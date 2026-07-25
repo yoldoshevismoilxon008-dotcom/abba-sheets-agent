@@ -1,0 +1,62 @@
+# Kuzatiladigan Google Sheets ro'yxati.
+#
+# mode: all_tabs — sheet'ning BARCHA tab'lari avtomatik topilib snapshot'ga
+#   yoziladi (Q&A va audit to'liq ma'lumot bilan ishlaydi).
+# watch_tabs: auto — kunlik diff uchun Main + JORIY OY tabi nomdan avtomatik
+#   aniqlanadi (oy nomining "Iyul " kabi bo'shliqli variantlarini ham taniydi;
+#   ikkita bir xil oy tabi bo'lsa tartibda oxirgisi = joriy yilniki olinadi).
+#   Oy almashganda config'ni qo'lda yangilash KERAK EMAS.
+#   Xohlasangiz aniq ro'yxat ham berish mumkin: watch_tabs: ["Main", "Iyul "]
+# key_column — qatorni kunma-kun tanib olish kaliti, semantik:
+#   main:  Main tabi uchun (ustun sarlavhasi yoki 1-based raqam)
+#   month: joriy oy tabi uchun
+#   Boshqa tab nomini ham to'g'ridan-to'g'ri yozish mumkin.
+# watch — tahlilda nimaga e'tibor berish (Claude uchun izoh).
+
+# KPI pul hisob-kitoblari: prompts/kpi-qoidalar.md tasdiqlanmagunicha o'chiq.
+# Ismoilxon "KPI tasdiqlayman" deganda true qilinadi.
+kpi_enabled: false
+
+# PDF hisobot dizayni: data/brand/themes/<nom>.yaml (bot /dizayn bilan boshqariladi)
+active_theme: "default"
+
+# Dashboard — agent YOZADIGAN YAGONA sheet (dashboard_writer.py allowlist'i).
+# PM sheet'lari read-only bo'lib qoladi. SA bu sheet'da Editor bo'lishi kerak.
+dashboard_id: "1CcBteJ3qnsk86LjEihaaC6Wpoi1ck-iVp7qE6O36-No"
+
+sheets:
+  - id: "13ElVyLQqk-LZpyJ-rzN8VWpG1yscnUplt_SCPXvqmaM"
+    name: "Zubair PM KPI"
+    mode: all_tabs
+    watch_tabs: auto
+    key_column:
+      main: "Loyihalar"
+      month: "Proekt nomi"
+    watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."
+
+  - id: "18nGSHcyAh5rey786TBQNGhVTGjtwV7XSTmyehLCHBco"
+    name: "Islom PM KPI"
+    mode: all_tabs
+    watch_tabs: auto
+    key_column:
+      main: "Loyihalar"
+      month: "Proekt nomi"
+    watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."
+
+  - id: "1gMZJUowOA1tZglUuaLv6E1jaBSkoPCBZgMPv8-qqYBc"
+    name: "Abdufattoh PM KPI"
+    mode: all_tabs
+    watch_tabs: auto
+    key_column:
+      main: "Loyihalar"
+      month: "Proekt nomi"
+    watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."
+
+  - id: "1cDdqYAg-_ChFmQCv5mikV3c5S96th4H1fd7_XYwAk34"
+    name: "Azizxo'ja PM KPI"
+    mode: all_tabs
+    watch_tabs: auto
+    key_column:
+      main: "Loyihalar"
+      month: "Proekt nomi"
+    watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."

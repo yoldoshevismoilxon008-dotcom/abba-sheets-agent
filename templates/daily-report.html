@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 210mm; height: 297mm; }
+  body {
+    font-family: {{ theme.font }};
+    color: {{ theme.text }}; background: {{ theme.page_bg }}; padding: 9mm 10mm 6mm;
+    display: flex; flex-direction: column;
+  }
+  .muted { color: {{ theme.muted }}; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5mm; }
+  .header .brand { display: flex; align-items: center; gap: 3.5mm; }
+  .header .brand img { height: 9mm; max-width: 40mm; object-fit: contain; }
+  .header h1 { font-size: 19px; font-weight: 700; }
+  .header .sub { font-size: 11px; margin-top: 1mm; }
+  .badge { font-size: 13px; font-weight: 700; padding: 2.4mm 4.5mm; border-radius: 6mm; color: #fff; }
+  .badge.ok { background: {{ theme.badge_ok }}; }
+  .badge.bad { background: {{ theme.badge_bad }}; }
+  .badge.quiet { background: {{ theme.badge_quiet }}; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-bottom: 5mm; }
+  .card { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 4mm 4.5mm;
+          box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; }
+  .card .top { display: flex; justify-content: space-between; align-items: baseline; }
+  .card .name { font-size: 14px; font-weight: 700; }
+  .card .delta { font-size: 11px; font-weight: 600; }
+  .d-up { color: {{ theme.kpi_green }}; } .d-down { color: {{ theme.kpi_red }}; } .d-flat { color: {{ theme.muted }}; }
+  .card .big { font-size: 34px; font-weight: 800; line-height: 1.15; margin: 1mm 0 1.5mm; }
+  .c-green { color: {{ theme.kpi_green }}; } .c-yellow { color: {{ theme.kpi_yellow }}; }
+  .c-orange { color: {{ theme.kpi_orange }}; } .c-red { color: {{ theme.kpi_red }}; }
+  .bar { height: 3mm; background: {{ theme.bar_track }}; border-radius: 2mm; overflow: hidden; margin-bottom: 2mm; }
+  .bar i { display: block; height: 100%; border-radius: 2mm; }
+  .b-green i { background: {{ theme.kpi_green }}; } .b-yellow i { background: {{ theme.kpi_yellow }}; }
+  .b-orange i { background: {{ theme.kpi_orange }}; } .b-red i { background: {{ theme.kpi_red }}; }
+  .card .meta { font-size: 10.5px; color: {{ theme.muted }}; display: flex; gap: 4mm; margin-bottom: 1.5mm; }
+  .card .chg { font-size: 9.5px; color: {{ theme.muted }}; line-height: 1.45; }
+  .card .chg b { color: {{ theme.accent }}; font-weight: 600; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-bottom: 5mm; }
+  .panel { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
+           box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; }
+  .panel h3 { font-size: 11px; font-weight: 700; color: {{ theme.accent }}; margin-bottom: 2.5mm; }
+  .hbar { display: flex; align-items: center; gap: 2.5mm; margin-bottom: 2.2mm; font-size: 10.5px; }
+  .hbar .lbl { width: 21mm; font-weight: 600; }
+  .hbar .track { flex: 1; height: 4.2mm; background: {{ theme.bar_track }}; border-radius: 2mm; overflow: hidden; }
+  .hbar .track i { display: block; height: 100%; }
+  .hbar .val { width: 12mm; text-align: right; font-weight: 700; }
+  .legend { display: flex; gap: 4mm; font-size: 9px; color: {{ theme.muted }}; margin-top: 1.5mm; flex-wrap: wrap; }
+  .legend span::before { content: "●"; margin-right: 1mm; }
+  {% for pm in pms %}.lg-{{ loop.index }}::before { color: {{ pm.line_color }}; }
+  {% endfor %}
+  .bottom { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
+            box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
+  .bottom h3 { font-size: 11px; font-weight: 700; margin-bottom: 2mm; color: {{ theme.badge_bad }}; }
+  .crit { font-size: 10.5px; color: {{ theme.kpi_red }}; line-height: 1.55; }
+  .okline { font-size: 11px; color: {{ theme.kpi_green }}; font-weight: 600; }
+  .ackline { font-size: 10px; color: {{ theme.muted }}; margin-top: 2mm; }
+  .insights { margin-top: 2.5mm; padding-top: 2.5mm; border-top: 0.3mm solid {{ theme.bar_track }}; }
+  .insights li { font-size: 10.5px; line-height: 1.6; margin-left: 4mm; }
+  .footer { margin-top: auto; display: flex; justify-content: space-between; font-size: 9px; color: {{ theme.muted }}; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="brand">
+    {% if logo_uri %}<img src="{{ logo_uri }}" alt="logo">{% endif %}
+    <div>
+      <h1>📊 Kunlik KPI hisobot — {{ date_human }}</h1>
+      <div class="sub muted">{{ prev_date_human }} holatiga nisbatan · 4 PM sheet kuzatuvda</div>
+    </div>
+  </div>
+  {% if totals.quiet %}<div class="badge quiet">😴 O'zgarish yo'q</div>
+  {% elif new_criticals %}<div class="badge bad">🔴 {{ new_criticals|length }} yangi kritik</div>
+  {% else %}<div class="badge ok">✅ Yangi kritik yo'q</div>{% endif %}
+</div>
+
+<div class="cards">
+  {% for pm in pms %}
+  <div class="card">
+    <div class="top">
+      <span class="name">{{ pm.name }}</span>
+      {% if pm.delta is none %}<span class="delta d-flat">—</span>
+      {% elif pm.delta > 0 %}<span class="delta d-up">↑ +{{ pm.delta }}%</span>
+      {% elif pm.delta < 0 %}<span class="delta d-down">↓ {{ pm.delta }}%</span>
+      {% else %}<span class="delta d-flat">→ 0%</span>{% endif %}
+    </div>
+    <div class="big c-{{ pm.color }}">{{ pm.pct }}%</div>
+    <div class="bar b-{{ pm.color }}"><i style="width: {{ [pm.pct, 100]|min }}%"></i></div>
+    <div class="meta">
+      <span>📁 {{ pm.aktiv }} aktiv</span>
+      <span>⏱ kechikish {{ pm.delay_pct }}%</span>
+      <span>{{ pm.fakt }}/{{ pm.ideal }}</span>
+    </div>
+    <div class="chg">
+      {% for c in pm.top_changes[:2] %}<b>·</b> {{ c }}<br>{% else %}<span class="muted">o'zgarish yo'q</span>{% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="charts">
+  <div class="panel">
+    <h3>Bajarilish % — solishtirma</h3>
+    {% for pm in pms %}
+    <div class="hbar">
+      <span class="lbl">{{ pm.name }}</span>
+      <span class="track"><i style="width: {{ [pm.pct, 100]|min }}%; background: {{ pm.line_color }}"></i></span>
+      <span class="val">{{ pm.pct }}%</span>
+    </div>
+    {% endfor %}
+    <div class="legend muted">KPI chegaralari: ≥90 normal · 80–90 muammoli · 70–80 yomon · &lt;70 kritik (rasmiy xulosa oy oxirida)</div>
+  </div>
+  <div class="panel">
+    <h3>Trend — oxirgi {{ trend_days }} kun (bajarilish %)</h3>
+    <svg viewBox="0 0 300 92" width="100%" height="92">
+      <line x1="0" y1="18" x2="300" y2="18" stroke="{{ theme.grid_line }}" stroke-width="1"/>
+      <line x1="0" y1="46" x2="300" y2="46" stroke="{{ theme.grid_line }}" stroke-width="1"/>
+      <line x1="0" y1="74" x2="300" y2="74" stroke="{{ theme.grid_line }}" stroke-width="1"/>
+      <text x="2" y="15" font-size="7" fill="{{ theme.muted }}">80%</text>
+      <text x="2" y="43" font-size="7" fill="{{ theme.muted }}">50%</text>
+      <text x="2" y="71" font-size="7" fill="{{ theme.muted }}">20%</text>
+      {% for pm in pms %}
+      <polyline points="{{ pm.spark }}" fill="none" stroke="{{ pm.line_color }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      {% endfor %}
+    </svg>
+    <div class="legend">
+      {% for pm in pms %}<span class="lg-{{ loop.index }}">{{ pm.name }}</span>{% endfor %}
+      <span style="margin-left:auto">{{ trend_range }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="bottom">
+  {% if new_criticals %}
+  <h3>🔴 Yangi kritik topilmalar</h3>
+  <div class="crit">{% for c in new_criticals %}• {{ c }}<br>{% endfor %}</div>
+  {% else %}
+  <div class="okline">✅ Yangi kritik topilma yo'q</div>
+  {% endif %}
+  {% if acknowledged %}
+  <div class="ackline">🤝 Tan olingan: {{ acknowledged|join(" · ") }} — batafsil: /audit</div>
+  {% endif %}
+  {% if insights %}
+  <div class="insights"><ul>
+    {% for i in insights %}<li>💡 {{ i }}</li>{% endfor %}
+  </ul></div>
+  {% endif %}
+</div>
+
+<div class="footer">
+  <span>Manba: snapshot {{ snapshot_time }} · abba-sheets-agent · to'liq matn: Obsidian arxivi</span>
+  <span>{{ theme.name }} · {{ generated_at }} · 1/1</span>
+</div>
+
+</body>
+</html>

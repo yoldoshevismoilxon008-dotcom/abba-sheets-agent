@@ -1,0 +1,12 @@
+credentials/
+.env
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/*
+!data/brand/
+data/brand/inbox/
+data/brand/preview.pdf
+data/brand/pending.json
+data/brand/logo-draft.*

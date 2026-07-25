@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.abba.sheets-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/ismoilxon/abba-sheets-agent/bot_run.sh</string>
+    </array>
+
+    <!-- Doimiy ishlaydi: login'da ko'tariladi, o'lsa launchd qayta ishga tushiradi -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ismoilxon/abba-sheets-agent/data/logs/bot-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ismoilxon/abba-sheets-agent/data/logs/bot-launchd.log</string>
+</dict>
+</plist>

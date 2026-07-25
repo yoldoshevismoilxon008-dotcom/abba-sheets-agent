@@ -1,0 +1,22 @@
+# "default" theme — dastlabki (och) ko'rinish
+name: default
+style_notes: "Och fon, toza korporativ minimal uslub"
+font: '-apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif'
+page_bg: "#f4f6f9"
+card_bg: "#ffffff"
+text: "#1a1d21"
+muted: "#6b7480"
+accent: "#3b6fe0"
+radius: "3mm"
+card_shadow: "0 0.5mm 2mm rgba(20,30,50,.08)"
+card_border: "none"
+badge_ok: "#1e9e56"
+badge_bad: "#d93025"
+badge_quiet: "#5f6b7a"
+kpi_green: "#1e9e56"
+kpi_yellow: "#c8a400"
+kpi_orange: "#e8710a"
+kpi_red: "#d93025"
+bar_track: "#e8ecf1"
+grid_line: "#eef1f5"
+line_colors: ["#3b6fe0", "#d93025", "#e8a400", "#1e9e56"]

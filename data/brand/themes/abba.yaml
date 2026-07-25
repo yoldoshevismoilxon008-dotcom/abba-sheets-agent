@@ -1,0 +1,25 @@
+# "abba" theme — Abba ichki hisobot uslubi.
+# Manba: abba-presentation-master skill, Recipe 3 "Glassmorphism Analytics"
+# (KPI dashboard, growth mint / decline coral; skill'da "Recipe 7 Growth Point"
+# topilmadi — eng yaqin analytics-recipe shu; kerak bo'lsa /dizayn bilan tuzatiladi)
+name: abba
+style_notes: "To'q analytics fon, iliq oltin urg'u, mint o'sish / coral tushish"
+font: '-apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif'
+page_bg: "#0F1729"
+card_bg: "#1A2438"
+text: "#FFFFFF"
+muted: "#94A3B8"
+accent: "#D4A574"
+radius: "3mm"
+card_shadow: "0 0.5mm 2.5mm rgba(0,0,0,.4)"
+card_border: "0.3mm solid #2D3A52"
+badge_ok: "#00D9A3"
+badge_bad: "#FF6B6B"
+badge_quiet: "#5A6B85"
+kpi_green: "#00D9A3"
+kpi_yellow: "#FFB84D"
+kpi_orange: "#FF8C42"
+kpi_red: "#FF6B6B"
+bar_track: "#2D3A52"
+grid_line: "#2D3A52"
+line_colors: ["#D4A574", "#FF6B6B", "#FFB84D", "#00D9A3"]
