@@ -146,7 +146,10 @@ def validate_theme(d):
     for k in ("card_border", "card_shadow"):
         if d.get(k):
             out[k] = _sanitize_css(d[k])
-    for k in ("font", "style_notes", "palette_summary"):
+    if d.get("font"):
+        # CSS-xavfsiz: faqat harf/raqam, bo'shliq, vergul, qo'shtirnoq, defis
+        out["font"] = re.sub(r"[^\w\s,\"'-]", "", str(d["font"]))[:220]
+    for k in ("style_notes", "palette_summary"):
         if d.get(k):
             out[k] = str(d[k])[:220]
     return out, issues

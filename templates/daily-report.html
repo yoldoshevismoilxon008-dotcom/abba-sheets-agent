@@ -7,7 +7,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 210mm; height: 297mm; }
   body {
-    font-family: {{ theme.font }};
+    font-family: {{ theme.font|safe }};
     color: {{ theme.text }}; background: {{ theme.page_bg }}; padding: 9mm 10mm 6mm;
     display: flex; flex-direction: column;
   }
