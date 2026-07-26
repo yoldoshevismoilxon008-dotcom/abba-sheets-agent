@@ -10,11 +10,13 @@ export PATH="$HOME/.claude/local:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/b
 export PYTHONWARNINGS="ignore"
 
 TODAY=$(date +%F)
-mkdir -p data/logs data/snapshots
-LOG="data/logs/$TODAY.log"
+DATA_DIR="${DATA_DIR:-data}"
+mkdir -p "$DATA_DIR/logs" "$DATA_DIR/snapshots"
+LOG="$DATA_DIR/logs/$TODAY.log"
 
-# Terminaldan qo'lda ishga tushirilsa ekranga ham chiqsin, launchd'da faqat log'ga
-if [ -t 1 ]; then
+# Terminalda yoki LOG_TEE=1 (Railway — loglar platformada ko'rinsin) bo'lsa
+# ekranga ham chiqsin, launchd'da faqat log'ga
+if [ -t 1 ] || [ -n "${LOG_TEE:-}" ]; then
   exec > >(tee -a "$LOG") 2>&1
 else
   exec >>"$LOG" 2>&1
@@ -32,7 +34,7 @@ PY=venv/bin/python
 
 alert() {
   echo "XATO: $1"
-  "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): $1. Log: data/logs/$TODAY.log" \
+  "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): $1. Log: $DATA_DIR/logs/$TODAY.log" \
     || echo "(xato alertning o'zi ham yuborilmadi — token/chat_id tekshiring)"
   exit 1
 }
@@ -42,10 +44,10 @@ alert() {
 "$PY" analyze.py --date "$TODAY" || alert "analyze bosqichi yiqildi"
 
 # Data audit: dushanba — to'liq bo'lim, boshqa kunlar — faqat kritik 1 qator
-REPORT="data/snapshots/$TODAY/report.md"
+REPORT="$DATA_DIR/snapshots/$TODAY/report.md"
 if [ "$(date +%u)" = "1" ]; then
-  if "$PY" audit.py --from-snapshot "$TODAY" --out "data/snapshots/$TODAY/audit.md"; then
-    { echo ""; echo "———"; cat "data/snapshots/$TODAY/audit.md"; } >> "$REPORT"
+  if "$PY" audit.py --from-snapshot "$TODAY" --out "$DATA_DIR/snapshots/$TODAY/audit.md"; then
+    { echo ""; echo "———"; cat "$DATA_DIR/snapshots/$TODAY/audit.md"; } >> "$REPORT"
   else
     echo "OGOHLANTIRISH: haftalik audit yiqildi — hisobot auditsiz ketadi"
   fi
@@ -63,15 +65,15 @@ SEND_ERR=0
 
 if [ "$PDF_ERR" = "1" ]; then
   echo "XATO: PDF render yiqildi — hisobot matn ko'rinishida ketdi"
-  "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): PDF render yiqildi, hisobot matn rejimida yuborildi. Log: data/logs/$TODAY.log" || true
+  "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): PDF render yiqildi, hisobot matn rejimida yuborildi. Log: $DATA_DIR/logs/$TODAY.log" || true
 fi
 
 # Obsidian eksport — send yiqilsa ham hisobot vault arxiviga yozilsin.
 # Serverda vault yo'q — Mac'dagi mac-sync skript hisobotlarni o'zi tortadi.
 if [ -d "$HOME/claude-brain" ]; then
   if ! "$PY" export_obsidian.py --date "$TODAY"; then
-    echo "XATO: Obsidian eksport yiqildi (hisobot data/snapshots/$TODAY/report.md da turibdi)"
-    "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): hisobot Obsidian vault'ga yozilmadi. Log: data/logs/$TODAY.log" || true
+    echo "XATO: Obsidian eksport yiqildi (hisobot $DATA_DIR/snapshots/$TODAY/report.md da turibdi)"
+    "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): hisobot Obsidian vault'ga yozilmadi. Log: $DATA_DIR/logs/$TODAY.log" || true
   fi
 else
   echo "obsidian eksport: o'tkazib yuborildi (vault yo'q — server rejimi)"
@@ -81,18 +83,18 @@ fi
 if grep -qE '^dashboard_id: *"[^"]+"' config.yaml; then
   if ! "$PY" dashboard.py --date "$TODAY"; then
     echo "XATO: dashboard yangilanmadi"
-    "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): dashboard yangilanmadi. Log: data/logs/$TODAY.log" || true
+    "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): dashboard yangilanmadi. Log: $DATA_DIR/logs/$TODAY.log" || true
   fi
 else
   echo "dashboard: o'tkazib yuborildi (dashboard_id yo'q)"
 fi
 
-[ "$SEND_ERR" = "1" ] && alert "send bosqichi yiqildi (hisobot data/snapshots/$TODAY/report.md da turibdi)"
+[ "$SEND_ERR" = "1" ] && alert "send bosqichi yiqildi (hisobot $DATA_DIR/snapshots/$TODAY/report.md da turibdi)"
 
 # Retention: 30 kundan eski snapshot papkalarini o'chirish (papka nomi bo'yicha)
 # date -v : BSD/macOS, date -d : GNU/Linux — ikkalasi ham qo'llanadi
 CUTOFF=$(date -v-30d +%F 2>/dev/null || date -d "30 days ago" +%F)
-for d in data/snapshots/*/; do
+for d in "$DATA_DIR"/snapshots/*/; do
   [ -d "$d" ] || continue
   n=$(basename "$d")
   [[ "$n" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue

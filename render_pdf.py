@@ -18,7 +18,8 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
-SNAPSHOTS = BASE / "data" / "snapshots"
+DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
+SNAPSHOTS = DATA / "snapshots"
 TEMPLATE_DIR = BASE / "templates"
 
 CHROME_CANDIDATES = [
@@ -33,7 +34,7 @@ CHROME_CANDIDATES = [
     "/usr/bin/google-chrome",
     "/snap/bin/chromium",
 ]
-BRAND = BASE / "data" / "brand"
+BRAND = DATA / "brand"
 THEMES_DIR = BRAND / "themes"
 
 # To'liq default theme — yaml yetishmagan kalitlar shu yerdan to'ldiriladi

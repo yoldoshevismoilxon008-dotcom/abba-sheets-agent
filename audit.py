@@ -39,7 +39,10 @@ NOYEAR_RE = re.compile(r"^\d{1,2}[./]\d{1,2}$")
 CRIT = "critical"
 WARN = "warning"
 
-ACK_FILE = BASE / "data" / "audit-acknowledged.yaml"
+import os as _os
+
+DATA = Path(_os.environ.get("DATA_DIR") or (BASE / "data"))
+ACK_FILE = DATA / "audit-acknowledged.yaml"
 
 # Topilma kalitlari (barqaror — /ack shu kalitlar bilan ishlaydi)
 KEY_LABELS = {
@@ -349,7 +352,7 @@ def render(findings, source, today):
 def save_last(det_text):
     """Oxirgi audit natijasini saqlaydi — Q&A bot doim kontekstda ushlaydi."""
     try:
-        (BASE / "data" / "last-audit.md").write_text(det_text + "\n", encoding="utf-8")
+        (DATA / "last-audit.md").write_text(det_text + "\n", encoding="utf-8")
     except OSError as e:
         log(f"last-audit saqlanmadi: {e}")
 

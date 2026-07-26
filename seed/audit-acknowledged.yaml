@@ -1,0 +1,7 @@
+# Tan olingan audit muammolari — hisobotlarda KRITIK deb takrorlanmaydi.
+# key: topilma turi (audit.KEY_LABELS), sheet: ixtiyoriy (faqat shu sheet),
+# date: qachondan, note: izoh. /ack buyrug'i shu faylga yozadi.
+acknowledged:
+- key: main-tab-yoq
+  date: '2026-07-25'
+  note: jamoa bilan muhokamada

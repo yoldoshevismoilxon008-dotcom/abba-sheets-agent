@@ -13,6 +13,7 @@ Auth/quota xatosida sheet skip qilinadi (log bilan), qolganlari davom etadi.
 """
 import argparse
 import json
+import os
 import sys
 import time
 import unicodedata
@@ -23,8 +24,21 @@ import yaml
 
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "config.yaml"
-CREDS = BASE / "credentials" / "service-account.json"
-SNAPSHOTS = BASE / "data" / "snapshots"
+# DATA_DIR (Railway volume kabi) berilsa barcha state o'sha yerda yashaydi
+DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
+SNAPSHOTS = DATA / "snapshots"
+
+
+def _creds_path():
+    p = os.environ.get("GOOGLE_SA_PATH", "").strip()
+    if p:
+        return Path(p)
+    if os.environ.get("DATA_DIR"):
+        return DATA / "credentials" / "service-account.json"
+    return BASE / "credentials" / "service-account.json"
+
+
+CREDS = _creds_path()
 
 RETRY_CODES = {429, 500, 502, 503}
 TAB_RANGE = "A1:BZ1000"  # har tab uchun o'qiladigan maksimal maydon

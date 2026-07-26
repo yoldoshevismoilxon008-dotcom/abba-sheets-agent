@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-SNAPSHOTS = BASE / "data" / "snapshots"
+SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
 CHUNK_LIMIT = 4000  # Telegram limiti 4096 — teglar uchun zaxira qoldiramiz
 API = "https://api.telegram.org/bot{token}/{method}"

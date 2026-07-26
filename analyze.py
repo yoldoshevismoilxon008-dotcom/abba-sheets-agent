@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-SNAPSHOTS = BASE / "data" / "snapshots"
+SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 PROMPT_TPL = BASE / "prompts" / "daily-report.md"
 
 MAX_ROWS = 30      # kontekstda har bo'limdagi maksimal qatorlar

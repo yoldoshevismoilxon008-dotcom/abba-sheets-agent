@@ -8,12 +8,13 @@ va hisobotlar/INDEX.md tepasiga link qo'shadi (eng yangisi birinchi, idempotent)
 "O'zgarish yo'q" kunlarda ham yoziladi — tarix uzilmasin.
 """
 import argparse
+import os
 import sys
 from datetime import date
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-SNAPSHOTS = BASE / "data" / "snapshots"
+SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 VAULT_DIR = Path.home() / "claude-brain" / "abba-sheets-agent" / "hisobotlar"
 
 INDEX_HEAD = [

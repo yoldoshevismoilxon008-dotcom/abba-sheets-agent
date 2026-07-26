@@ -131,7 +131,9 @@ def dashboard_url():
     return f"https://docs.google.com/spreadsheets/d/{did}" if did else ""
 
 
-_LAST = BASE / "data" / "dashboard-state.json"
+import os as _os
+
+_LAST = Path(_os.environ.get("DATA_DIR") or (BASE / "data")) / "dashboard-state.json"
 
 
 def save_state():

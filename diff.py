@@ -14,8 +14,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import os
+
 BASE = Path(__file__).resolve().parent
-SNAPSHOTS = BASE / "data" / "snapshots"
+SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 

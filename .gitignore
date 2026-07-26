@@ -2,6 +2,7 @@ credentials/
 .env
 .env.server
 deploy/mac-sync/server.conf
+deploy/railway/repo.conf
 venv/
 __pycache__/
 *.pyc

@@ -36,7 +36,9 @@ import diff as diffmod
 import fetch as fetchmod
 import send as sendmod
 
-DATA = BASE / "data"
+import os as _os
+
+DATA = Path(_os.environ.get("DATA_DIR") or (BASE / "data"))
 LOGS = DATA / "logs"
 STATE_FILE = DATA / "bot-state.json"
 MEM_DIR = DATA / "bot-memory"

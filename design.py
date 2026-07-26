@@ -18,12 +18,15 @@ sys.path.insert(0, str(BASE))
 import analyze
 import render_pdf
 
-BRAND = BASE / "data" / "brand"
+import os as _os
+
+DATA = Path(_os.environ.get("DATA_DIR") or (BASE / "data"))
+BRAND = DATA / "brand"
 THEMES = BRAND / "themes"
 INBOX = BRAND / "inbox"
 PENDING = BRAND / "pending.json"
 PREVIEW = BRAND / "preview.pdf"
-SNAPSHOTS = BASE / "data" / "snapshots"
+SNAPSHOTS = DATA / "snapshots"
 
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 COLOR_KEYS = [
@@ -190,6 +193,9 @@ def set_active(name):
 
 
 def git_commit_brand(msg):
+    if _os.environ.get("DATA_DIR"):
+        log("git commit: DATA_DIR rejimi (konteyner) — o'tkazildi")
+        return
     try:
         subprocess.run(["git", "-C", str(BASE), "add", "data/brand", "config.yaml"],
                        capture_output=True, timeout=30)
