@@ -1,5 +1,7 @@
 credentials/
 .env
+.env.server
+deploy/mac-sync/server.conf
 venv/
 __pycache__/
 *.pyc

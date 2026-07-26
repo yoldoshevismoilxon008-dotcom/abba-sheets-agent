@@ -66,10 +66,15 @@ if [ "$PDF_ERR" = "1" ]; then
   "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): PDF render yiqildi, hisobot matn rejimida yuborildi. Log: data/logs/$TODAY.log" || true
 fi
 
-# Obsidian eksport — send yiqilsa ham hisobot vault arxiviga yozilsin
-if ! "$PY" export_obsidian.py --date "$TODAY"; then
-  echo "XATO: Obsidian eksport yiqildi (hisobot data/snapshots/$TODAY/report.md da turibdi)"
-  "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): hisobot Obsidian vault'ga yozilmadi. Log: data/logs/$TODAY.log" || true
+# Obsidian eksport — send yiqilsa ham hisobot vault arxiviga yozilsin.
+# Serverda vault yo'q — Mac'dagi mac-sync skript hisobotlarni o'zi tortadi.
+if [ -d "$HOME/claude-brain" ]; then
+  if ! "$PY" export_obsidian.py --date "$TODAY"; then
+    echo "XATO: Obsidian eksport yiqildi (hisobot data/snapshots/$TODAY/report.md da turibdi)"
+    "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): hisobot Obsidian vault'ga yozilmadi. Log: data/logs/$TODAY.log" || true
+  fi
+else
+  echo "obsidian eksport: o'tkazib yuborildi (vault yo'q — server rejimi)"
 fi
 
 # Dashboard yangilash (dashboard_id to'ldirilgan bo'lsa) — yiqilsa alert, pipeline davom etadi
@@ -85,7 +90,8 @@ fi
 [ "$SEND_ERR" = "1" ] && alert "send bosqichi yiqildi (hisobot data/snapshots/$TODAY/report.md da turibdi)"
 
 # Retention: 30 kundan eski snapshot papkalarini o'chirish (papka nomi bo'yicha)
-CUTOFF=$(date -v-30d +%F)
+# date -v : BSD/macOS, date -d : GNU/Linux — ikkalasi ham qo'llanadi
+CUTOFF=$(date -v-30d +%F 2>/dev/null || date -d "30 days ago" +%F)
 for d in data/snapshots/*/; do
   [ -d "$d" ] || continue
   n=$(basename "$d")

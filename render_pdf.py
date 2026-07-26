@@ -22,9 +22,16 @@ SNAPSHOTS = BASE / "data" / "snapshots"
 TEMPLATE_DIR = BASE / "templates"
 
 CHROME_CANDIDATES = [
+    # macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    # Linux (server)
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/snap/bin/chromium",
 ]
 BRAND = BASE / "data" / "brand"
 THEMES_DIR = BRAND / "themes"
@@ -102,6 +109,12 @@ def find_chrome():
     for c in CHROME_CANDIDATES:
         if Path(c).exists():
             return c
+    import shutil
+
+    for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
+        w = shutil.which(name)
+        if w:
+            return w
     raise RuntimeError("Chrome topilmadi — .env da CHROME_BIN ko'rsating")
 
 
@@ -393,8 +406,10 @@ def html_to_pdf(html_path, pdf_path, wait_s=60):
     cmd = [
         chrome, "--headless=new", "--disable-gpu", "--no-first-run",
         "--user-data-dir=/tmp/chrome-pdf", "--no-pdf-header-footer",
-        f"--print-to-pdf={pdf_path}", f"file://{html_path}",
     ]
+    # Server (Linux) muhitida kerak bo'lishi mumkin: CHROME_FLAGS="--no-sandbox"
+    cmd += os.environ.get("CHROME_FLAGS", "").split()
+    cmd += [f"--print-to-pdf={pdf_path}", f"file://{html_path}"]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline, last = _time.time() + wait_s, -1
     try:

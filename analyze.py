@@ -27,8 +27,9 @@ MAX_ROW_CHARS = 260
 CLAUDE_TIMEOUT = 600
 
 CLAUDE_FALLBACK_PATHS = [
-    "/opt/homebrew/bin/claude",
+    "/opt/homebrew/bin/claude",  # macOS (brew)
     "/usr/local/bin/claude",
+    "/usr/bin/claude",  # Linux (native installer / paket)
     str(Path.home() / ".claude/local/claude"),
     str(Path.home() / ".local/bin/claude"),
 ]

@@ -1,0 +1,12 @@
+# Har kuni 09:00 (server TZ = Asia/Tashkent, deploy.sh o'rnatadi).
+# Persistent=true — server o'sha paytda o'chiq bo'lsa, yoqilganda bir marta
+# bajariladi (launchd StartCalendarInterval xatti-harakati bilan bir xil).
+[Unit]
+Description=Abba Sheets Agent — kunlik 09:00 trigger
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

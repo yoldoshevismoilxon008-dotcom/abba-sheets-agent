@@ -226,3 +226,13 @@ bo'lsa avval `launchctl bootout`, keyin qidiring.
 **Offset:** `data/bot-state.json` da `last_update_id` saqlanadi — xabar hech
 qachon ikki marta ishlanmaydi; birinchi ishga tushishda eski backlog tashlab
 yuboriladi (restart'da eski xabarlar qayta o'qilmaydi).
+
+## 🖥 VPS'ga ko'chirish (deploy/)
+
+Tizim server-portable: `deploy/deploy.sh root@IP` — to'liq o'rnatish (paketlar,
+chromium, `abba` user, venv, claude CLI, systemd unit'lar, ufw) + 5 sinov
+(Sheets / Chrome-PDF / claude / Dashboard yozuv / Telegram salom). Service'lar
+avtomatik yoqilmaydi — almashtirish `--enable` bilan (Mac launchd'ni o'zi
+o'chiradi), qaytish `--rollback`. Hisobotlar vault'ga Mac'dagi soatlik
+`deploy/mac-sync/` job orqali tushadi. To'liq checklist va claude auth
+(setup-token / API-key) tafsilotlari: **`deploy/MIGRATION.md`**.

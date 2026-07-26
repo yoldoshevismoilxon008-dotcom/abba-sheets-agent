@@ -1,0 +1,15 @@
+# Kunlik KPI pipeline (launchd com.abba.sheets-agent ekvivalenti).
+# O'rnatish: deploy.sh avtomatik qiladi. Qo'lda test:
+#   sudo systemctl start abba-sheets-agent.service && journalctl -u abba-sheets-agent -f
+[Unit]
+Description=Abba Sheets Agent — kunlik KPI pipeline (fetch→diff→analyze→PDF→Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=abba
+WorkingDirectory=/home/abba/abba-sheets-agent
+ExecStart=/bin/bash /home/abba/abba-sheets-agent/run.sh
+# claude -p (deep) + Chrome render uchun keng zaxira
+TimeoutStartSec=2400
