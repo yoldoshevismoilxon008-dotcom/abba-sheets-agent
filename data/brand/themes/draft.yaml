@@ -1,0 +1,28 @@
+name: draft
+style_notes: Oq fonda yagona firmaviy ko'k (#2380AC) ustunlik qiladigan toza, korporativ
+  va minimal uslub; geometrik sans-serif logotipga mos ravishda och fon, yengil soya
+  va o'rtacha yumaloq burchaklar.
+font: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif
+page_bg: '#F3F7FA'
+card_bg: '#FFFFFF'
+text: '#13303F'
+muted: '#5E7A8A'
+accent: '#2380AC'
+radius: 2mm
+card_shadow: 0 0.5mm 2mm rgba(16,42,58,.10)
+card_border: none
+badge_ok: '#1E8E5A'
+badge_bad: '#D64545'
+badge_quiet: '#8298A7'
+kpi_green: '#1E8E5A'
+kpi_yellow: '#E2B93B'
+kpi_orange: '#E38A3D'
+kpi_red: '#D64545'
+bar_track: '#E3ECF2'
+grid_line: '#DCE6ED'
+line_colors:
+- '#2380AC'
+- '#164A66'
+- '#2FA69B'
+- '#E38A3D'
+palette_summary: '#2380AC, #13303F, #F3F7FA, #FFFFFF, #1E8E5A, #D64545, #E38A3D, #E2B93B'

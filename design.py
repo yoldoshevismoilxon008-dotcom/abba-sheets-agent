@@ -306,6 +306,37 @@ def latest_report_data():
     return None
 
 
+def pending_details(p):
+    """«batafsil» so'ralganda — to'liq tahlil (default javobda ko'rsatilmaydi)."""
+    t = (p or {}).get("type")
+    if t == "logo":
+        for f in BRAND.glob("logo-draft.*"):
+            return (
+                f"🖼 Logo-draft: {f.name} ({f.stat().st_size // 1024} KB, {f.suffix[1:].upper()})\n"
+                "Joylashuvi: header chapida, balandligi 9mm.\n\n«tasdiq» / «bekor»"
+            )
+        return "Logo-draft topilmadi."
+    name = "draft" if t == "theme" else (p or {}).get("name", "default")
+    theme, _ = render_pdf.load_theme(name)
+    L = [f"🎨 Theme tafsiloti ({name}):"]
+    if theme.get("style_notes"):
+        L.append(f"Uslub: {theme['style_notes']}")
+    if theme.get("palette_summary"):
+        L.append(f"Palitra: {theme['palette_summary']}")
+    L += [
+        f"• Sahifa foni {theme['page_bg']} · karta {theme['card_bg']}",
+        f"• Matn {theme['text']} · ikkilamchi {theme['muted']} · urg'u (panel sarlavhalari) {theme['accent']}",
+        f"• KPI: yaxshi {theme['kpi_green']} · o'rta {theme['kpi_yellow']} · past {theme['kpi_orange']} · kritik {theme['kpi_red']}",
+        f"• Badge: ok {theme['badge_ok']} · muammo {theme['badge_bad']} · tinch {theme['badge_quiet']}",
+        f"• Progress-bar foni {theme['bar_track']} · trend grid {theme['grid_line']}",
+        f"• Trend chiziqlari (PM tartibida): {', '.join(theme['line_colors'])}",
+        f"• Burchak {theme['radius']} · border {theme['card_border']} · soya {theme['card_shadow']}",
+        "",
+        "«tasdiq» / «bekor»",
+    ]
+    return "\n".join(L)
+
+
 def make_preview(theme_name=None, use_logo_draft=False):
     data = latest_report_data()
     if not data:

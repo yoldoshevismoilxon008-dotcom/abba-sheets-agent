@@ -959,7 +959,7 @@ def handle_media(msg):
             pv = design.make_preview(use_logo_draft=True)
             sendmod.tg_send_document(
                 TOKEN, CHAT_ID, str(pv),
-                "🖼 Logo bilan preview (joriy theme).\nYoqdimi? «tasdiq» yoki «bekor» deb yozing.",
+                "🖼 Logo qo'shildi — preview yuqorida.\n«tasdiq» / «bekor» / «batafsil»",
                 filename="preview-logo.pdf",
             )
             design.save_pending({"type": "logo"})
@@ -973,16 +973,15 @@ def handle_media(msg):
     typing()
     try:
         theme, issues = design.analyze_reference(path)
-        design.save_draft(theme)
+        design.save_draft(theme)  # to'liq tahlil draft'da qoladi (matnli tuzatishlar uchun)
+        if issues:
+            log(f"referens: default qolgan kalitlar: {', '.join(issues)}")
         pv = design.make_preview(theme_name="draft")
-        cap = (
-            "🎨 Referens tahlili:\n"
-            f"Uslub: {theme.get('style_notes', '—')}\n"
-            f"Palitra: {theme.get('palette_summary', ', '.join(theme[k] for k in ('page_bg', 'card_bg', 'accent', 'text')))}\n"
-            + (f"⚠️ O'qib bo'lmagan kalitlar (default qoldi): {', '.join(issues)}\n" if issues else "")
-            + "Preview yuqorida — «tasdiq» (joriy dizayn bo'ladi) yoki «bekor»."
+        sendmod.tg_send_document(
+            TOKEN, CHAT_ID, str(pv),
+            "🎨 Referens tahlil qilindi — preview yuqorida.\n«tasdiq» / «bekor» / «batafsil»",
+            filename="preview-referens.pdf",
         )
-        sendmod.tg_send_document(TOKEN, CHAT_ID, str(pv), cap[:1024], filename="preview-referens.pdf")
         design.save_pending({"type": "theme"})
     except Exception as e:
         log(f"referens tahlili xato: {type(e).__name__}: {e}")
@@ -991,7 +990,10 @@ def handle_media(msg):
 
 
 def apply_pending(p, low):
-    """«tasdiq»/«bekor» — kutilayotgan dizayn o'zgarishiga qaror."""
+    """«tasdiq»/«bekor»/«batafsil» — kutilayotgan dizayn o'zgarishiga munosabat."""
+    if low in ("batafsil", "tafsilot", "details"):
+        send_retry(design.pending_details(p), attempts=2)
+        return "design-detail"  # pending saqlanadi — hali tasdiq/bekor kutilyapti
     ok_words = ("tasdiq", "ha", "ok", "tasdiqlayman")
     no_words = ("bekor", "yo'q", "yoq", "cancel")
     if low not in ok_words + no_words:
@@ -1044,7 +1046,7 @@ def do_dizayn(arg):
             pv = design.make_preview(theme_name=name)
             sendmod.tg_send_document(
                 TOKEN, CHAT_ID, str(pv),
-                f"🎨 Theme: {name}\n«tasdiq» — shu dizaynga o'tamiz, «bekor» — qoladi.",
+                f"🎨 «{name}» — preview yuqorida.\n«tasdiq» / «bekor» / «batafsil»",
                 filename=f"preview-{name}.pdf",
             )
             design.save_pending({"type": "switch", "name": name})
@@ -1058,13 +1060,14 @@ def do_dizayn(arg):
     try:
         theme, issues = design.instruction_to_draft(arg)
         design.save_draft(theme)
+        if issues:
+            log(f"dizayn so'rovi: default qolgan kalitlar: {', '.join(issues)}")
         pv = design.make_preview(theme_name="draft")
-        cap = (
-            f"🎨 O'zgartirish: {theme.get('style_notes', arg)[:150]}\n"
-            + (f"⚠️ Qabul qilinmagan kalitlar: {', '.join(issues)}\n" if issues else "")
-            + "«tasdiq» yoki «bekor»."
+        sendmod.tg_send_document(
+            TOKEN, CHAT_ID, str(pv),
+            "🎨 O'zgartirish tayyor — preview yuqorida.\n«tasdiq» / «bekor» / «batafsil»",
+            filename="preview-draft.pdf",
         )
-        sendmod.tg_send_document(TOKEN, CHAT_ID, str(pv), cap[:1024], filename="preview-draft.pdf")
         design.save_pending({"type": "theme"})
     except Exception as e:
         log(f"dizayn so'rovi xato: {e}")
