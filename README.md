@@ -175,6 +175,15 @@ KPI qoidalari va oxirgi audit natijasi (`data/last-audit.md`) doim kontekstda.
 Javob yuborish 4 urinishli retry bilan (Mac uyqudan uyg'onganda tarmoq kech
 tiklanadi); yuborilmagan javob `data/bot-outbox.md` ga tushadi.
 
+**Infografik Q&A-PDF:** raqamli-jadvalli javoblar (solishtirish, trend, oylik
+natijalar, reyting/ro'yxat, KPI holat, `/audit`) kunlik hisobot brendidagi PDF
+bo'lib keladi (`templates/qa-report.html`, active_theme ranglari). Chuqur
+rejimda Claude javob turiga qarab o'zi tanlaydi: jadvalli javob — QA-JSON blok
+(→ `render_pdf.render_qa`, `data/qa-pdf/`, 7 kunlik retention), matnli javob —
+oddiy xabar. Fast rejim (bitta faktli savol) doim PDF'siz — tezlik saqlanadi.
+Caption'da asosiy xulosa; PDF render yiqilsa javob JSON'dan yasalgan to'liq
+matn bo'lib boradi (hech qachon yo'qolmaydi).
+
 **Buyruqlar:** `/hisobot` — hisobotni hozir yaratib yuborish (oxirgi snapshot'ga
 nisbatan diff, snapshot yozmasdan); `/audit` — data sifat auditi (bo'sh majburiy
 kataklar, yilsiz sanalar, raqam o'rnida matn, Jami=0 muammosi, nomsiz qatorlar,

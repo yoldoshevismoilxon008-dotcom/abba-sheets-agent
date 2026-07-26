@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html { background: {{ theme.page_bg }}; }
+  body {
+    font-family: {{ theme.font|safe }};
+    color: {{ theme.text }}; background: {{ theme.page_bg }};
+    width: 210mm; min-height: 297mm; padding: 9mm 10mm 8mm;
+  }
+  .muted { color: {{ theme.muted }}; }
+  .block { break-inside: avoid; page-break-inside: avoid; }
+  .card { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }};
+          box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; }
+  .header { display: flex; justify-content: space-between; align-items: center; gap: 4mm; margin-bottom: 5mm; }
+  .header .brand { display: flex; align-items: center; gap: 3.5mm; min-width: 0; }
+  .header .brand img { height: 9mm; max-width: 40mm; object-fit: contain; }
+  .header h1 { font-size: 18px; font-weight: 700; }
+  .header .sub { font-size: 10.5px; margin-top: 1mm; }
+  .badge { font-size: 12px; font-weight: 700; padding: 2.2mm 4.2mm; border-radius: 6mm; color: #fff; white-space: nowrap; }
+  .badge.bad { background: {{ theme.badge_bad }}; }
+  .badge.chip { background: {{ theme.accent }}; }
+  .summary { padding: 4mm 5mm; border-left: 1.2mm solid {{ theme.accent }};
+             margin-bottom: 4.5mm; font-size: 12.5px; line-height: 1.6; }
+  .kpis { display: grid; grid-template-columns: repeat({{ kpis|length or 1 }}, 1fr); gap: 4mm; margin-bottom: 4.5mm; }
+  .kpi { padding: 3.5mm 4.5mm; }
+  .kpi .label { font-size: 9.5px; font-weight: 600; color: {{ theme.muted }};
+                text-transform: uppercase; letter-spacing: 0.04em; }
+  .kpi .value { font-size: 26px; font-weight: 800; line-height: 1.2; margin: 0.8mm 0 0.5mm; }
+  .kpi .sub { font-size: 9.5px; color: {{ theme.muted }}; }
+  .panel { padding: 3.5mm 4.5mm; margin-bottom: 4.5mm; }
+  .panel h3 { font-size: 11px; font-weight: 700; color: {{ theme.accent }}; margin-bottom: 2.5mm; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  thead { display: table-header-group; }
+  thead th { text-align: left; font-size: 9.5px; font-weight: 700; color: {{ theme.accent }};
+             padding: 1.6mm 2mm; border-bottom: 0.45mm solid {{ theme.bar_track }}; }
+  tbody td { padding: 1.6mm 2mm; border-bottom: 0.25mm solid {{ theme.grid_line }}; vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .charts { display: grid; gap: 4mm; margin-bottom: 4.5mm;
+            grid-template-columns: {% if bars and trend_series %}1fr 1fr{% else %}1fr{% endif %}; }
+  .charts .panel { margin-bottom: 0; }
+  .hbar { display: flex; align-items: center; gap: 2.5mm; margin-bottom: 2.2mm; font-size: 10.5px; }
+  .hbar .lbl { width: 24mm; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hbar .track { flex: 1; height: 4.2mm; background: {{ theme.bar_track }}; border-radius: 2mm; overflow: hidden; }
+  .hbar .track i { display: block; height: 100%; border-radius: 2mm; }
+  .hbar .val { width: 15mm; text-align: right; font-weight: 700; }
+  .hbar .note { width: 18mm; font-size: 9px; color: {{ theme.muted }}; text-align: right; }
+  .legend { display: flex; gap: 4mm; font-size: 9px; color: {{ theme.muted }}; margin-top: 1.5mm; flex-wrap: wrap; }
+  .legend span::before { content: "●"; margin-right: 1mm; }
+  {% for s in trend_series %}.lg-{{ loop.index }}::before { color: {{ s.color }}; }
+  {% endfor %}
+  .warn { padding: 3.5mm 4.5mm; margin-bottom: 4.5mm; }
+  .warn h3 { font-size: 11px; font-weight: 700; color: {{ theme.badge_bad }}; margin-bottom: 2mm; }
+  .warn li { font-size: 10.5px; color: {{ theme.kpi_red }}; line-height: 1.6; margin-left: 4mm; }
+  .insights { padding: 3.5mm 4.5mm; margin-bottom: 4.5mm; }
+  .insights h3 { font-size: 11px; font-weight: 700; color: {{ theme.accent }}; margin-bottom: 2mm; }
+  .insights li { font-size: 10.5px; line-height: 1.6; margin-left: 4mm; }
+  .note { font-size: 9.5px; color: {{ theme.muted }}; margin-bottom: 4mm; line-height: 1.5; }
+  .footer { display: flex; justify-content: space-between; gap: 4mm;
+            font-size: 9px; color: {{ theme.muted }}; margin-top: 2mm; }
+</style>
+</head>
+<body>
+
+<div class="header block">
+  <div class="brand">
+    {% if logo_uri %}<img src="{{ logo_uri }}" alt="logo">{% endif %}
+    <div>
+      <h1>💬 {{ title }}</h1>
+      <div class="sub muted">Q&amp;A javob · {{ asked_at }} · savol: «{{ question }}»</div>
+    </div>
+  </div>
+  {% if warnings %}<div class="badge bad">⚠️ {{ warnings|length }} ogohlantirish</div>
+  {% else %}<div class="badge chip">Q&amp;A hisobot</div>{% endif %}
+</div>
+
+{% if summary %}
+<div class="card summary block">{{ summary }}</div>
+{% endif %}
+
+{% if kpis %}
+<div class="kpis block">
+  {% for k in kpis %}
+  <div class="card kpi">
+    <div class="label">{{ k.label }}</div>
+    <div class="value" style="color: {{ k.hex }}">{{ k.value }}</div>
+    {% if k.sub %}<div class="sub">{{ k.sub }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if table %}
+<div class="card panel">
+  {% if table.title %}<h3>{{ table.title }}</h3>{% endif %}
+  <table>
+    {% if table.columns %}
+    <thead><tr>{% for c in table.columns %}<th class="{{ 'num' if table.num_cols[loop.index0] else '' }}">{{ c }}</th>{% endfor %}</tr></thead>
+    {% endif %}
+    <tbody>
+      {% for row in table.rows %}
+      <tr>{% for cell in row %}<td class="{{ 'num' if cell.num else '' }}">{{ cell.v }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if bars or trend_series %}
+<div class="charts block">
+  {% if bars %}
+  <div class="card panel">
+    <h3>{{ bars.title }}</h3>
+    {% for it in bars["items"] %}
+    <div class="hbar">
+      <span class="lbl">{{ it.label }}</span>
+      <span class="track"><i style="width: {{ it.width }}%; background: {{ it.hex }}"></i></span>
+      <span class="val">{{ it.display }}</span>
+      {% if bars.has_notes %}<span class="note">{{ it.note }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if trend_series %}
+  <div class="card panel">
+    <h3>{{ trend_title }}</h3>
+    <svg viewBox="0 0 300 96" width="100%" height="96">
+      {% for g in trend_grid %}
+      <line x1="0" y1="{{ g.y }}" x2="300" y2="{{ g.y }}" stroke="{{ theme.grid_line }}" stroke-width="1"/>
+      <text x="2" y="{{ g.y - 2.5 }}" font-size="7" fill="{{ theme.muted }}">{{ g.label }}</text>
+      {% endfor %}
+      {% for s in trend_series %}{% for seg in s.segments %}
+      <polyline points="{{ seg }}" fill="none" stroke="{{ s.color }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      {% endfor %}{% if s.last %}<circle cx="{{ s.last[0] }}" cy="{{ s.last[1] }}" r="2.3" fill="{{ s.color }}"/>{% endif %}
+      {% endfor %}
+      {% for xl in trend_xlabels %}
+      <text x="{{ xl.x }}" y="95" font-size="7" fill="{{ theme.muted }}" text-anchor="{{ xl.anchor }}">{{ xl.label }}</text>
+      {% endfor %}
+    </svg>
+    {% if trend_series|length > 1 %}
+    <div class="legend">
+      {% for s in trend_series %}<span class="lg-{{ loop.index }}">{{ s.name }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if warnings %}
+<div class="card warn block">
+  <h3>⚠️ Ogohlantirishlar</h3>
+  <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if insights %}
+<div class="card insights block">
+  <h3>💡 Kuzatuvlar</h3>
+  <ul>{% for i in insights %}<li>{{ i }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if note %}<div class="note block">ℹ️ {{ note }}</div>{% endif %}
+
+<div class="footer">
+  <span>Manba: {{ source }}</span>
+  <span>{{ theme.name }} · abba-sheets-agent · {{ generated_at }}</span>
+</div>
+
+</body>
+</html>

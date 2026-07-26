@@ -17,7 +17,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 SNAPSHOTS = BASE / "data" / "snapshots"
 
-SERVICE_FILES = {"_meta.json", "diff.json"}
+SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 
 
 def log(msg):

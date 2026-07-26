@@ -10,6 +10,7 @@ o'tadi (hisobot hech qachon yo'qolmaydi).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -169,6 +170,218 @@ def build_html(data, theme=None, logo_uri=None):
     )
 
 
+# ---------- Q&A infografik PDF (bot javoblari uchun) ----------
+
+# Semantik rang nomi → theme kaliti (Claude JSON'da faqat shu nomlarni beradi)
+QA_COLOR_MAP = {
+    "green": "kpi_green", "yellow": "kpi_yellow", "orange": "kpi_orange",
+    "red": "kpi_red", "accent": "accent", "muted": "muted",
+}
+# Raqamli hujayra: ixtiyoriy belgi-prefiks/suffiks (↑↓⚠️ kabi) bilan son
+QA_NUMISH_RE = re.compile(r"^[^\w]{0,3}\d[\d\s.,]*%?[^\w]{0,4}$")
+QA_LIMITS = {"kpis": 4, "rows": 24, "cols": 8, "bars": 12, "series": 4,
+             "points": 24, "warnings": 6, "insights": 5}
+
+
+def _qa_hex(theme, name, default=None):
+    key = QA_COLOR_MAP.get(str(name or "").strip().lower())
+    if key:
+        return theme.get(key) or DEFAULT_THEME[key]
+    return default or theme["accent"]
+
+
+def _qa_num(v):
+    try:
+        return float(str(v).replace("\xa0", "").replace(" ", "").replace(",", ".").rstrip("%"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _qa_disp(v):
+    s = f"{v:.1f}".rstrip("0").rstrip(".")
+    return s.replace(".", ",")
+
+
+def _qa_kpis(data, theme):
+    out = []
+    for k in (data.get("kpis") or [])[: QA_LIMITS["kpis"]]:
+        if not isinstance(k, dict):
+            continue
+        out.append({
+            "label": str(k.get("label", ""))[:40],
+            "value": str(k.get("value", ""))[:20],
+            "sub": str(k.get("sub", ""))[:60],
+            "hex": _qa_hex(theme, k.get("color")),
+        })
+    return out
+
+
+def _qa_table(data):
+    t = data.get("table")
+    if not (isinstance(t, dict) and isinstance(t.get("rows"), list) and t.get("rows")):
+        return None
+    cols = [str(c)[:40] for c in (t.get("columns") or [])][: QA_LIMITS["cols"]]
+    width = len(cols) or QA_LIMITS["cols"]
+    rows = []
+    for r in t["rows"][: QA_LIMITS["rows"]]:
+        if not isinstance(r, list):
+            continue
+        cells = [str(c)[:70] for c in r][:width]
+        cells += [""] * (len(cols) - len(cells) if cols else 0)
+        rows.append([{"v": c, "num": bool(QA_NUMISH_RE.match(c.strip()))} for c in cells])
+    if not rows:
+        return None
+    # Ustun raqamli hisoblanadi: bo'sh bo'lmagan hujayralarining 70%+ raqamli bo'lsa
+    num_cols = []
+    for i in range(len(cols)):
+        vals = [row[i] for row in rows if i < len(row) and row[i]["v"].strip()]
+        num_cols.append(bool(vals) and sum(c["num"] for c in vals) >= 0.7 * len(vals))
+    return {"title": str(t.get("title", ""))[:80], "columns": cols, "rows": rows,
+            "num_cols": num_cols, "cut_from": len(t["rows"])}
+
+
+def _qa_bars(data, theme):
+    b = data.get("bars")
+    if not (isinstance(b, dict) and isinstance(b.get("items"), list)):
+        return None
+    line_colors = theme.get("line_colors") or DEFAULT_THEME["line_colors"]
+    items = []
+    for i, it in enumerate(b["items"][: QA_LIMITS["bars"]]):
+        if not isinstance(it, dict):
+            continue
+        v = _qa_num(it.get("value"))
+        if v is None:
+            continue
+        items.append({
+            "label": str(it.get("label", "?"))[:30],
+            "value": v,
+            "display": str(it.get("display") or _qa_disp(v))[:14],
+            "note": str(it.get("note", ""))[:26],
+            "hex": _qa_hex(theme, it.get("color"), default=line_colors[i % len(line_colors)]),
+        })
+    if not items:
+        return None
+    unit = str(b.get("unit", "")).strip()
+    vmax = max(it["value"] for it in items)
+    scale = 100.0 if unit == "%" and vmax <= 100 else max(vmax, 0.0001)
+    for it in items:
+        it["width"] = round(max(0.0, min(100.0, it["value"] / scale * 100)), 1)
+    return {"title": str(b.get("title", "Solishtirma"))[:80], "items": items,
+            "has_notes": any(it["note"] for it in items)}
+
+
+def _qa_trend(data, theme):
+    """(series, grid, xlabels, title) — min-max avtoshkala, null'lar segment uzadi."""
+    tr = data.get("trend")
+    if not (isinstance(tr, dict) and isinstance(tr.get("series"), list)):
+        return [], [], [], ""
+    line_colors = theme.get("line_colors") or DEFAULT_THEME["line_colors"]
+    labels = [str(x)[:12] for x in (tr.get("labels") or [])][: QA_LIMITS["points"]]
+    raw, all_vals, npts = [], [], 0
+    for s in tr["series"][: QA_LIMITS["series"]]:
+        if not isinstance(s, dict):
+            continue
+        pts = [_qa_num(p) for p in (s.get("points") or [])[: QA_LIMITS["points"]]]
+        if not any(p is not None for p in pts):
+            continue
+        raw.append({"name": str(s.get("name", "?"))[:20], "points": pts})
+        all_vals += [p for p in pts if p is not None]
+        npts = max(npts, len(pts))
+    if not raw or npts < 2:
+        return [], [], [], ""
+    vmin, vmax = min(all_vals), max(all_vals)
+    if vmax - vmin < 1e-9:
+        vmin, vmax = vmin - 1, vmax + 1
+    pad = (vmax - vmin) * 0.08
+    vmin, vmax = vmin - pad, vmax + pad
+
+    def x(i):
+        return 8 + 284 * (i / max(1, npts - 1))
+
+    def y(v):
+        return 84 - (max(vmin, min(vmax, v)) - vmin) / (vmax - vmin) * 72
+
+    series = []
+    for si, s in enumerate(raw):
+        segs, cur, last = [], [], None
+        for i, p in enumerate(s["points"]):
+            if p is None:
+                if len(cur) >= 2:
+                    segs.append(" ".join(cur))
+                cur = []
+                continue
+            cur.append(f"{x(i):.1f},{y(p):.1f}")
+            last = (round(x(i), 1), round(y(p), 1))
+        if len(cur) >= 2:
+            segs.append(" ".join(cur))
+        if segs or last:
+            series.append({"name": s["name"], "color": line_colors[si % len(line_colors)],
+                           "segments": segs, "last": last})
+    grid = []
+    for gy in (14, 48, 82):
+        gv = vmin + (84 - gy) / 72 * (vmax - vmin)
+        grid.append({"y": gy, "label": _qa_disp(round(gv, 1))})
+    xlabels = []
+    if labels:
+        idx = sorted({0, len(labels) // 2, len(labels) - 1})
+        for j, i in enumerate(idx):
+            anchor = "start" if i == 0 else ("end" if i == len(labels) - 1 else "middle")
+            xlabels.append({"x": round(x(i), 1), "anchor": anchor, "label": labels[i]})
+    return series, grid, xlabels, str(tr.get("title", "Trend"))[:80]
+
+
+def _qa_lines(data, key, limit, maxlen=220):
+    return [str(x)[:maxlen] for x in (data.get(key) or [])[:limit] if str(x).strip()]
+
+
+def build_qa_html(data, theme=None, logo_uri=None):
+    """Q&A JSON (Claude'dan) → HTML. Barcha bloklar ixtiyoriy, kirish yumshoq
+    normalizatsiya qilinadi — buzuq blok tashlanadi, hujjat baribir chiqadi."""
+    from jinja2 import Environment, FileSystemLoader
+
+    if theme is None:
+        theme, _ = load_theme()
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
+    tpl = env.get_template("qa-report.html")
+    table = _qa_table(data)
+    note = str(data.get("note", "")).strip()[:300]
+    if table and table["cut_from"] > len(table["rows"]) and "qisqartirildi" not in note:
+        extra = f"Jadval qisqartirildi ({len(table['rows'])}/{table['cut_from']}) — to'liq ro'yxat uchun aniqroq savol bering."
+        note = (note + " " + extra).strip()
+    series, grid, xlabels, trend_title = _qa_trend(data, theme)
+    q = str(data.get("question", "")).strip()
+    return tpl.render(
+        theme=theme,
+        logo_uri=logo_uri if logo_uri is not None else logo_data_uri(),
+        title=str(data.get("title") or "Savol-javob")[:90],
+        summary=str(data.get("summary", "")).strip()[:600],
+        question=(q[:110] + "…") if len(q) > 110 else q,
+        asked_at=str(data.get("asked_at", ""))[:16],
+        kpis=_qa_kpis(data, theme),
+        table=table,
+        bars=_qa_bars(data, theme),
+        trend_series=series, trend_grid=grid, trend_xlabels=xlabels, trend_title=trend_title,
+        warnings=_qa_lines(data, "warnings", QA_LIMITS["warnings"]),
+        insights=_qa_lines(data, "insights", QA_LIMITS["insights"]),
+        note=note,
+        source=str(data.get("source", "—"))[:160],
+        generated_at=data.get("generated_at") or datetime.now().strftime("%Y-%m-%d %H:%M"),
+    )
+
+
+def render_qa(data, out_pdf, keep_html=False, theme_name=None):
+    """Q&A JSON → PDF. Kunlik render() bilan bir xil theme-fallback siyosati."""
+    theme, resolved = load_theme(theme_name)
+    try:
+        return _render_with(data, out_pdf, theme, keep_html, builder=build_qa_html)
+    except Exception as e:
+        if resolved == "default":
+            raise
+        log(f"theme '{resolved}' bilan QA render yiqildi ({e}) — default fallback")
+        theme, _ = load_theme("default")
+        return _render_with(data, out_pdf, theme, keep_html, builder=build_qa_html)
+
+
 def html_to_pdf(html_path, pdf_path, wait_s=60):
     """Chrome ba'zan PDF yozib bo'lgach ham chiqmaydi (macOS'da kuzatildi) —
     shuning uchun jarayon emas, FAYL kuzatiladi: hajm barqarorlashgach Chrome
@@ -220,8 +433,8 @@ def render(data, out_pdf, keep_html=False, theme_name=None, logo_uri=None):
         return _render_with(data, out_pdf, theme, keep_html, logo_uri)
 
 
-def _render_with(data, out_pdf, theme, keep_html, logo_uri=None):
-    html = build_html(data, theme=theme, logo_uri=logo_uri)
+def _render_with(data, out_pdf, theme, keep_html, logo_uri=None, builder=None):
+    html = (builder or build_html)(data, theme=theme, logo_uri=logo_uri)
     html_path = Path(str(out_pdf).rsplit(".", 1)[0] + ".html")
     html_path.write_text(html, encoding="utf-8")
     try:

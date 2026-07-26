@@ -43,6 +43,7 @@ MEM_DIR = DATA / "bot-memory"
 HIST_FILE = MEM_DIR / "history.jsonl"
 OUTBOX = DATA / "bot-outbox.md"
 LAST_AUDIT = DATA / "last-audit.md"
+QA_PDF_DIR = DATA / "qa-pdf"
 QA_PROMPT = BASE / "prompts" / "qa.md"
 DAILY_PROMPT = BASE / "prompts" / "daily-report.md"
 
@@ -76,12 +77,54 @@ HISTQ_WORDS = ("kecha", "o'tgan", "avval", "trend", "dinamika", "nisbatan", "tar
 LIVE_WORDS = ("hozir", "jonli", "shu payt", "ayni", "real vaqt", "o'zgardimi", "yangilandimi")
 # Maksimal effort faqat eksplitsit so'ralganda
 MAX_WORDS = ("chuqur tahlil", "to'liq tahlil", "to'liq audit", "maksimal tahlil", "chuqur o'rgan")
+# Infografik PDF kutiladigan so'rov belgilari — kamida deep rejim (PDF-nomzod)
+PDF_WORDS = ("taqdim", "ko'rsat", "hisobot", "reyting", "ro'yxat", "jadval", "pdf", "grafik")
+
+# Javob format ko'rsatmalari (prompts/qa.md dagi {{FORMAT}} o'rniga qo'yiladi).
+# fast: doim matn (tezlik muhim); deep/max: Claude data turiga qarab o'zi tanlaydi.
+TEXT_FORMAT = (
+    "Telegram formati: oddiy matn, **qalin**, • ro'yxat; jadval/kod blok/# ishlatma."
+)
+PDF_FORMAT = """AQLLI TANLOV — javob turiga qarab ikki formatdan birini tanla:
+
+1) Javob RAQAMLI-JADVALLI bo'lsa — solishtirish, trend/dinamika, oylik natijalar,
+   reyting yoki 3+ qatorli raqamli ro'yxat, KPI holat taqdimoti — javobni FAQAT
+   bitta ```json ... ``` blok qilib qaytar (quyidagi tuzilma). U brendli
+   infografik PDF'ga aylantirilib yuboriladi.
+2) Aks holda — bitta faktli qisqa javob ("ha/yo'q", bitta raqam), aniqlashtirish
+   savoli, sof matnli tushuntirish — ODDIY MATN qaytar: oddiy matn, **qalin**,
+   • ro'yxat; jadval/kod blok/# ishlatma.
+
+JSON tuzilmasi (title, summary, source majburiy; qolgan bloklardan faqat data
+turiga mosini kirit — hammasini majburan to'ldirma):
+{
+ "title": "3-6 so'zli sarlavha (savol mohiyati)",
+ "summary": "2-3 gapli asosiy xulosa — eng muhim natija, raqami bilan",
+ "kpis": [{"label": "Iyul", "value": "41,2%", "sub": "12/29 ball", "color": "yellow"}],
+ "table": {"title": "...", "columns": ["Oy", "Ideal", "Fakt", "%"], "rows": [["Yanvar", "30", "24", "80,0%"]]},
+ "bars": {"title": "...", "unit": "%", "items": [{"label": "Zubair", "value": 41.2, "display": "41,2%", "note": "12/29", "color": "yellow"}]},
+ "trend": {"title": "...", "labels": ["18.07", "19.07"], "series": [{"name": "Zubair", "points": [45.1, 47.2]}]},
+ "warnings": ["anomaliya/ogohlantirish qatorlari (faqat haqiqatan bor bo'lsa)"],
+ "insights": ["1-3 muhim kuzatuv"],
+ "note": "chegara izohi (masalan: ro'yxat qisqartirilgani)",
+ "source": "qaysi sheet/tab'lar, manba (snapshot SANA VAQT yoki jonli holat)"
+}
+Qoidalar:
+- color ∈ green|yellow|orange|red|accent|muted. KPI foizga status rang (≥90 green,
+  80-90 yellow, 70-80 orange, <70 red); oddiy solishtirishda color yozma (o'zi tanlanadi).
+- "value" va "points" — float (nuqta bilan: 41.2); ko'rsatiladigan matnlar
+  ("display", jadval hujayralari, kpis.value) — sheet ko'rinishida ("41,2%").
+- Limitlar: kpis ≤4 · table ≤20 qator (ko'p bo'lsa eng muhimlarini kirit, note'da ayt)
+  · bars ≤10 · trend faqat vaqt-dinamika so'ralganda, series ≤4.
+- trend.points'da ma'lumot yo'q kunga null yoz. summary'da to'qima raqam bo'lmasin —
+  hammasi DATA'dan."""
 
 HELP = (
     "🤖 **Abba Sheets Q&A**\n"
     "Oddiy tilda savol yozing — PM KPI sheet'larining joriy holati asosida "
     "javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani batafsilroq\" "
-    "kabi davom savollari ishlaydi.\n\n"
+    "kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar (solishtirish, "
+    "trend, oylik natijalar) infografik PDF bo'lib keladi.\n\n"
     "Misollar:\n"
     "• Zubairda Livardi loyihasi bormi?\n"
     "• Islomning oktabrdan iyungacha natijalari qanday?\n"
@@ -187,6 +230,16 @@ def edit_status(mid, text, html=False):
         return api("editMessageText", payload).status_code == 200
     except requests.RequestException:
         return False
+
+
+def delete_status(mid):
+    """Progress xabarini o'chiradi (PDF yuborilgach ortda qolmasin)."""
+    if not mid:
+        return
+    try:
+        api("deleteMessage", {"chat_id": CHAT_ID, "message_id": mid})
+    except requests.RequestException:
+        pass
 
 
 # ---------- getUpdates offset ----------
@@ -383,7 +436,10 @@ def classify(q, months):
     ref = any(w in qn for w in REF_WORDS)
     if any(w in qn for w in MAX_WORDS):
         return "max", ref
-    if ref or len(months) >= 2 or len(q) > 140 or any(w in qn for w in DEEP_WORDS):
+    if (
+        ref or len(months) >= 2 or len(q) > 140
+        or any(w in qn for w in DEEP_WORDS) or any(w in qn for w in PDF_WORDS)
+    ):
         return "deep", ref
     return "fast", ref
 
@@ -716,6 +772,166 @@ def audit_block():
         return "(audit o'qib bo'lmadi)"
 
 
+# ---------- Q&A infografik PDF ----------
+
+def parse_qa_answer(ans):
+    """Claude javobidan QA-JSON blokini ajratadi. Topilmasa/buzuq bo'lsa None
+    (javob oddiy matn sifatida yuboriladi)."""
+    m = re.search(r"```json\s*(.*?)```", ans, re.S)
+    raw = m.group(1).strip() if m else None
+    if raw is None:
+        t = ans.strip()
+        if t.startswith("{") and t.endswith("}"):
+            raw = t
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except ValueError as e:
+        log(f"QA-JSON parse bo'lmadi ({e}) — matn sifatida yuboriladi")
+        return None
+    if not (isinstance(d, dict) and (d.get("summary") or d.get("title"))):
+        return None
+    return d
+
+
+def qa_json_to_text(qa):
+    """QA-JSON → Telegram matni (PDF yiqilsa javob hech qachon yo'qolmasin;
+    xotira uchun ham shu matn saqlanadi)."""
+    L = []
+    t = str(qa.get("title") or "").strip()
+    if t:
+        L.append(f"**{t}**")
+    s = str(qa.get("summary") or "").strip()
+    if s:
+        L.append(s)
+    for k in qa.get("kpis") or []:
+        if isinstance(k, dict):
+            line = f"• {k.get('label', '')}: {k.get('value', '')}"
+            if k.get("sub"):
+                line += f" ({k['sub']})"
+            L.append(line)
+    tb = qa.get("table")
+    if isinstance(tb, dict) and isinstance(tb.get("rows"), list):
+        if tb.get("title"):
+            L.append(f"\n**{tb['title']}**")
+        cols = tb.get("columns") or []
+        if cols:
+            L.append(" | ".join(str(c) for c in cols))
+        for r in tb["rows"][:24]:
+            if isinstance(r, list):
+                L.append(" | ".join(str(c) for c in r))
+    b = qa.get("bars")
+    if isinstance(b, dict):
+        if b.get("title"):
+            L.append(f"\n**{b['title']}**")
+        for it in (b.get("items") or [])[:12]:
+            if isinstance(it, dict):
+                disp = it.get("display") or it.get("value")
+                note = f" ({it['note']})" if it.get("note") else ""
+                L.append(f"• {it.get('label', '?')}: {disp}{note}")
+    for w in qa.get("warnings") or []:
+        L.append(f"⚠️ {w}")
+    for i in qa.get("insights") or []:
+        L.append(f"💡 {i}")
+    if qa.get("note"):
+        L.append(f"ℹ️ {qa['note']}")
+    if qa.get("source"):
+        L.append(f"Manba: {qa['source']}")
+    return "\n".join(L)
+
+
+def build_qa_caption(qa):
+    """sendDocument caption: sarlavha + asosiy xulosa + PDF'ga ishora (≤1024)."""
+    lines = [f"📊 {str(qa.get('title') or 'Savol-javob').strip()}"]
+    s = str(qa.get("summary") or "").strip()
+    if s:
+        lines.append(s)
+    w = qa.get("warnings") or []
+    if w:
+        lines.append(f"⚠️ {len(w)} ogohlantirish — PDF ichida")
+    lines.append("📎 Batafsil jadval va grafiklar PDF ichida")
+    return "\n".join(lines)[:1024]
+
+
+def _prune_qa_pdfs(days=7):
+    """Eski QA PDF/HTML fayllarini tozalaydi (papka o'sib ketmasin)."""
+    try:
+        cutoff = time.time() - days * 86400
+        for p in list(QA_PDF_DIR.glob("*.pdf")) + list(QA_PDF_DIR.glob("*.html")):
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+    except OSError:
+        pass
+
+
+def send_qa_pdf(qa, q, mid, filename=None):
+    """QA-JSON → infografik PDF → sendDocument. Muvaffaqiyatda progress xabari
+    o'chiriladi. Xatoda exception — chaqiruvchi matnga fallback qiladi."""
+    import render_pdf
+
+    QA_PDF_DIR.mkdir(parents=True, exist_ok=True)
+    _prune_qa_pdfs()
+    now = datetime.now()
+    qa = dict(qa)
+    qa.setdefault("question", q)
+    qa["asked_at"] = now.strftime("%Y-%m-%d %H:%M")
+    pdf = QA_PDF_DIR / f"qa-{now.strftime('%Y%m%d-%H%M%S')}.pdf"
+    render_pdf.render_qa(qa, pdf)
+    sendmod.tg_send_document(
+        TOKEN, CHAT_ID, str(pdf), build_qa_caption(qa),
+        filename=filename or f"KPI-javob-{now.strftime('%Y-%m-%d')}.pdf",
+    )
+    delete_status(mid)
+
+
+def audit_qa_data(findings, source, today, ai_lines):
+    """Audit natijalari (deterministik) → QA-PDF strukturasi. Claude shart emas."""
+    fresh, acked = auditmod.split_acked(findings)
+    crit = [f for f in fresh if f[2] == auditmod.CRIT]
+    warn = [f for f in fresh if f[2] == auditmod.WARN]
+    if not findings:
+        summary = "Hammasi toza — muammo topilmadi ✅"
+    elif not fresh:
+        summary = "Yangi muammo yo'q — barcha topilmalar avvaldan tan olingan."
+    else:
+        summary = f"Yangi topilmalar: {len(crit)} kritik, {len(warn)} ogohlantirish."
+    qa = {
+        "title": "Data audit",
+        "summary": summary,
+        "kpis": [
+            {"label": "Kritik", "value": str(len(crit)), "color": "red" if crit else "green"},
+            {"label": "Ogohlantirish", "value": str(len(warn)), "color": "yellow" if warn else "green"},
+            {"label": "Tan olingan", "value": str(len(acked)), "color": "muted",
+             "sub": "kritik ro'yxatdan chiqarilgan"},
+        ],
+        "source": source,
+    }
+    rows = [
+        ["🔴" if lvl == auditmod.CRIT else "🟡", sheet, tab, msg]
+        for sheet, tab, lvl, msg, _k in sorted(fresh, key=lambda f: 0 if f[2] == auditmod.CRIT else 1)
+    ]
+    if rows:
+        qa["table"] = {"title": "Yangi topilmalar", "columns": ["", "Sheet", "Tab", "Muammo"],
+                       "rows": rows}
+    notes = []
+    if len(rows) > 24:
+        notes.append(f"Jadvalda 24/{len(rows)} topilma — to'lig'i: /audit matn arxivida.")
+    if acked:
+        groups = {}
+        for (sheet, _t, _l, _m, key), _e in acked:
+            groups.setdefault(key, set()).add(sheet)
+        ack_txt = " · ".join(
+            f"{auditmod.KEY_LABELS.get(k, k)} ({len(s)} sheet)" for k, s in groups.items()
+        )
+        notes.append(f"🤝 Tan olingan: {ack_txt} — ro'yxat: /ack")
+    if notes:
+        qa["note"] = " ".join(notes)
+    if ai_lines:
+        qa["insights"] = ai_lines
+    return qa
+
+
 # ---------- savol / buyruqlar ----------
 
 def do_question(q):
@@ -751,6 +967,7 @@ def do_question(q):
         .replace("{{KPI_RULES}}", kpi_rules)
         .replace("{{KPI_MODE}}", kpi_mode)
         .replace("{{HISTORY_DATA}}", hist_data or "(tarixiy ma'lumot talab qilinmadi)")
+        .replace("{{FORMAT}}", PDF_FORMAT if mode != "fast" else TEXT_FORMAT)
         .replace("{{DATA}}", data_text)
     )
     try:
@@ -762,18 +979,35 @@ def do_question(q):
         remember(q, "(tahlil xatosi — javob berilmadi)", sel)
         return
     t_claude = time.monotonic()
-    # Bitta bo'lakli javob — progress xabarining o'zini javobga aylantiramiz
-    chunks = sendmod.split_chunks(sendmod.md_to_html(ans))
-    if mid and len(chunks) == 1 and edit_status(mid, chunks[0], html=True):
+    # PDF yo'li: deep/max javobda QA-JSON blok bo'lsa — infografik hujjat
+    pdf_sent = False
+    qa = parse_qa_answer(ans) if mode != "fast" else None
+    if qa:
+        if qa.get("source") is None and src == "snapshot":
+            qa["source"] = f"snapshot {latest_day() or ''}".strip()
+        edit_status(mid, "📄 PDF tayyorlanmoqda...")
+        try:
+            send_qa_pdf(qa, q, mid)
+            pdf_sent = True
+            ans = qa_json_to_text(qa)  # xotira uchun matn ekvivalenti
+        except Exception as e:
+            log(f"QA PDF bo'lmadi ({type(e).__name__}: {str(e)[:150]}) — matn fallback")
+            ans = qa_json_to_text(qa)
+    if pdf_sent:
         ok = True
     else:
-        if mid:
-            edit_status(mid, "📄 Javob:")
-        ok = send_retry(ans)
+        # Bitta bo'lakli javob — progress xabarining o'zini javobga aylantiramiz
+        chunks = sendmod.split_chunks(sendmod.md_to_html(ans))
+        if mid and len(chunks) == 1 and edit_status(mid, chunks[0], html=True):
+            ok = True
+        else:
+            if mid:
+                edit_status(mid, "📄 Javob:")
+            ok = send_retry(ans)
     remember(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
-    log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({len(ans)} belgi)")
+    log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({'PDF' if pdf_sent else 'matn'}, {len(ans)} belgi)")
     log(
-        f"META: mode={mode} ref={int(ref)} src={src} "
+        f"META: mode={mode} ref={int(ref)} src={src} pdf={int(pdf_sent)} "
         f"fetch_ms={int((t_fetch - t0) * 1000)} claude_ms={int((t_claude - t_fetch) * 1000)} "
         f"ctx={len(data_text)} hist={len(hist_data)} ans={len(ans)}"
     )
@@ -781,27 +1015,49 @@ def do_question(q):
 
 def do_audit():
     typing()
-    send_retry("⏳ Data audit boshlandi (sheet'lar jonli o'qilmoqda)...", attempts=2)
+    mid = send_status("⏳ Data audit boshlandi (sheet'lar jonli o'qilmoqda)...")
     typing()
     today = date.today().isoformat()
     try:
         findings, source = auditmod.run_checks(None)
     except Exception as e:
         log(f"audit xato: {e}")
-        send_retry(f"⚠️ Audit ishlamadi: {str(e)[:150]}")
+        if not edit_status(mid, f"⚠️ Audit ishlamadi: {str(e)[:150]}"):
+            send_retry(f"⚠️ Audit ishlamadi: {str(e)[:150]}")
         return
     det, crit = auditmod.render(findings, source, today)
     auditmod.save_last(det)
+    ai_summary = None
     if findings:
         try:
-            summary = auditmod.claude_summary(det, today)
-            det += "\n\n💡 **Xulosa va takliflar (AI):**\n" + summary
+            ai_summary = auditmod.claude_summary(det, today)
         except Exception as e:
             log(f"audit claude xato: {e}")
+    # Infografik PDF (deterministik struktura); yiqilsa — to'liq matn fallback
+    pdf_sent = False
+    try:
+        ai_lines = (
+            [l.strip("•-# ").strip() for l in ai_summary.splitlines() if l.strip()][:4]
+            if ai_summary else []
+        )
+        qa = audit_qa_data(findings, source, today, ai_lines)
+        send_qa_pdf(qa, "/audit", mid, filename=f"Data-audit-{today}.pdf")
+        pdf_sent = True
+    except Exception as e:
+        log(f"/audit PDF bo'lmadi ({type(e).__name__}: {str(e)[:150]}) — matn rejimi")
+    if pdf_sent:
+        ok = True
+    else:
+        if ai_summary:
+            det += "\n\n💡 **Xulosa va takliflar (AI):**\n" + ai_summary
+        elif findings:
             det += "\n\n(AI xulosa ishlamadi — deterministik natijalar bilan cheklandi)"
-    ok = send_retry(det)
+        ok = send_retry(det)
     remember("/audit", det[:600] if ok else "(audit natijasi yuborilmadi)")
-    log(f"/audit {'yuborildi' if ok else 'YUBORILMADI'} ({len(findings)} topilma, {len(crit)} kritik)")
+    log(
+        f"/audit {'yuborildi' if ok else 'YUBORILMADI'} "
+        f"({'PDF' if pdf_sent else 'matn'}, {len(findings)} topilma, {len(crit)} kritik)"
+    )
 
 
 def do_hisobot():
