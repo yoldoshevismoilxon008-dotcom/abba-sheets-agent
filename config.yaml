@@ -60,3 +60,11 @@ sheets:
       main: "Loyihalar"
       month: "Proekt nomi"
     watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."
+
+  # qa_only: FAQAT Q&A bot o'qiydi (savolda "smm" bo'lsa tanlanadi, jonli).
+  # Kunlik pipeline/diff/audit/dashboard TEGMAYDI, snapshot yozilmaydi.
+  # PM KPI formatida emas: SMM bo'limi bazasi (proektlar, undiruv, mini-KPI,
+  # oyliklar, mijozlar). To'liq monitoringga qo'shish — alohida qaror.
+  - id: "1ze6JwULZmt-8etGfttCLOSFNkjyFOuWx0mji6mXoHjk"
+    name: "SMM proektlar"
+    qa_only: true

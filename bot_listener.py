@@ -473,7 +473,8 @@ def sheets_for_question(cfg, q, extra_names=None):
         for s in cfg:
             if s.get("name") in extra_names and s not in sel:
                 sel.append(s)
-    return sel or list(cfg)
+    # Nom aytilmagan umumiy savolda qa_only sheet'lar qo'shilmaydi (PM default)
+    return sel or [s for s in cfg if not s.get("qa_only")] or list(cfg)
 
 
 def months_in_question(q):
@@ -628,7 +629,7 @@ def build_data(q, extra_sel=None, force_live=False):
     """Savolga mos sheet/tab'lar. SNAPSHOT-FIRST: bugungi snapshot yangi bo'lsa
     undan o'qiladi; jonli fetch faqat so'ralganda/eskirganda — PARALLEL.
     Qaytaradi: (matn, sel, manba)."""
-    cfg = fetchmod.load_config()
+    cfg = fetchmod.load_config(include_qa_only=True)
     extra_names = (extra_sel or {}).get("sheets")
     sel_sheets = sheets_for_question(cfg, q, extra_names)
     latest = latest_day()
@@ -645,23 +646,28 @@ def build_data(q, extra_sel=None, force_live=False):
             tabs = [w.title for w in sh.worksheets()]
             _tabs_cache[s["id"]] = (time.time() + TABS_CACHE_TTL, sh, tabs)
         extra_tabs = (extra_sel or {}).get("tabs", {}).get(name)
-        sel_tabs = tabs_for_question(tabs, q, extra_tabs)
+        # Watch-tab'siz sheet'da (qa_only) savolga mos tab chiqmasa — birinchi tab
+        sel_tabs = tabs_for_question(tabs, q, extra_tabs) or tabs[:1]
         ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(t) for t in sel_tabs], name)
         return tabs, sel_tabs, ranges
 
     results = {}
+    live_sheets = []
     if use_snap:
         for s in sel_sheets:
             snap = snap_sheets.get(s["id"])
             if not snap:
-                results[s["id"]] = None
+                # Snapshot'ga tushmaydigan sheet (qa_only) — jonli o'qiladi
+                live_sheets.append(s)
                 continue
             extra_tabs = (extra_sel or {}).get("tabs", {}).get(s.get("name"))
             tabs, sel_tabs, ranges = select_from_snapshot(snap, q, extra_tabs)
             results[s["id"]] = (sel_tabs, ranges, f"snapshot: {snap.get('fetched_at', latest)}")
     else:
-        with ThreadPoolExecutor(max_workers=min(4, max(1, len(sel_sheets)))) as ex:
-            futs = {ex.submit(fetch_live, s): s for s in sel_sheets}
+        live_sheets = list(sel_sheets)
+    if live_sheets:
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(live_sheets)))) as ex:
+            futs = {ex.submit(fetch_live, s): s for s in live_sheets}
             for fut, s in futs.items():
                 name = s.get("name", s["id"])
                 try:

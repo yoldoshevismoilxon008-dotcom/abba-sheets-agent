@@ -139,7 +139,9 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
     return out
 
 
-def load_config():
+def load_config(include_qa_only=False):
+    """Sheets ro'yxati. qa_only sheet'lar faqat include_qa_only=True bo'lganda
+    qaytadi (Q&A bot) — kunlik pipeline/diff/audit ularni ko'rmaydi."""
     with open(CONFIG, encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
     valid = []
@@ -147,6 +149,8 @@ def load_config():
         sheet_id = str(s.get("id") or "")
         if not sheet_id or "SHU_YERGA" in sheet_id or "SHEET_ID" in sheet_id:
             log(f"skip: '{s.get('name', '?')}' — id hali to'ldirilmagan")
+            continue
+        if s.get("qa_only") and not include_qa_only:
             continue
         valid.append(s)
     return valid
