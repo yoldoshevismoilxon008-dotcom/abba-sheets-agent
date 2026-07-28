@@ -93,6 +93,13 @@ def build_context(diff):
             L.append("(bu sheet uchun birinchi snapshot — solishtirish yo'q)")
         if sheet.get("removed_ranges"):
             L.append(f"O'chirilgan range'lar: {', '.join(sheet['removed_ranges'])}")
+        ot = sheet.get("other_tabs")
+        if ot and ot.get("changed"):
+            L.append(
+                f"Kuzatuvdan tashqari tab'lar: {ot['total']} tadan {len(ot['changed'])} tasi "
+                f"o'zgargan ({', '.join(ot['changed'][:8])}) — batafsil diff yuritilmaydi, "
+                "hisobotda faqat 1 qator eslat."
+            )
 
         for rng, d in sheet["ranges"].items():
             st = d["stats"]
@@ -208,11 +215,14 @@ def fallback_report(diff, err):
                 )
     for m in (diff.get("missing_today") or {}).values():
         L.append(f"▸ {m['name']}: bugun o'qilmadi — {trunc(m['reason'], 120)}")
+    L += other_tabs_note(diff)
     return "\n".join(L)
 
 
 def is_quiet(diff):
-    """Hech narsa o'zgarmagan oddiy kun — Claude'ni bezovta qilmaymiz."""
+    """Hech narsa o'zgarmagan oddiy kun — Claude'ni bezovta qilmaymiz.
+    (track_other_tabs o'zgarishlari quiet'ni buzmaydi — ular hisobotga
+    faqat 1 qator eslatma sifatida qo'shiladi.)"""
     t = diff["totals"]
     return (
         not diff.get("baseline")
@@ -222,6 +232,32 @@ def is_quiet(diff):
         and not diff.get("missing_today")
         and not any(s.get("baseline") or s.get("removed_ranges") for s in diff["sheets"].values())
     )
+
+
+def other_tabs_note(diff):
+    """track_other_tabs sheet'lari uchun 1 qatorlik eslatmalar ro'yxati."""
+    L = []
+    for sheet in diff["sheets"].values():
+        ot = sheet.get("other_tabs")
+        if ot and ot.get("changed"):
+            names = ", ".join(ot["changed"][:6])
+            more = f" +{len(ot['changed']) - 6}" if len(ot["changed"]) > 6 else ""
+            L.append(
+                f"▸ {sheet['name']}: kuzatuvdan tashqari {len(ot['changed'])}/{ot['total']} "
+                f"tab o'zgargan ({names}{more})"
+            )
+    return L
+
+
+def undiruv_block(day):
+    """Kunlik hisobot oxiriga qo'shiladigan Undiruv bloki (bo'lmasa bo'sh)."""
+    try:
+        import undiruv
+
+        return undiruv.report_block(day)
+    except Exception as e:
+        log(f"undiruv bloki tuzilmadi: {e}")
+        return ""
 
 
 def _day_stats(day):
@@ -375,6 +411,13 @@ def build_report_json(day, diff_dict, report_text, insights=None, out_name="repo
         "acknowledged": acked_lines,
         "insights": insights if insights is not None else [],
     }
+    try:
+        import undiruv as undiruvmod
+
+        data["undiruv"] = undiruvmod.summary(day)
+    except Exception as e:
+        log(f"undiruv (json) xato: {e}")
+        data["undiruv"] = None
     out = SNAPSHOTS / day / out_name
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -406,6 +449,11 @@ def main():
             f"O'zgarish yo'q. {len(diff['sheets'])} ta sheet ({names}), jami {rows} qator "
             f"tekshirildi — {diff['prev_date']} holatidan farq topilmadi."
         )
+        for note in other_tabs_note(diff):
+            report += f"\n{note}"
+        ub = undiruv_block(args.date)
+        if ub:
+            report += "\n\n———\n" + ub
         report_path.write_text(report + "\n", encoding="utf-8")
         log("o'zgarish yo'q — Claude chaqirilmadi, qisqa hisobot yozildi")
         try:
@@ -450,6 +498,9 @@ def main():
         log("fallback hisobot yozilyapti (quruq raqamlar)")
         report = fallback_report(diff, str(e))
 
+    ub = undiruv_block(args.date)
+    if ub:
+        report += "\n\n———\n" + ub
     report_path.write_text(report + "\n", encoding="utf-8")
     log(f"hisobot tayyor: {report_path} ({len(report)} belgi)")
     try:

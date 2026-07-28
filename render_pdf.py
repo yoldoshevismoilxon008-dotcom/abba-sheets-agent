@@ -167,6 +167,12 @@ def build_html(data, theme=None, logo_uri=None):
         f"{human_date(trend[0]['date']).split(' ')[0]} – {human_date(trend[-1]['date']).split(' ')[0]}"
         if trend else "—"
     )
+    undiruv = data.get("undiruv") or None
+    if undiruv:
+        undiruv = dict(undiruv)
+        for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv"):
+            undiruv[k + "_disp"] = f"${undiruv.get(k, 0):,.0f}".replace(",", " ")
+        undiruv["otgan_sum"] = "$" + f"{sum(i.get('summa', 0) for i in undiruv.get('muddat_otgan', [])):,.0f}".replace(",", " ")
     return tpl.render(
         pms=pms,
         theme=theme,
@@ -175,6 +181,7 @@ def build_html(data, theme=None, logo_uri=None):
         new_criticals=data.get("new_criticals", []),
         acknowledged=data.get("acknowledged", []),
         insights=data.get("insights", []),
+        undiruv=undiruv,
         date_human=human_date(data.get("date", "")),
         prev_date_human=human_date(data.get("prev_date") or "").split(" ")[0],
         snapshot_time=str(data.get("snapshot_time", ""))[11:16] or data.get("snapshot_time", ""),

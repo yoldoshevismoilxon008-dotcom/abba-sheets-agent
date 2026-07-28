@@ -88,6 +88,12 @@ def current_month_name(today=None):
     return MONTHS[m - 1]
 
 
+def expand_month(s, today=None):
+    """Config'dagi "<oy>" placeholder'ini joriy oy nomiga yoyadi
+    (masalan "Undiruv <oy>" → "Undiruv iyul"). Oy almashganda avtomatik."""
+    return str(s).replace("<oy>", current_month_name(today))
+
+
 def detect_watch_tabs(tab_titles, today=None):
     """Main + joriy oy tabini topadi. Bir xil nomli (bo'shliq bilan farqlanuvchi)
     oy tab'laridan tartibda OXIRGISI olinadi — u joriy yilniki.
@@ -121,7 +127,7 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
         None if main_exists
         else next((t for t in tab_titles if "ishlash muddati" in norm(t)), None)
     )
-    by_name = {norm(k): v for k, v in key_cfg.items()}
+    by_name = {norm(expand_month(k, today)): v for k, v in key_cfg.items()}
     out = {}
     for t in tab_titles:
         n = norm(t)
@@ -207,18 +213,26 @@ def fetch_sheet(gc, s, today=None):
     name = s.get("name", s["id"])
     if s.get("mode", "all_tabs") == "all_tabs" and not s.get("ranges"):
         sh, tabs = list_tabs(gc, s["id"])
-        ranges = [tab_range(t) for t in tabs]
+        # exclude_tabs: bu tab'lar API'dan O'QILMAYDI ham — snapshot/diff/git
+        # arxiviga tushmaydi (maxfiy ma'lumot, masalan parollar). Nomi esa
+        # meta.tabs ro'yxatida qoladi — Q&A bot mavjudligini bilib, kerak
+        # bo'lsa jonli o'qiy oladi.
+        excluded_norm = {norm(x) for x in (s.get("exclude_tabs") or [])}
+        excluded = [t for t in tabs if norm(t) in excluded_norm]
+        fetch_tabs = [t for t in tabs if norm(t) not in excluded_norm]
+        ranges = [tab_range(t) for t in fetch_tabs]
         data = fetch_ranges(sh, ranges, name)
         watch_titles = s.get("watch_tabs", "auto")
         if watch_titles in (None, "auto"):
-            watch_titles = detect_watch_tabs(tabs, today)
+            watch_titles = detect_watch_tabs(fetch_tabs, today)
         else:
-            wanted = [norm(w) for w in watch_titles]
-            watch_titles = [t for t in tabs if norm(t) in wanted]
+            wanted = [norm(expand_month(w, today)) for w in watch_titles]
+            watch_titles = [t for t in fetch_tabs if norm(t) in wanted]
         meta = {
             "tabs": tabs,
+            "excluded_tabs": excluded,
             "watch_ranges": [tab_range(t) for t in watch_titles],
-            "key_column": resolve_key_columns(tabs, s.get("key_column", 1), today),
+            "key_column": resolve_key_columns(fetch_tabs, s.get("key_column", 1), today),
         }
         if not watch_titles:
             log(f"'{name}': DIQQAT — watch tab topilmadi (Main/joriy oy yo'q)")
@@ -227,7 +241,8 @@ def fetch_sheet(gc, s, today=None):
     sh = _with_retry(lambda: gc.open_by_key(s["id"]), name)
     ranges = s.get("ranges") or ["A1:Z1000"]
     data = fetch_ranges(sh, ranges, name)
-    meta = {"tabs": [], "watch_ranges": list(ranges), "key_column": s.get("key_column", 1)}
+    meta = {"tabs": [], "excluded_tabs": [], "watch_ranges": list(ranges),
+            "key_column": s.get("key_column", 1)}
     return data, meta
 
 
@@ -268,8 +283,13 @@ def main():
                 "id": s["id"],
                 "name": name,
                 "watch": s.get("watch", ""),
+                # pm_kpi=False — PM KPI formatida emas (audit/dashboard-PM
+                # statistikasi bu sheet'ni chetlab o'tadi)
+                "pm_kpi": s.get("pm_kpi", True),
+                "track_other_tabs": bool(s.get("track_other_tabs")),
                 "key_column": meta["key_column"],
                 "tabs": meta["tabs"],
+                "excluded_tabs": meta.get("excluded_tabs", []),
                 "watch_ranges": meta["watch_ranges"],
                 "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "ranges": ranges,

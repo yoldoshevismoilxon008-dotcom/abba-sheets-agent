@@ -51,6 +51,16 @@
   .legend span::before { content: "●"; margin-right: 1mm; }
   {% for pm in pms %}.lg-{{ loop.index }}::before { color: {{ pm.line_color }}; }
   {% endfor %}
+  .undiruv { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
+             box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
+  .undiruv h3 { font-size: 11px; font-weight: 700; color: {{ theme.accent }}; margin-bottom: 2mm; }
+  .u-kpis { display: flex; gap: 6mm; margin-bottom: 1.5mm; }
+  .u-kpis .uk .l { font-size: 8.5px; color: {{ theme.muted }}; text-transform: uppercase; }
+  .u-kpis .uk .v { font-size: 15px; font-weight: 800; }
+  .u-due { font-size: 9.5px; line-height: 1.55; }
+  .u-due .overdue { color: {{ theme.kpi_red }}; font-weight: 600; }
+  .u-due .soon { color: {{ theme.kpi_orange }}; }
+  .u-ok { font-size: 10px; color: {{ theme.kpi_green }}; font-weight: 600; }
   .bottom { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
             box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
   .bottom h3 { font-size: 11px; font-weight: 700; margin-bottom: 2mm; color: {{ theme.badge_bad }}; }
@@ -69,7 +79,7 @@
     {% if logo_uri %}<img src="{{ logo_uri }}" alt="logo">{% endif %}
     <div>
       <h1>📊 Kunlik KPI hisobot — {{ date_human }}</h1>
-      <div class="sub muted">{{ prev_date_human }} holatiga nisbatan · 4 PM sheet kuzatuvda</div>
+      <div class="sub muted">{{ prev_date_human }} holatiga nisbatan · {{ pms|length }} PM sheet{% if undiruv %} + SMM{% endif %} kuzatuvda</div>
     </div>
   </div>
   {% if totals.quiet %}<div class="badge quiet">😴 O'zgarish yo'q</div>
@@ -132,6 +142,32 @@
     </div>
   </div>
 </div>
+
+{% if undiruv %}
+<div class="undiruv">
+  <h3>💰 Undiruv ({{ undiruv.oy }}) — {{ undiruv.tab }}</h3>
+  <div class="u-kpis">
+    <div class="uk"><div class="l">Kelishilgan</div><div class="v">{{ undiruv.kelishilgan_disp }}</div></div>
+    <div class="uk"><div class="l">Undirildi</div><div class="v c-green">{{ undiruv.undirildi_disp }}</div></div>
+    <div class="uk"><div class="l">Qoldiq</div><div class="v c-orange">{{ undiruv.qoldiq_disp }}</div></div>
+    {% if undiruv.aktiv %}<div class="uk"><div class="l">Aktiv (ehtimoliy)</div><div class="v muted">{{ undiruv.aktiv_disp }}</div></div>{% endif %}
+    <div class="uk"><div class="l">Bajarilish</div><div class="v">{{ undiruv.pct|string|replace(".", ",") }}%</div></div>
+  </div>
+  {% if undiruv.muddat_otgan %}
+  <div class="u-due"><span class="overdue">⏰ Muddati o'tgan, undirilmagan — {{ undiruv.muddat_otgan|length }} loyiha ({{ undiruv.otgan_sum }}):</span>
+    {% for i in undiruv.muddat_otgan[:6] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.muddat_otgan|length > 6 %} · +{{ undiruv.muddat_otgan|length - 6 }} ta{% endif %}
+  </div>
+  {% endif %}
+  {% if undiruv.muddat_yaqin %}
+  <div class="u-due"><span class="soon">🔜 Muddati ≤4 kun:</span>
+    {% for i in undiruv.muddat_yaqin[:5] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.muddat_yaqin|length > 5 %} · +{{ undiruv.muddat_yaqin|length - 5 }} ta{% endif %}
+  </div>
+  {% endif %}
+  {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin %}
+  <div class="u-ok">✅ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q</div>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="bottom">
   {% if new_criticals %}

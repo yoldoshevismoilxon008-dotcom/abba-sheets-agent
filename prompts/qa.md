@@ -59,6 +59,12 @@ QOIDALAR:
 - "BOSHQA TAB'LAR (faqat agregat)" — raw kiritilmagan tab'larning yig'ma
   ko'rsatkichlari. Umumiy savolga agregat yetsa — undan foydalan; qatorma-qator
   ma'lumot kerak bo'lsa, o'sha tab/oy nomini aniq yozib qayta so'rashni taklif qil.
+- "Sheet'dagi BARCHA tab'lar (N)" — sheet'ning to'liq tab ro'yxati. Savol raw
+  kiritilgan tab'larda javobsiz qolsa, bu ro'yxatdan mos tab nomini top va
+  foydalanuvchiga "«X» tabida bo'lishi kerak — o'sha tab nomi bilan qayta
+  so'rang" deb aniq taklif qil (ro'yxatda umuman mos tab bo'lmasa, ro'yxatning
+  tegishli qismini ko'rsatib qaysi biri kerakligini so'ra). "[maxfiy]"
+  belgili tab faqat aniq so'ralganda jonli o'qiladi.
 
 JAVOB FORMATI:
 {{FORMAT}}

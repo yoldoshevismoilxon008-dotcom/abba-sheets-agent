@@ -254,6 +254,8 @@ def audit_month_tab(sheet_name, tab, vals, findings):
 
 def audit_sheet(snap, findings):
     """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar."""
+    if not snap.get("pm_kpi", True):
+        return  # PM KPI formatida emas (masalan SMM) — Main/oy tekshiruvlari yot
     name = snap.get("name", snap.get("id", "?"))
     ranges = snap.get("ranges", {})
     by_tab = {fetchmod.tab_of_range(r): r for r in ranges}
@@ -296,7 +298,8 @@ def gather(from_snapshot=None):
         name = s.get("name", s["id"])
         try:
             ranges, meta = fetchmod.fetch_sheet(gc, s)
-            out.append({"id": s["id"], "name": name, "ranges": ranges, "tabs": meta["tabs"]})
+            out.append({"id": s["id"], "name": name, "ranges": ranges,
+                        "tabs": meta["tabs"], "pm_kpi": s.get("pm_kpi", True)})
         except Exception as e:
             log(f"'{name}' o'qilmadi: {str(e)[:150]}")
     if not out:

@@ -17,7 +17,10 @@ from pathlib import Path
 import os
 
 BASE = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE))
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
+
+from fetch import tab_of_range  # noqa: E402
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 
@@ -233,6 +236,21 @@ def main():
             gone = [r for r in old_watch if r not in all_ranges]
             if gone:
                 entry["removed_ranges"] = gone
+        # track_other_tabs (masalan SMM): watch'dan tashqari tab'lar uchun faqat
+        # "o'zgardi/o'zgarmadi" (values tengligi) — hisobotda soni ko'rsatiladi,
+        # batafsil diff YO'Q (spam bo'lmasin). totals'ga ham QO'SHILMAYDI.
+        if snap.get("track_other_tabs") and old_snap is not None:
+            changed_tabs = []
+            for rng, data in all_ranges.items():
+                if rng in watch:
+                    continue
+                old_rng = old_snap.get("ranges", {}).get(rng)
+                if old_rng is not None and old_rng.get("values", []) != data.get("values", []):
+                    changed_tabs.append(tab_of_range(rng))
+            entry["other_tabs"] = {
+                "total": sum(1 for r in all_ranges if r not in watch),
+                "changed": changed_tabs,
+            }
         result["sheets"][sid] = entry
 
     for sid, old_snap in old_sheets.items():

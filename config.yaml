@@ -61,10 +61,24 @@ sheets:
       month: "Proekt nomi"
     watch: "PM ballari, delay, deadline — ball tushganlar, kechikkan (Kechga qolgan > 0) va muddati o'tgan loyihalarni alohida ko'rsat."
 
-  # qa_only: FAQAT Q&A bot o'qiydi (savolda "smm" bo'lsa tanlanadi, jonli).
-  # Kunlik pipeline/diff/audit/dashboard TEGMAYDI, snapshot yozilmaydi.
-  # PM KPI formatida emas: SMM bo'limi bazasi (proektlar, undiruv, mini-KPI,
-  # oyliklar, mijozlar). To'liq monitoringga qo'shish — alohida qaror.
+  # SMM bo'limi operatsion bazasi (~45 tab) — kunlik monitoringda, lekin PM KPI
+  # formatida EMAS (pm_kpi: false → audit va PM dashboard chetlab o'tadi).
+  #   exclude_tabs — bu tab API'dan O'QILMAYDI: snapshot/diff/git arxiviga
+  #     tushmaydi (mijoz login-parollari!). Q&A bot so'ralganda jonli o'qiydi.
+  #   watch_tabs — batafsil kunlik diff faqat shu 3 tab ("<oy>" avtomatik
+  #     joriy oy nomiga aylanadi — oy almashganda config'ga tegilmaydi).
+  #   track_other_tabs — qolgan tab'lar uchun hisobotda faqat "o'zgargan
+  #     tab'lar soni" (spam bo'lmasin).
+  #   aliases — savolda shu so'zlar bo'lsa Q&A bot bu sheet'ni tanlaydi.
   - id: "1ze6JwULZmt-8etGfttCLOSFNkjyFOuWx0mji6mXoHjk"
     name: "SMM proektlar"
-    qa_only: true
+    pm_kpi: false
+    exclude_tabs: ["Mijozlarning ma'lumot bazasi"]
+    watch_tabs: ["Undiruv <oy>", "Smm main", "Pm proektlar After"]
+    track_other_tabs: true
+    aliases: ["smm", "undiruv", "hoji", "ltv", "sibistoimost", "mijozlar"]
+    key_column:
+      "Undiruv <oy>": "Nomi"
+      "Smm main": "Proektlar nomi"
+      "Pm proektlar After": "Loyihalar"
+    watch: "Undiruv (joriy oy): to'lov muddati o'tgan yoki yaqin, undirilmagan loyihalar PM kesimida; Smm main: proekt holati/narx o'zgarishlari; Pm proektlar After: ball o'zgarishlari."

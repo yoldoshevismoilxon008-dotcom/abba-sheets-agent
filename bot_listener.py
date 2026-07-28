@@ -123,13 +123,14 @@ Qoidalar:
 
 HELP = (
     "🤖 **Abba Sheets Q&A**\n"
-    "Oddiy tilda savol yozing — PM KPI sheet'larining joriy holati asosida "
-    "javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani batafsilroq\" "
-    "kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar (solishtirish, "
-    "trend, oylik natijalar) infografik PDF bo'lib keladi.\n\n"
+    "Oddiy tilda savol yozing — PM KPI va SMM sheet'larining joriy holati "
+    "asosida javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani "
+    "batafsilroq\" kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar "
+    "(solishtirish, trend, oylik natijalar) infografik PDF bo'lib keladi.\n\n"
     "Misollar:\n"
     "• Zubairda Livardi loyihasi bormi?\n"
     "• Islomning oktabrdan iyungacha natijalari qanday?\n"
+    "• Undiruv bo'yicha kimda qancha qoldiq bor?\n"
     "• Kechaga nisbatan nima o'zgardi?\n"
     "• Nega Bekzodning bali tushdi?\n\n"
     "Buyruqlar:\n"
@@ -469,12 +470,21 @@ def sheets_for_question(cfg, q, extra_names=None):
         first = _q_norm(s.get("name", "")).split()[0].replace("'", "") if s.get("name") else ""
         if first and first in qn:
             sel.append(s)
+            continue
+        # config'dagi aliases: savolda shu so'z bo'lsa sheet tanlanadi
+        # (masalan "undiruv qancha?" → SMM proektlar)
+        if any(a and _q_norm(str(a)) in qn for a in (s.get("aliases") or [])):
+            sel.append(s)
     if extra_names:
         for s in cfg:
             if s.get("name") in extra_names and s not in sel:
                 sel.append(s)
-    # Nom aytilmagan umumiy savolda qa_only sheet'lar qo'shilmaydi (PM default)
-    return sel or [s for s in cfg if not s.get("qa_only")] or list(cfg)
+    # Nom/alias aytilmagan umumiy savol — faqat PM KPI sheet'lar (default)
+    return (
+        sel
+        or [s for s in cfg if s.get("pm_kpi", True) and not s.get("qa_only")]
+        or list(cfg)
+    )
 
 
 def months_in_question(q):
@@ -499,9 +509,20 @@ def months_in_question(q):
     return months
 
 
+def tab_month(t):
+    """Tab nomidagi oy so'zi (kanonik), yo'q bo'lsa None.
+    "Undiruv iyul" → iyul; "Hoji mini kpi may(Ball)" → may."""
+    for w in fetchmod.norm(t).split():
+        for alias, canon in fetchmod.MONTH_ALIASES.items():
+            if w == alias or w.startswith(alias + "("):
+                return canon
+    return None
+
+
 def tabs_for_question(tabs, q, extra_tabs=None):
     chosen = list(fetchmod.detect_watch_tabs(tabs))
-    for m in months_in_question(q):
+    q_months = months_in_question(q)
+    for m in q_months:
         plain = [t for t in tabs if fetchmod.norm(t) == m]
         mgr = [t for t in tabs if m in fetchmod.norm(t) and "managerlar" in fetchmod.norm(t)]
         other = [t for t in tabs if m in fetchmod.norm(t) and t not in plain and t not in mgr]
@@ -512,9 +533,17 @@ def tabs_for_question(tabs, q, extra_tabs=None):
         if other:
             chosen.append(other[-1])
     qn = _q_norm(q)
+    cur_month = fetchmod.current_month_name()
     for t in tabs:
         for word in fetchmod.norm(t).split():
             if len(word) >= 5 and word not in fetchmod.MONTHS and word in qn:
+                # Oy-variantli tab guruhlari ("Undiruv iyul", "Hoji mini kpi may"):
+                # keyword mos kelsa ham, faqat savolda aytilgan oy (aytilmasa —
+                # joriy oy) varianti olinadi. Aks holda 12 oylik guruh birdan
+                # kontekstga tushib ketadi (token isrofi).
+                tm = tab_month(t)
+                if tm and tm not in q_months and not (not q_months and tm == cur_month):
+                    break
                 chosen.append(t)
                 break
     if extra_tabs:
@@ -583,12 +612,24 @@ def format_tab(tab, d):
 
 
 def select_from_snapshot(snap, q, extra_tabs):
+    """Qaytaradi: (tabs, sel_tabs, ranges, live_needed) — live_needed:
+    savolga mos, lekin snapshot'da yo'q (exclude_tabs) tab'lar — ular
+    faqat jonli o'qiladi (maxfiy ma'lumot snapshot'ga yozilmaydi)."""
     all_ranges = snap.get("ranges", {})
     by_tab = {fetchmod.tab_of_range(r): r for r in all_ranges}
     tabs = snap.get("tabs") or list(by_tab.keys())
-    sel_tabs = [t for t in tabs_for_question(tabs, q, extra_tabs) if t in by_tab]
+    wanted = tabs_for_question(tabs, q, extra_tabs)
+    if not wanted:
+        # Savolga aniq mos tab chiqmadi — sheet'ning asosiy (watch) tab'lari default
+        wanted = [
+            t for t in (fetchmod.tab_of_range(r) for r in snap.get("watch_ranges", []))
+            if t in by_tab
+        ]
+    excluded = set(snap.get("excluded_tabs") or [])
+    sel_tabs = [t for t in wanted if t in by_tab]
+    live_needed = [t for t in wanted if t in excluded]
     ranges = {by_tab[t]: all_ranges[by_tab[t]] for t in sel_tabs}
-    return tabs, sel_tabs, ranges
+    return tabs, sel_tabs, ranges, live_needed
 
 
 _agg_cache = {}
@@ -646,8 +687,15 @@ def build_data(q, extra_sel=None, force_live=False):
             tabs = [w.title for w in sh.worksheets()]
             _tabs_cache[s["id"]] = (time.time() + TABS_CACHE_TTL, sh, tabs)
         extra_tabs = (extra_sel or {}).get("tabs", {}).get(name)
-        # Watch-tab'siz sheet'da (qa_only) savolga mos tab chiqmasa — birinchi tab
-        sel_tabs = tabs_for_question(tabs, q, extra_tabs) or tabs[:1]
+        sel_tabs = tabs_for_question(tabs, q, extra_tabs)
+        if not sel_tabs:
+            # Savolga mos tab chiqmadi — config'dagi watch tab'lar default,
+            # ular ham bo'lmasa birinchi tab
+            wt = s.get("watch_tabs")
+            if isinstance(wt, list):
+                wanted = {fetchmod.norm(fetchmod.expand_month(w)) for w in wt}
+                sel_tabs = [t for t in tabs if fetchmod.norm(t) in wanted]
+            sel_tabs = sel_tabs or fetchmod.detect_watch_tabs(tabs) or tabs[:1]
         ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(t) for t in sel_tabs], name)
         return tabs, sel_tabs, ranges
 
@@ -661,8 +709,23 @@ def build_data(q, extra_sel=None, force_live=False):
                 live_sheets.append(s)
                 continue
             extra_tabs = (extra_sel or {}).get("tabs", {}).get(s.get("name"))
-            tabs, sel_tabs, ranges = select_from_snapshot(snap, q, extra_tabs)
-            results[s["id"]] = (sel_tabs, ranges, f"snapshot: {snap.get('fetched_at', latest)}")
+            tabs, sel_tabs, ranges, live_needed = select_from_snapshot(snap, q, extra_tabs)
+            tag = f"snapshot: {snap.get('fetched_at', latest)}"
+            if live_needed:
+                # exclude_tabs (masalan parollar tabi) — snapshot'da yo'q,
+                # savolga mos kelgani uchun FAQAT kontekstga jonli o'qiladi
+                name = s.get("name", s["id"])
+                try:
+                    sh = tgc().open_by_key(s["id"])
+                    live = fetchmod.fetch_ranges(
+                        sh, [fetchmod.tab_range(t) for t in live_needed], name
+                    )
+                    ranges.update(live)
+                    sel_tabs = sel_tabs + [t for t in live_needed if t not in sel_tabs]
+                    tag += " + jonli (maxfiy tab)"
+                except Exception as e:
+                    log(f"maxfiy tab jonli o'qilmadi '{name}': {str(e)[:120]}")
+            results[s["id"]] = (sel_tabs, ranges, tag)
     else:
         live_sheets = list(sel_sheets)
     if live_sheets:
@@ -678,7 +741,7 @@ def build_data(q, extra_sel=None, force_live=False):
                     snap = snap_sheets.get(s["id"])
                     if snap:
                         extra_tabs = (extra_sel or {}).get("tabs", {}).get(name)
-                        _tabs, sel_tabs, ranges = select_from_snapshot(snap, q, extra_tabs)
+                        _tabs, sel_tabs, ranges, _live = select_from_snapshot(snap, q, extra_tabs)
                         results[s["id"]] = (
                             sel_tabs, ranges, f"oxirgi snapshot: {latest} — jonli o'qib bo'lmadi"
                         )
@@ -694,13 +757,32 @@ def build_data(q, extra_sel=None, force_live=False):
             parts.append(f"\n=== SHEET: {name} — O'QIB BO'LMADI (zaxira snapshot ham yo'q) ===")
             continue
         sel_tabs, ranges, tag = r
+        snap = snap_sheets.get(s["id"])
+        # Metadata-avval: sheet'ning TO'LIQ tab ro'yxati doim kontekstda —
+        # model qaysi tab'lar mavjudligini bilib, keraklisini so'ray oladi
+        all_tabs = (snap or {}).get("tabs") or []
+        if not all_tabs:
+            ent = _tabs_cache.get(s["id"])
+            all_tabs = ent[2] if ent else []
+        excl = set((snap or {}).get("excluded_tabs") or [])
         block = [
             f"\n=== SHEET: {name} (manba: {tag}) ===\n"
             f"Raw kiritilgan tab'lar: {', '.join(sel_tabs) or '—'}"
         ]
+        if all_tabs:
+            names = " · ".join(
+                t + (" [maxfiy — faqat so'ralganda jonli o'qiladi]" if t in excl else "")
+                for t in all_tabs
+            )
+            block.append(f"Sheet'dagi BARCHA tab'lar ({len(all_tabs)}): {names}")
+        if not sel_tabs:
+            block.append(
+                "(Savolga aniq mos tab topilmadi va default tab'lar ham yo'q — "
+                "foydalanuvchiga yuqoridagi TO'LIQ tab ro'yxatini ko'rsatib, "
+                "qaysi biri kerakligini so'ra.)"
+            )
         for rng in ranges:
             block.append(format_tab(fetchmod.tab_of_range(rng), ranges[rng]))
-        snap = snap_sheets.get(s["id"])
         if snap:
             agg = sheet_aggregates(latest, snap, set(sel_tabs))
             if agg:
@@ -1093,7 +1175,14 @@ def do_hisobot():
         name = s.get("name", s["id"])
         try:
             sh, tabs = sheet_tabs(s)
-            watch_titles = fetchmod.detect_watch_tabs(tabs)
+            # config'dagi eksplitsit watch_tabs (masalan SMM) hurmat qilinadi,
+            # auto bo'lsa avvalgidek Main+joriy oy topiladi
+            wt = s.get("watch_tabs", "auto")
+            if wt in (None, "auto"):
+                watch_titles = fetchmod.detect_watch_tabs(tabs)
+            else:
+                wanted = {fetchmod.norm(fetchmod.expand_month(w)) for w in wt}
+                watch_titles = [t for t in tabs if fetchmod.norm(t) in wanted]
             ranges_keys = [fetchmod.tab_range(t) for t in watch_titles]
             live = fetchmod.fetch_ranges(sh, ranges_keys, name) if ranges_keys else {}
             kc_map = fetchmod.resolve_key_columns(tabs, s.get("key_column", 1))

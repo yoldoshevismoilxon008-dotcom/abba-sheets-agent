@@ -124,11 +124,23 @@ def build_caption(data, title="kunlik KPI hisobot"):
         holat = "✅ Yangi kritik yo'q"
     d = data.get("date", "")
     dd = f"{d[8:10]}.{d[5:7]}.{d[:4]}" if len(d) == 10 else d
+    u = data.get("undiruv") or {}
+    u_line = ""
+    if u.get("kelishilgan"):
+        fmt = lambda v: f"${v:,.0f}".replace(",", " ")
+        u_line = (
+            f"💰 Undiruv ({u.get('oy', '')}): {str(u.get('pct', 0)).replace('.', ',')}% — "
+            f"{fmt(u['undirildi'])} / {fmt(u['kelishilgan'])}"
+        )
+        if u.get("muddat_otgan"):
+            tot = sum(i.get("summa", 0) for i in u["muddat_otgan"])
+            u_line += f" · ⏰ muddat o'tgan: {len(u['muddat_otgan'])} ta ({fmt(tot)})"
     lines = [
         f"📊 {dd} — {title}",
         holat + (f" · 🤝 tan olingan: {len(data['acknowledged'])}" if data.get("acknowledged") else ""),
         " · ".join(f"{p['name']} {p['pct']}%" for p in data.get("pms", [])),
         f"O'zgarishlar: +{t.get('added', 0)} yangi · −{t.get('removed', 0)} o'chgan · ~{t.get('changed', 0)} o'zgargan",
+        u_line,
         "To'liq matn: Obsidian arxivi · /audit · /dashboard",
     ]
     return "\n".join(x for x in lines if x.strip())[:1024]

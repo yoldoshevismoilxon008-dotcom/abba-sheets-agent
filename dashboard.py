@@ -30,6 +30,8 @@ HEADERS_UMUMIY = ["PM", "Aktiv loyihalar", "Jami ideal", "Jami fakt",
 HEADERS_TREND = ["Sana", "PM", "Aktiv", "Jami ideal", "Jami fakt",
                  "Bajarilish %", "Kechikish", "Kritik"]
 HEADERS_AUDIT = ["Sheet", "Tab", "Daraja", "Topilma", "Sana"]
+HEADERS_UNDIRUV = ["PM", "Loyiha", "Kelishilgan $", "Undirildi $", "Qoldiq $",
+                   "To'lov muddati", "Holat"]
 
 
 def log(msg):
@@ -87,6 +89,8 @@ def build(day):
     trend_rows = []
     kpi_prog = []
     for snap in sorted(sheets.values(), key=lambda s: s.get("name", "")):
+        if not snap.get("pm_kpi", True):
+            continue  # SMM kabi sheet'lar PM statistikasiga kirmaydi
         name = snap.get("name", "?")
         st = sheet_stats(snap)
         crit = crit_count.get(name, 0)
@@ -115,6 +119,8 @@ def build(day):
     if len(audit_tab) == 1:
         audit_tab.append(["—", "—", "—", "Muammo topilmadi ✅", day])
 
+    undiruv_tab = build_undiruv(day, now)
+
     kpi_enabled = bool(fetchmod.load_full_config().get("kpi_enabled"))
     kpi_tab = [
         ["KPI QOIDALARI HOLATI", "TASDIQLANGAN" if kpi_enabled else "QORALAMA (kpi_enabled: false)"],
@@ -133,7 +139,53 @@ def build(day):
         ["Yangilangan", time.strftime("%Y-%m-%d %H:%M")],
     ]
 
-    return {"umumiy": umumiy, "trend": trend_rows, "audit": audit_tab, "kpi": kpi_tab}
+    return {"umumiy": umumiy, "trend": trend_rows, "audit": audit_tab, "kpi": kpi_tab,
+            "undiruv": undiruv_tab}
+
+
+def build_undiruv(day, now):
+    """SMM "Undiruv <oy>" tabidan dashboard jadvali. Ma'lumot bo'lmasa None
+    (tab yozilmaydi — mavjud holati saqlanadi)."""
+    import undiruv as undiruvmod
+
+    try:
+        rows, tab = undiruvmod.load_rows(day)
+    except Exception as e:
+        log(f"undiruv o'qilmadi: {e}")
+        return None
+    if not rows:
+        return None
+    today = date.fromisoformat(day)
+
+    def status_label(r):
+        if r["holat"] == "pending" and r["muddat"] and r["muddat"] < today:
+            return "MUDDAT O'TDI 🔴"
+        return undiruvmod.STATUS_LABEL[r["holat"]]
+
+    order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Pauza ⏸": 2, "Ketdi ⛔": 3,
+             "Undirildi ✅": 4}
+    out = [[f"UNDIRUV — {tab}", "", "", "", "", "", ""], list(HEADERS_UNDIRUV)]
+    for r in sorted(rows, key=lambda r: (order.get(status_label(r), 9),
+                                         r["muddat"] or today)):
+        out.append([
+            r["pm"], r["loyiha"],
+            round(r["kelishilgan"]) or "",
+            round(r["undirildi"]) or "",
+            round(r["qoldiq"] or r["aktiv"]) or "",
+            undiruvmod._due_str(r["muddat"]),
+            status_label(r),
+        ])
+    kelishilgan = round(sum(r["qoldiq"] + r["undirildi"] for r in rows))
+    undirildi = round(sum(r["undirildi"] for r in rows))
+    qoldiq = round(sum(r["qoldiq"] for r in rows))
+    aktiv = round(sum(r["aktiv"] for r in rows))
+    pct = f"{undirildi / kelishilgan * 100:.1f}%".replace(".", ",") if kelishilgan else "—"
+    out.append([])
+    out.append(["JAMI (kelishilgan)", "", kelishilgan, undirildi, qoldiq, "", pct])
+    if aktiv:
+        out.append(["Aktiv (ehtimoliy)", "", aktiv, "", aktiv, "", ""])
+    out.append(["Yangilangan", now, "", "", "", "", ""])
+    return out
 
 
 def push(tabs):
@@ -143,6 +195,8 @@ def push(tabs):
     dw.append_rows_idempotent("Trend", list(HEADERS_TREND), tabs["trend"], key_idx=(0, 1))
     dw.overwrite_tab("Audit", tabs["audit"])
     dw.overwrite_tab("KPI", tabs["kpi"])
+    if tabs.get("undiruv"):
+        dw.overwrite_tab("Undiruv", tabs["undiruv"])
     dw.save_state()
 
 
@@ -157,7 +211,9 @@ def main():
         log(f"XATO: build — {e}")
         return 1
     if args.dry_run:
-        for name in ("umumiy", "trend", "audit", "kpi"):
+        for name in ("umumiy", "trend", "audit", "kpi", "undiruv"):
+            if not tabs.get(name):
+                continue
             print(f"\n===== TAB: {name} =====")
             rows = tabs[name] if name != "trend" else [HEADERS_TREND] + tabs[name]
             for r in rows[:25]:
