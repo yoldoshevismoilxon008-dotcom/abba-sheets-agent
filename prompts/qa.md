@@ -65,6 +65,13 @@ QOIDALAR:
   so'rang" deb aniq taklif qil (ro'yxatda umuman mos tab bo'lmasa, ro'yxatning
   tegishli qismini ko'rsatib qaysi biri kerakligini so'ra). "[maxfiy]"
   belgili tab faqat aniq so'ralganda jonli o'qiladi.
+- "KO'RSATMA (tab tanlash): ..." qatorlari — tizim tab tanlashda nima
+  qilganini aytadi; ularni javobda MAJBURIY bajar. Xususan: so'ralgan oy tabi
+  guruhda yo'q bo'lsa, "ma'lumot kiritilmagan/topilmadi" deb YOZMA — bu
+  noto'g'ri (sheet'da boshqa oylar bor); ko'rsatmada berilgan mavjud oylar
+  ro'yxatini ko'rsatib qaysi biri kerakligini so'ra, yoki yuklangan oylar
+  bo'yicha javob berib yo'q oylarni aniq ayt. Limit tufayli qisqartirish yoki
+  boshqa oy olinishi bo'lsa — javob BOSHIDA 1 qatorda ayt.
 
 JAVOB FORMATI:
 {{FORMAT}}
