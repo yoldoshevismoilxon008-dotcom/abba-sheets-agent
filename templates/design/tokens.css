@@ -1,0 +1,43 @@
+/* ============ Abba Report Design System v1 — tokens ============
+   YAGONA MANBA: ranglar, tipografika, spacing, radius, soya.
+   Qiymatlar render_pdf.DESIGN_TOKENS (material|prime) + active_theme
+   overlay'idan Jinja orqali quyiladi. Barcha PDF template'lari shu faylni
+   Jinja include qiladi va var(--...) ishlatadi. */
+:root {
+  /* Palitra (theme = tokens + yaml overlay) */
+  --c-page: {{ theme.page_bg }};
+  --c-surface: {{ design.surface }};
+  --c-surface-alt: {{ design.surface_alt }};
+  --c-text: {{ theme.text }};
+  --c-muted: {{ theme.muted }};
+  --c-border: {{ design.border }};
+  --c-grid: {{ theme.grid_line }};
+  --c-accent: {{ theme.accent }};
+  --c-green: {{ theme.kpi_green }};
+  --c-amber: {{ theme.kpi_yellow }};
+  --c-orange: {{ theme.kpi_orange }};
+  --c-red: {{ theme.kpi_red }};
+  /* Header (Prime'da to'q navy, Material'da oq) */
+  --header-bg: {{ design.header_bg }};
+  --header-text: {{ design.header_text }};
+  --header-sub: {{ design.header_sub }};
+  /* KPI qiymat rangi (Prime: Amazon orange; bo'sh bo'lsa semantik rang) */
+  --kpi-value: {{ design.kpi_value_color or theme.text }};
+  /* Chip'lar (Material chip uslubi) */
+  --chip-red-bg: {{ design.chip_red_bg }};
+  --chip-red-text: {{ design.chip_red_text }};
+  --chip-amber-bg: {{ design.chip_amber_bg }};
+  --chip-amber-text: {{ design.chip_amber_text }};
+  --chip-green-bg: {{ design.chip_green_bg }};
+  --chip-green-text: {{ design.chip_green_text }};
+  /* Geometriya — 8px grid (~2.1mm) */
+  --sp-1: 2.1mm; --sp-05: 1mm; --sp-2: 4.2mm; --sp-3: 6.3mm;
+  --radius: {{ design.radius }};
+  --radius-sm: {{ design.radius_sm }};
+  --shadow: {{ design.shadow }};
+  /* Jadval zichligi (Prime Dense: 14px qator) */
+  --row-h: {{ design.row_h }};
+  --table-font: {{ design.table_font }};
+  --font: {{ theme.font|safe }};
+}
+* { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

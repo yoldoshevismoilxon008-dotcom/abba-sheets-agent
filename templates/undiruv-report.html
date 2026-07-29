@@ -3,56 +3,98 @@
 <head>
 <meta charset="utf-8">
 <style>
+{% include "design/tokens.css" %}
   @page { size: A4; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 210mm; }
-  body {
-    font-family: {{ theme.font|safe }};
-    color: {{ theme.text }}; background: {{ theme.page_bg }}; padding: 8mm 10mm 6mm;
-  }
-  .muted { color: {{ theme.muted }}; }
-  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4mm; }
+  body { font-family: var(--font); color: var(--c-text); background: var(--c-page); }
+  .muted { color: var(--c-muted); }
+
+  /* Header band (Prime'da navy, Material'da oq) */
+  .header { background: var(--header-bg); color: var(--header-text);
+            padding: 5mm 10mm 4.5mm; display: flex; justify-content: space-between;
+            align-items: center; }
   .header .brand { display: flex; align-items: center; gap: 3.5mm; }
-  .header .brand img { height: 9mm; max-width: 40mm; object-fit: contain; }
-  .header h1 { font-size: 18px; font-weight: 700; }
-  .header .sub { font-size: 10.5px; margin-top: 0.8mm; }
-  .badge { font-size: 12px; font-weight: 700; padding: 2.2mm 4mm; border-radius: 6mm; color: #fff; }
-  .badge.bad { background: {{ theme.badge_bad }}; }
-  .badge.ok { background: {{ theme.badge_ok }}; }
-  .panel { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
-           box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
-  .kpis { display: flex; gap: 7mm; }
-  .kpis .k .l { font-size: 8px; color: {{ theme.muted }}; text-transform: uppercase; letter-spacing: .04em; }
-  .kpis .k .v { font-size: 17px; font-weight: 800; }
-  .c-green { color: {{ theme.kpi_green }}; } .c-orange { color: {{ theme.kpi_orange }}; }
-  .c-red { color: {{ theme.kpi_red }}; } .c-accent { color: {{ theme.accent }}; }
-  .counts { font-size: 9.5px; color: {{ theme.muted }}; margin-top: 2mm; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
-  .pm { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3mm 3.5mm 2.5mm;
-        box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }};
+  .header .brand img { height: 9mm; max-width: 42mm; object-fit: contain; }
+  .header h1 { font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
+  .header .sub { font-size: 9.5px; margin-top: 1mm; color: var(--header-sub); }
+  .chips { display: flex; gap: 2.5mm; }
+  .chip { font-size: 9.5px; font-weight: 700; padding: 1.8mm 3.4mm;
+          border-radius: 8mm; white-space: nowrap; }
+  .chip.red { background: var(--chip-red-bg); color: var(--chip-red-text); }
+  .chip.amber { background: var(--chip-amber-bg); color: var(--chip-amber-text); }
+  .chip.green { background: var(--chip-green-bg); color: var(--chip-green-text); }
+
+  .wrap { padding: var(--sp-2) 10mm 4mm; }
+
+  /* KPI panel — 5 alohida elevation karta + progress */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3mm;
+          margin-bottom: var(--sp-2); }
+  .kpi { background: var(--c-surface); border-radius: var(--radius);
+         box-shadow: var(--shadow); padding: 2.8mm 3.2mm 2.4mm; }
+  .kpi .l { font-size: 7.6px; color: var(--c-muted); text-transform: uppercase;
+            letter-spacing: .06em; font-weight: 600; margin-bottom: 1mm; }
+  .kpi .v { font-size: 21px; font-weight: 800; letter-spacing: -.02em;
+            color: var(--kpi-value); }
+  .kpi .s { font-size: 7.8px; color: var(--c-muted); margin-top: 0.8mm; }
+  .kpi .v.green { color: var(--c-green); } .kpi .v.amber { color: var(--c-amber); }
+  .kpi .v.red { color: var(--c-red); } .kpi .v.plain { color: var(--c-text); }
+  .progress { grid-column: 1 / -1; background: var(--c-surface);
+              border-radius: var(--radius); box-shadow: var(--shadow);
+              padding: 2.2mm 3.2mm; }
+  .progress .row { display: flex; justify-content: space-between;
+                   font-size: 8px; color: var(--c-muted); margin-bottom: 1.2mm; }
+  .progress .track { height: 2.2mm; background: var(--c-grid);
+                     border-radius: 2mm; overflow: hidden; }
+  .progress .fill { height: 100%; border-radius: 2mm; background: var(--c-green); }
+
+  /* PM kartalar — 2x2, zebra jadval */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; }
+  .pm { background: var(--c-surface); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 2.6mm 3.2mm 2.2mm;
         page-break-inside: avoid; }
-  .pm .top { display: flex; justify-content: space-between; align-items: baseline;
-             border-bottom: 0.4mm solid {{ theme.bar_track }}; padding-bottom: 1.6mm; margin-bottom: 1.6mm; }
-  .pm .name { font-size: 12.5px; font-weight: 700; }
-  .pm .tot { font-size: 10px; font-weight: 700; color: {{ theme.kpi_orange }}; }
+  .pm .top { display: flex; justify-content: space-between; align-items: center;
+             padding-bottom: 1.6mm; margin-bottom: 1.2mm;
+             border-bottom: 0.35mm solid var(--c-border); }
+  .pm .name { font-size: 12px; font-weight: 800; }
+  .badge { font-size: 8.4px; font-weight: 700; padding: 1.2mm 2.6mm;
+           border-radius: var(--radius-sm); }
+  .badge.red { background: var(--chip-red-bg); color: var(--chip-red-text); }
+  .badge.amber { background: var(--chip-amber-bg); color: var(--chip-amber-text); }
+  .badge.green { background: var(--chip-green-bg); color: var(--chip-green-text); }
   table { width: 100%; border-collapse: collapse; }
-  td { font-size: 8.8px; padding: 0.9mm 1mm; border-bottom: 0.25mm solid {{ theme.grid_line }};
-       vertical-align: top; }
+  td { font-size: var(--table-font); height: var(--row-h);
+       padding: 0.6mm 1.2mm; vertical-align: middle;
+       border-bottom: 0.2mm solid var(--c-grid); }
+  tr:nth-child(even) td { background: var(--c-surface-alt); }
   tr:last-child td { border-bottom: none; }
-  td.sum { text-align: right; font-weight: 600; white-space: nowrap; }
-  td.sum .src { font-weight: 400; font-size: 7.5px; color: {{ theme.muted }}; }
-  td.due { white-space: nowrap; color: {{ theme.muted }}; }
-  td.st { white-space: nowrap; text-align: right; }
-  tr.overdue td.st { color: {{ theme.kpi_red }}; font-weight: 700; }
-  tr.soon td.st { color: {{ theme.kpi_orange }}; font-weight: 600; }
-  tr.nodate td.st, tr.future td.st { color: {{ theme.muted }}; }
-  .pm .paid { font-size: 8.8px; color: {{ theme.kpi_green }}; margin-top: 1.6mm; font-weight: 600; }
-  .pm .none { font-size: 9.5px; color: {{ theme.kpi_green }}; font-weight: 600; }
-  .push-info { margin-top: 4mm; }
-  .push-info h3 { font-size: 10.5px; font-weight: 700; color: {{ theme.accent }}; margin-bottom: 1.6mm; }
-  .push-info div { font-size: 9.3px; line-height: 1.55; }
-  .footer { display: flex; justify-content: space-between; font-size: 8.5px;
-            color: {{ theme.muted }}; margin-top: 4mm; }
+  td.sum { text-align: right; font-weight: 700; white-space: nowrap; }
+  td.due { white-space: nowrap; color: var(--c-muted); }
+  td.st { white-space: nowrap; text-align: right; font-weight: 600; }
+  tr.overdue td.st { color: var(--c-red); font-weight: 800; }
+  tr.soon td.st { color: var(--c-amber); }
+  tr.nodate td.st, tr.future td.st { color: var(--c-muted); font-weight: 400; }
+  .pm .paid { font-size: 8.2px; color: var(--c-green); margin-top: 1.4mm;
+              font-weight: 700; }
+  .pm .paid::before { content: "✓ "; }
+  .pm .none { font-size: 9px; color: var(--c-green); font-weight: 700; padding: 1mm 0; }
+
+  /* Aktiv obuna — chap ko'k border-left karta */
+  .aktiv { background: var(--c-surface); border-radius: var(--radius);
+           box-shadow: var(--shadow); border-left: 1.2mm solid var(--c-accent);
+           padding: 2.4mm 3.2mm; margin-top: 3mm; }
+  .aktiv h3 { font-size: 9.5px; font-weight: 800; color: var(--c-accent);
+              margin-bottom: 1.2mm; }
+  .aktiv td:first-child { font-weight: 700; width: 22mm; }
+
+  .push-info { background: var(--c-surface); border-radius: var(--radius);
+               box-shadow: var(--shadow); padding: 2.4mm 3.2mm; margin-top: 3mm; }
+  .push-info h3 { font-size: 9.5px; font-weight: 800; color: var(--c-accent);
+                  margin-bottom: 1.2mm; }
+  .push-info div { font-size: 8.6px; line-height: 1.55; }
+
+  .footer { display: flex; justify-content: space-between; font-size: 8px;
+            color: var(--c-muted); padding: 2.5mm 10mm 4mm; }
 </style>
 </head>
 <body>
@@ -62,75 +104,86 @@
     {% if logo_uri %}<img src="{{ logo_uri }}" alt="logo">{% endif %}
     <div>
       <h1>💰 Undiruv — {{ oy_title }}</h1>
-      <div class="sub muted">{{ date_human }}{% if data.source %} · {{ data.source }}{% endif %} · {{ data.tab }}</div>
+      <div class="sub">{{ date_human }}{% if data.source %} · {{ data.source }}{% endif %} · {{ data.tab }}</div>
     </div>
   </div>
-  {% if overdue_n %}<div class="badge bad">🔴 {{ overdue_n }} muddat o'tgan · {{ overdue_sum }}</div>
-  {% else %}<div class="badge ok">✅ Muddat o'tgan yo'q</div>{% endif %}
+  <div class="chips">
+    {% if overdue_n %}<span class="chip red">🔴 muddat o'tgan {{ overdue_n }} · {{ overdue_sum }}</span>{% endif %}
+    {% if soon_n %}<span class="chip amber">⏳ yaqin {{ soon_n }} · {{ soon_sum }}</span>{% endif %}
+    {% if not overdue_n and not soon_n %}<span class="chip green">✓ dolzarb qarz yo'q</span>{% endif %}
+  </div>
 </div>
 
-<div class="panel">
+<div class="wrap">
   <div class="kpis">
-    <div class="k"><div class="l">Kelishilgan</div><div class="v c-accent">{{ t.kelishilgan_d }}</div></div>
-    <div class="k"><div class="l">Undirildi</div><div class="v c-green">{{ t.undirildi_d }}</div></div>
-    <div class="k"><div class="l">Bajarilish</div><div class="v">{{ t.pct_d }}%</div></div>
-    <div class="k"><div class="l">Qoldiq</div><div class="v c-orange">{{ t.qoldiq_d }}</div></div>
-    {% if data.totals.aktiv %}<div class="k"><div class="l">Aktiv obuna</div><div class="v muted">{{ t.aktiv_d }}</div></div>{% endif %}
-  </div>
-  <div class="counts">Loyihalar: {{ data.counts.jami }} ta · ✅ to'langan {{ data.counts.paid }} ·
-    ⛔ ketgan {{ data.counts.ketdi }} · ⏸ pauza {{ data.counts.pauza }}</div>
-</div>
-
-<div class="grid">
-  {% for pm in data.pms %}
-  <div class="pm">
-    <div class="top">
-      <span class="name">{{ pm.name }}</span>
-      {% if pm.n %}<span class="tot">undirilmagan {{ pm.n }} ta · {{ pm.sum_d }}</span>
-      {% else %}<span class="tot c-green">undirilmagan yo'q</span>{% endif %}
+    <div class="kpi"><div class="l">Kelishilgan</div><div class="v">{{ t.kelishilgan_d }}</div>
+      <div class="s">{{ data.counts.jami }} loyiha</div></div>
+    <div class="kpi"><div class="l">Undirildi</div><div class="v green">{{ t.undirildi_d }}</div>
+      <div class="s">✓ to'langan {{ data.counts.paid }} ta</div></div>
+    <div class="kpi"><div class="l">Bajarilish</div><div class="v {{ pct_class }}">{{ t.pct_d }}%</div>
+      <div class="s">undirildi / kelishilgan</div></div>
+    <div class="kpi"><div class="l">Qoldiq</div><div class="v {{ 'plain' if not data.totals.qoldiq else 'amber' }}">{{ t.qoldiq_d }}</div>
+      <div class="s">shu oy so'raladi</div></div>
+    <div class="kpi"><div class="l">Aktiv obuna</div><div class="v plain">{{ t.aktiv_d }}</div>
+      <div class="s">oldindan to'langan</div></div>
+    <div class="progress">
+      <div class="row"><span>Undiruv jarayoni</span>
+        <span>{{ t.undirildi_d }} / {{ t.kelishilgan_d }} · ketgan {{ data.counts.ketdi }} · pauza {{ data.counts.pauza }}</span></div>
+      <div class="track"><div class="fill" style="width: {{ [data.totals.pct, 100]|min }}%"></div></div>
     </div>
-    {% if pm["items"] %}
+  </div>
+
+  <div class="grid">
+    {% for pm in data.pms %}
+    <div class="pm">
+      <div class="top">
+        <span class="name">{{ pm.name }}</span>
+        {% if pm.n %}<span class="badge {{ 'red' if pm.has_overdue else 'amber' }}">undirilmagan {{ pm.n }} · {{ pm.sum_d }}</span>
+        {% else %}<span class="badge green">✓ qarz yo'q</span>{% endif %}
+      </div>
+      {% if pm["items"] %}
+      <table>
+        {% for i in pm["items"] %}
+        <tr class="{{ i.status }}">
+          <td>{{ i.loyiha }}{% if i.pauza %} ⏸{% endif %}</td>
+          <td class="sum">{{ i.summa_d }}</td>
+          <td class="due">{{ i.muddat }}</td>
+          <td class="st">{{ i.st_label }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}<div class="none">Barcha loyihalar yopilgan</div>{% endif %}
+      {% if pm.paid_n %}<div class="paid">to'langan: {{ pm.paid_n }} ta, {{ pm.paid_sum_d }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if aktiv_obuna and aktiv_obuna.n %}
+  <div class="aktiv">
+    <h3>💳 Aktiv obuna — oldindan to'langan, so'ralmaydi ({{ aktiv_obuna.n }} loyiha · {{ aktiv_obuna.sum_d }})</h3>
     <table>
-      {% for i in pm["items"] %}
-      <tr class="{{ i.status }}">
-        <td>{{ i.loyiha }}{% if i.pauza %} ⏸{% endif %}</td>
-        <td class="sum">{{ i.summa_d }}</td>
-        <td class="due">{{ i.muddat }}</td>
-        <td class="st">{{ i.st_label }}</td>
+      {% for p in aktiv_obuna.pms %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ p.loyihalar|join(" · ") }}</td>
+        <td class="sum">{{ p.sum_d }} <span class="muted" style="font-weight:400">{{ p.n }} ta</span></td>
       </tr>
       {% endfor %}
     </table>
-    {% else %}<div class="none">Barcha loyihalar yopilgan ✅</div>{% endif %}
-    {% if pm.paid_n %}<div class="paid">✅ to'langan: {{ pm.paid_n }} ta, {{ pm.paid_sum_d }}</div>{% endif %}
   </div>
-  {% endfor %}
-</div>
+  {% endif %}
 
-{% if aktiv_obuna and aktiv_obuna.n %}
-<div class="panel push-info" style="margin-top: 4mm;">
-  <h3>💳 Aktiv obuna — oldindan to'langan, so'ralmaydi ({{ aktiv_obuna.n }} loyiha · {{ aktiv_obuna.sum_d }})</h3>
-  <table>
-    {% for p in aktiv_obuna.pms %}
-    <tr>
-      <td style="width: 22mm; font-weight: 600;">{{ p.name }}</td>
-      <td>{{ p.loyihalar|join(" · ") }}</td>
-      <td class="sum">{{ p.sum_d }} <span class="src">{{ p.n }} ta</span></td>
-    </tr>
-    {% endfor %}
-  </table>
+  {% if push_info %}
+  <div class="push-info">
+    <h3>📤 Push jamlamasi</h3>
+    <div>{% for line in push_info %}{{ line }}<br>{% endfor %}</div>
+  </div>
+  {% endif %}
 </div>
-{% endif %}
-
-{% if push_info %}
-<div class="panel push-info">
-  <h3>📤 Push jamlamasi</h3>
-  <div>{% for line in push_info %}{{ line }}<br>{% endfor %}</div>
-</div>
-{% endif %}
 
 <div class="footer">
   <span>Manba: {{ data.source or "snapshot" }} · abba-sheets-agent</span>
-  <span>{{ theme.name }} · {{ generated_at }}</span>
+  <span>{{ design.name }} · {{ theme.name }} · {{ generated_at }}</span>
 </div>
 
 </body>

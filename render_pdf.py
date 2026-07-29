@@ -36,22 +36,99 @@ CHROME_CANDIDATES = [
 ]
 BRAND = DATA / "brand"
 THEMES_DIR = BRAND / "themes"
+DESIGN_CONFIG = DATA / "design_config.json"
 
-# To'liq default theme — yaml yetishmagan kalitlar shu yerdan to'ldiriladi
-DEFAULT_THEME = {
-    "name": "default",
-    "style_notes": "",
-    "font": '-apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif',
-    "page_bg": "#f4f6f9", "card_bg": "#ffffff",
-    "text": "#1a1d21", "muted": "#6b7480", "accent": "#3b6fe0",
-    "radius": "3mm",
-    "card_shadow": "0 0.5mm 2mm rgba(20,30,50,.08)", "card_border": "none",
-    "badge_ok": "#1e9e56", "badge_bad": "#d93025", "badge_quiet": "#5f6b7a",
-    "kpi_green": "#1e9e56", "kpi_yellow": "#c8a400",
-    "kpi_orange": "#e8710a", "kpi_red": "#d93025",
-    "bar_track": "#e8ecf1", "grid_line": "#eef1f5",
-    "line_colors": ["#3b6fe0", "#d93025", "#e8a400", "#1e9e56"],
+# ============ Abba Report Design System v1 ============
+# tokens.css (templates/design/) barcha PDF template'lariga include qilinadi;
+# qiymatlar quyidagi token to'plamlaridan (Jinja orqali) quyiladi.
+# active_theme (data/brand/themes/*.yaml) mexanizmi SAQLANADI — u tokens
+# ustiga overlay bo'ladi (masalan abba brend-rang accent'i).
+DESIGN_TOKENS = {
+    # (A) Google Material 3 uslubi — oq/och fon, Google Blue, yumshoq elevation
+    "material": {
+        "name": "Material Light",
+        "font": "'Inter', 'Roboto', -apple-system, 'Helvetica Neue', Arial, sans-serif",
+        "page_bg": "#F8F9FA", "surface": "#FFFFFF", "surface_alt": "#FAFAFA",
+        "text": "#1F1F1F", "muted": "#5F6368", "border": "#DADCE0", "grid": "#E8EAED",
+        "accent": "#1A73E8", "green": "#188038", "amber": "#F29900",
+        "orange": "#E37400", "red": "#D93025",
+        "header_bg": "#FFFFFF", "header_text": "#1F1F1F", "header_sub": "#5F6368",
+        "kpi_value_color": "",  # bo'sh — semantik rang KPI'da qoladi
+        "chip_red_bg": "#FCE8E6", "chip_red_text": "#C5221F",
+        "chip_amber_bg": "#FEF7E0", "chip_amber_text": "#A56500",
+        "chip_green_bg": "#E6F4EA", "chip_green_text": "#137333",
+        "radius": "3.2mm", "radius_sm": "2mm",
+        "shadow": "0 0.3mm 0.6mm rgba(60,64,67,.3), 0 0.3mm 1mm 0.3mm rgba(60,64,67,.15)",
+        "row_h": "16px", "table_font": "9px",
+        "line_colors": ["#1A73E8", "#D93025", "#F29900", "#188038"],
+    },
+    # (B) Amazon Prime data-density — navy header, orange faqat KPI raqamlarda,
+    # zich jadval
+    "prime": {
+        "name": "Prime Dense",
+        "font": "'Inter', 'Amazon Ember', -apple-system, Arial, sans-serif",
+        "page_bg": "#FFFFFF", "surface": "#FFFFFF", "surface_alt": "#F7F8F8",
+        "text": "#0F1111", "muted": "#565959", "border": "#D5D9D9", "grid": "#E7E9E9",
+        "accent": "#146EB4", "green": "#067D62", "amber": "#C7511F",
+        "orange": "#C7511F", "red": "#B12704",
+        "header_bg": "#232F3E", "header_text": "#FFFFFF", "header_sub": "#B0B8C1",
+        "kpi_value_color": "#FF9900",  # Amazon orange — FAQAT KPI raqamlarda
+        "chip_red_bg": "#FDEBE7", "chip_red_text": "#B12704",
+        "chip_amber_bg": "#FDF3E7", "chip_amber_text": "#C7511F",
+        "chip_green_bg": "#E7F4F1", "chip_green_text": "#067D62",
+        "radius": "2mm", "radius_sm": "1.2mm",
+        "shadow": "0 0.2mm 0.8mm rgba(15,17,17,.16)",
+        "row_h": "14px", "table_font": "8.6px",
+        "line_colors": ["#FF9900", "#146EB4", "#067D62", "#B12704"],
+    },
 }
+
+
+def design_mode():
+    """Tanlangan token to'plami (default: material). /dizayn tema ... bilan
+    almashtiriladi, DATA/design_config.json'da saqlanadi (volume)."""
+    try:
+        m = json.loads(DESIGN_CONFIG.read_text(encoding="utf-8")).get("mode", "")
+        if m in DESIGN_TOKENS:
+            return m
+    except Exception:
+        pass
+    return "material"
+
+
+def set_design_mode(mode):
+    if mode not in DESIGN_TOKENS:
+        return False
+    DESIGN_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    DESIGN_CONFIG.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+    return True
+
+
+def design_tokens(mode=None):
+    return dict(DESIGN_TOKENS[mode or design_mode()])
+
+
+def _tokens_as_theme(t):
+    """Token to'plami → mavjud theme kalitlari (daily/qa template'lari uchun) —
+    ular kod o'zgarishisiz yangi dizayn-tizimda chiqadi."""
+    return {
+        "name": t["name"],
+        "style_notes": "",
+        "font": t["font"],
+        "page_bg": t["page_bg"], "card_bg": t["surface"],
+        "text": t["text"], "muted": t["muted"], "accent": t["accent"],
+        "radius": t["radius"],
+        "card_shadow": t["shadow"], "card_border": "none",
+        "badge_ok": t["green"], "badge_bad": t["red"], "badge_quiet": t["muted"],
+        "kpi_green": t["green"], "kpi_yellow": t["amber"],
+        "kpi_orange": t["orange"], "kpi_red": t["red"],
+        "bar_track": t["grid"], "grid_line": t["grid"],
+        "line_colors": list(t["line_colors"]),
+    }
+
+
+# Legacy fallback — endi tokens'dan quriladi (Material default)
+DEFAULT_THEME = _tokens_as_theme(DESIGN_TOKENS["material"])
 
 
 def active_theme_name():
@@ -65,11 +142,13 @@ def active_theme_name():
 
 
 def load_theme(name=None):
-    """(theme_dict, nomi). Yaml yo'q/buzuq bo'lsa — default."""
+    """(theme_dict, nomi). Baza — tanlangan dizayn-tizim tokenlari
+    (design_config.json: material|prime); ustiga active_theme yaml OVERLAY
+    bo'ladi (brend rang moslash). Yaml yo'q/buzuq bo'lsa — sof tokens."""
     import yaml
 
     name = name or active_theme_name()
-    theme = dict(DEFAULT_THEME)
+    theme = _tokens_as_theme(design_tokens())
     p = THEMES_DIR / f"{name}.yaml"
     if p.exists():
         try:
@@ -85,15 +164,19 @@ def load_theme(name=None):
     return theme, name
 
 
-def logo_data_uri():
-    """data/brand/logo.* → base64 data URI (draft emas — faqat tasdiqlangan)."""
+def logo_data_uri(variant=None):
+    """data/brand/logo.* → base64 data URI (draft emas — faqat tasdiqlangan).
+    variant="light": to'q fon uchun oq logo (logo-light.*), yo'q bo'lsa oddiy."""
     import base64
 
-    for ext, mime in (("png", "image/png"), ("svg", "image/svg+xml"),
-                      ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("webp", "image/webp")):
-        p = BRAND / f"logo.{ext}"
-        if p.exists():
-            return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
+    names = [f"logo-{variant}"] if variant else []
+    names.append("logo")
+    for nm in names:
+        for ext, mime in (("png", "image/png"), ("svg", "image/svg+xml"),
+                          ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("webp", "image/webp")):
+            p = BRAND / f"{nm}.{ext}"
+            if p.exists():
+                return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
     return ""
 
 WEEKDAYS = ["dushanba", "seshanba", "chorshanba", "payshanba", "juma", "shanba", "yakshanba"]
@@ -176,6 +259,7 @@ def build_html(data, theme=None, logo_uri=None):
     return tpl.render(
         pms=pms,
         theme=theme,
+        design=design_tokens(),
         logo_uri=logo_uri if logo_uri is not None else logo_data_uri(),
         totals=data.get("totals", {}),
         new_criticals=data.get("new_criticals", []),
@@ -202,16 +286,21 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         theme, _ = load_theme()
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
     tpl = env.get_template("undiruv-report.html")
+    design = design_tokens()
     usd = lambda v: f"${v:,.0f}".replace(",", " ")
     t = dict(data.get("totals", {}))
     t_disp = {k + "_d": usd(t.get(k, 0)) for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv")}
     t_disp["pct_d"] = str(t.get("pct", 0)).replace(".", ",")
+    pct = float(t.get("pct", 0) or 0)
+    pct_class = "green" if pct >= 85 else ("amber" if pct >= 70 else "red")
     pms = []
     overdue_n, overdue_sum = 0, 0
+    soon_n, soon_sum = 0, 0
     for pm in data.get("pms", []):
         pm = dict(pm)
         pm["sum_d"] = usd(pm.get("sum", 0))
         pm["paid_sum_d"] = usd(pm.get("paid_sum", 0))
+        pm["has_overdue"] = any(i.get("status") == "overdue" for i in pm.get("items", []))
         items = []
         for i in pm.get("items", []):
             i = dict(i)
@@ -223,6 +312,8 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
                 overdue_sum += i.get("summa", 0)
             elif st == "soon":
                 i["st_label"] = "⏳ bugun" if kun == 0 else f"⏳ {kun} kun qoldi"
+                soon_n += 1
+                soon_sum += i.get("summa", 0)
             elif st == "future":
                 i["st_label"] = f"📅 {kun} kun"
             else:
@@ -235,15 +326,23 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
     if ao.get("n"):
         ao = dict(ao, sum_d=usd(ao.get("sum", 0)),
                   pms=[dict(p, sum_d=usd(p.get("sum", 0))) for p in ao.get("pms", [])])
+    if logo_uri is None:
+        # Prime'da header navy — to'q fon uchun oq logo varianti (bo'lsa)
+        logo_uri = logo_data_uri("light" if design.get("header_bg", "").lower() not in
+                                 ("#ffffff", "#fff", "") else None)
     return tpl.render(
         data=d,
         t=t_disp,
         theme=theme,
-        logo_uri=logo_uri if logo_uri is not None else logo_data_uri(),
+        design=design,
+        logo_uri=logo_uri,
         oy_title=str(data.get("oy", "?")).capitalize(),
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,
         overdue_sum=usd(overdue_sum),
+        soon_n=soon_n,
+        soon_sum=usd(soon_sum),
+        pct_class=pct_class,
         aktiv_obuna=ao if ao.get("n") else None,
         push_info=data.get("push_info") or [],
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -445,6 +544,7 @@ def build_qa_html(data, theme=None, logo_uri=None):
     q = str(data.get("question", "")).strip()
     return tpl.render(
         theme=theme,
+        design=design_tokens(),
         logo_uri=logo_uri if logo_uri is not None else logo_data_uri(),
         title=str(data.get("title") or "Savol-javob")[:90],
         summary=str(data.get("summary", "")).strip()[:600],

@@ -1680,7 +1680,27 @@ def handle_update(upd):
             send_retry(f"«{key}» allaqachon tan olingan.", attempts=2)
         return "ack-add"
     if low.startswith("/dizayn"):
-        return do_dizayn(text[len("/dizayn"):].strip())
+        arg = text[len("/dizayn"):].strip()
+        # Dizayn-tizim temasi: /dizayn tema material | /dizayn tema prime
+        if arg.lower().startswith("tema"):
+            import render_pdf
+
+            parts = arg.split()
+            mode = parts[1].lower() if len(parts) > 1 else ""
+            if render_pdf.set_design_mode(mode):
+                nm = render_pdf.DESIGN_TOKENS[mode]["name"]
+                send_retry(
+                    f"🎨 Dizayn-tizim: **{nm}** tanlandi — keyingi BARCHA PDF'lar "
+                    "(kunlik, undiruv, Q&A) shu temada chiqadi.", attempts=2,
+                )
+            else:
+                cur = render_pdf.design_mode()
+                send_retry(
+                    f"Joriy tema: {render_pdf.DESIGN_TOKENS[cur]['name']}.\n"
+                    "Variantlar: /dizayn tema material · /dizayn tema prime", attempts=2,
+                )
+            return "design-mode"
+        return do_dizayn(arg)
     if low.startswith("/dashboard"):
         import dashboard_writer as dw
 
