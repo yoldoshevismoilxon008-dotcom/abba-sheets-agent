@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """BIR MARTALIK lokal login (Mac): eganing Telegram akkaunti uchun Telethon
-session yaratadi — keyin base64 qilib Railway'ga TG_SESSION_B64 qilib qo'yiladi.
+StringSession yaratadi (~350 belgi — Railway env limitiga bemalol sig'adi).
+Satr EKRANGA CHIQMAYDI — to'g'ridan clipboard'ga (pbcopy).
 
 Ishlatish:
   venv/bin/python scripts/tg_login.py
@@ -8,15 +9,11 @@ Ishlatish:
    development tools'dan olinadi)
 
 Hamma so'rovlar OCHIQ input (getpass YO'Q) — telefon, SMS kod, 2FA parol.
-Session fayl: shu papkada undiruv_user.session
+So'ng Railway → Variables → TG_SESSION_STRING = (paste).
 """
-import base64
 import os
+import subprocess
 import sys
-from pathlib import Path
-
-HERE = Path(__file__).resolve().parent
-SESSION = HERE / "undiruv_user.session"
 
 
 def ask(prompt, env=None):
@@ -29,6 +26,7 @@ def ask(prompt, env=None):
 
 def main():
     try:
+        from telethon.sessions import StringSession
         from telethon.sync import TelegramClient
     except ImportError:
         print("XATO: telethon yo'q — avval: venv/bin/pip install telethon")
@@ -38,7 +36,7 @@ def main():
     api_hash = ask("TG_API_HASH", "TG_API_HASH")
     phone = ask("Telefon (masalan +99890...)")
 
-    client = TelegramClient(str(SESSION), int(api_id), api_hash,
+    client = TelegramClient(StringSession(), int(api_id), api_hash,
                             device_model="abba-sheets-agent", system_version="railway")
     # Kod va 2FA parol — OCHIQ input (foydalanuvchi talabi: getpass yo'q)
     client.start(
@@ -47,13 +45,16 @@ def main():
         password=lambda: input("2FA parol (bo'lmasa Enter): ").strip(),
     )
     me = client.get_me()
+    s = client.session.save()
     client.disconnect()
-    print(f"\n✅ Session yaratildi: {SESSION}")
-    print(f"   Akkaunt: {me.first_name} (@{me.username or '—'}, id {me.id})")
-    print("\nKEYINGI QADAM — session'ni base64 qilib clipboard'ga oling:\n")
-    print(f"  base64 -i {SESSION} | pbcopy\n")
-    print("So'ng Railway → Variables: TG_SESSION_B64 = (paste), TG_API_ID, TG_API_HASH.")
-    print(f"(b64 hajmi ≈ {len(base64.b64encode(SESSION.read_bytes())) // 1024} KB — bitta env sig'adi)")
+    print(f"\n✅ Login muvaffaqiyatli: {me.first_name} (@{me.username or '—'}, id {me.id})")
+    try:
+        subprocess.run(["pbcopy"], input=s.encode(), check=True)
+        print(f"OK — StringSession clipboard'ga ko'chirildi ({len(s)} belgi)")
+    except Exception as e:
+        print(f"XATO: pbcopy ishlamadi ({e}) — satr ko'rsatilmadi (xavfsizlik).")
+        return 1
+    print("Endi: Railway → Variables: TG_SESSION_STRING = ⌘V, TG_API_ID, TG_API_HASH.")
     return 0
 
 

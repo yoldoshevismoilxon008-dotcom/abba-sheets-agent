@@ -53,6 +53,29 @@ def ensure_session():
         return False
 
 
+def _session_string():
+    return os.environ.get("TG_SESSION_STRING", "").strip()
+
+
+def _make_session():
+    """Ustuvorlik: TG_SESSION_STRING (StringSession, ~350 belgi — Railway env
+    limitiga sig'adi) → fallback: fayl-session (TG_SESSION_B64/volume)."""
+    s = _session_string()
+    if s:
+        from telethon.sessions import StringSession
+
+        try:
+            return StringSession(s)
+        except Exception as e:
+            raise SessionInvalid(f"TG_SESSION_STRING buzuq: {str(e)[:80]} — "
+                                 "scripts/tg_to_string.py bilan qayta oling")
+    if ensure_session():
+        return str(SESSION)
+    raise SessionInvalid(
+        "session yo'q (TG_SESSION_STRING berilmagan) — scripts/tg_login.py bilan yarating"
+    )
+
+
 def available():
     """(True, "") yoki (False, sabab) — yuborishdan oldin tekshiruv."""
     try:
@@ -61,8 +84,10 @@ def available():
         return False, "telethon o'rnatilmagan"
     if not (os.environ.get("TG_API_ID") and os.environ.get("TG_API_HASH")):
         return False, "TG_API_ID/TG_API_HASH env yo'q"
-    if not ensure_session():
-        return False, "session yo'q (TG_SESSION_B64 berilmagan) — scripts/tg_login.py bilan yarating"
+    try:
+        _make_session()
+    except SessionInvalid as e:
+        return False, str(e)
     return True, ""
 
 
@@ -81,7 +106,7 @@ def send_messages(items, sleep_range=SLEEP_RANGE):
 
     results = []
     client = TelegramClient(
-        str(SESSION), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
+        _make_session(), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
         device_model="abba-sheets-agent", system_version="railway",
     )
     try:
