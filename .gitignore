@@ -13,3 +13,5 @@ data/brand/inbox/
 data/brand/preview.pdf
 data/brand/pending.json
 data/brand/logo-draft.*
+*.session
+*.session-journal

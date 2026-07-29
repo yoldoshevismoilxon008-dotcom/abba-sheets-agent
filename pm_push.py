@@ -30,6 +30,7 @@ import undiruv
 
 DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
 CHATS_FILE = DATA / "pm_chats.json"
+CONTACTS_FILE = DATA / "pm_contacts.json"  # userbot yetkazish: slot → @username/+tel
 STATE_FILE = DATA / "undiruv_push_state.json"
 
 PUSH_DUE_DAYS = undiruv.PUSH_DUE_DAYS  # yagona chegara — undiruv.py'da
@@ -148,6 +149,32 @@ def slot_of_chat(chat_id, chats=None):
     return None
 
 
+# ---------- PM kontaktlari (userbot yetkazish) ----------
+
+def load_contacts():
+    try:
+        return json.loads(CONTACTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def set_contact(slot, contact):
+    """Egadan /pm_set <slot> <@username|+tel>. Qaytadi: javob matni."""
+    slots = slots_from_config()
+    if slot not in slots:
+        return f"Noma'lum slot: {slot}. Mavjud: {', '.join(slots)}"
+    contact = contact.strip()
+    if not (contact.startswith("@") or contact.startswith("+")):
+        return "Kontakt @username yoki +998... ko'rinishida bo'lsin."
+    c = load_contacts()
+    old = c.get(slot)
+    c[slot] = contact
+    CONTACTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONTACTS_FILE.write_text(json.dumps(c, ensure_ascii=False, indent=1), encoding="utf-8")
+    return (f"✅ {slots[slot]} kontakti: {contact}"
+            + (f" (eski: {old})" if old and old != contact else ""))
+
+
 # ---------- onboarding / PM xabarlari (bot_listener chaqiradi) ----------
 
 def handle_incoming(chat_id, msg):
@@ -236,21 +263,28 @@ def reject(slot):
 
 
 def status_text():
-    chats = load_chats()
     slots = slots_from_config()
-    L = ["👥 **PM undiruv-push slotlari:**"]
-    for slot, name in slots.items():
-        e = chats["slots"].get(slot)
-        if e:
-            L.append(f"• {name}: {e.get('username')} ({e.get('approved')} dan)")
-        else:
-            L.append(f"• {name}: ulanmagan — t.me havola: ?start=pm_{slot}")
-        p = chats["pending"].get(slot)
-        if p:
-            L.append(f"   ⏳ kutilmoqda: {p.get('username')} — /approve_{slot} | /reject_{slot}")
+    contacts = load_contacts()
     st = _load_state()
+    L = ["👥 **PM undiruv-push (eganing akkauntidan, userbot):**"]
+    try:
+        import userbot_sender
+
+        ok, why = userbot_sender.available()
+        L.append(f"Userbot: {'tayyor ✅' if ok else 'sozlanmagan — ' + why}")
+    except Exception as e:
+        L.append(f"Userbot: xato — {str(e)[:80]}")
+    for slot, name in slots.items():
+        c = contacts.get(slot)
+        line = f"• {name}: {c}" if c else f"• {name}: kontakt yo'q — /pm_set {slot} @username"
+        if st.get("sent", {}).get(slot):
+            line += f" · oxirgi: yuborildi ✅ ({st.get('date')})"
+        elif st.get("failed", {}).get(slot):
+            line += f" · oxirgi: XATO ❌ {str(st['failed'][slot])[:50]}"
+        L.append(line)
     if st.get("date"):
         L.append(f"Oxirgi push: {st['date']} ({st.get('tab', '?')})")
+    L.append("Sinov: /pm_push test — 4 xabar o'z Saved Messages'ingizga")
     return "\n".join(L)
 
 
@@ -363,41 +397,61 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     _ptab, prev_rows = _month_rows(snap_day, prev_month, today)
     per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month)
 
-    chats = load_chats()
+    contacts = load_contacts()
     slots = slots_from_config()
     by_slot = {}
     for pm_name, lines in per_pm.items():
         by_slot[_slot_key(pm_name)] = (pm_name, lines)
 
     dd = today.strftime("%d.%m.%Y")
-    sent, waiting = {}, {}
+    # Xabarlarni tayyorlash (yetkazish: EGANING akkauntidan, userbot_sender)
+    msgs, no_contact, texts = [], {}, {}
     for slot, (pm_name, lines) in by_slot.items():
         text = (f"🔔 Undiruv eslatmasi — {dd}\n\n" + "\n".join(lines)
                 + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
-        e = chats["slots"].get(slot)
-        if not e:
-            waiting[slot] = len(lines)
+        texts[slot] = text
+        c = contacts.get(slot)
+        if not c:
+            no_contact[slot] = len(lines)
             continue
-        if dry_run:
-            log(f"[dry-run] {pm_name} ({e.get('username')}):\n{text}\n")
-            sent[slot] = len(lines)
-        elif send_to(e["chat_id"], text):
-            sent[slot] = len(lines)
-        else:
-            waiting[slot] = len(lines)
-            log(f"{pm_name}ga yuborilmadi (chat_id {e.get('chat_id')})")
+        msgs.append((slot, c, text))
 
-    # Egaga jamlama
+    sent, failed = {}, {}
+    fallback_reason = ""
+    if msgs and not dry_run:
+        try:
+            import userbot_sender
+
+            for slot, ok2, err in userbot_sender.send_messages(msgs):
+                if ok2:
+                    sent[slot] = len(by_slot[slot][1])
+                else:
+                    failed[slot] = err
+        except Exception as e:
+            # Session yo'q/yaroqsiz yoki telethon xatosi — hech kimga ketmadi
+            fallback_reason = str(e)[:200]
+            failed.update({slot: "yuborilmadi" for slot, _c, _t in msgs})
+            log(f"userbot ishlamadi: {fallback_reason}")
+    elif dry_run:
+        for slot, _c, _t in msgs:
+            log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
+            sent[slot] = len(by_slot[slot][1])
+
+    # Egaga jamlama (yetkazish holati bilan)
     L = [f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, snapshot: {snap_day})"]
     for slot, name in slots.items():
         if slot in sent:
-            e = chats["slots"].get(slot, {})
-            L.append(f"• {name} ({e.get('username', '?')}): {sent[slot]} eslatma ketdi")
-        elif slot in waiting:
-            why = "ulanmagan" if not chats["slots"].get(slot) else "YUBORILMADI (xato)"
-            L.append(f"• {name}: {why} — {waiting[slot]} eslatma kutmoqda")
+            L.append(f"• {name} ({contacts.get(slot, '?')}): {sent[slot]} eslatma yuborildi ✅")
+        elif slot in failed:
+            L.append(f"• {name} ({contacts.get(slot, '?')}): YUBORILMADI ❌ — {failed[slot][:80]}")
+        elif slot in no_contact:
+            L.append(f"• {name}: kontakt yo'q — /pm_set {slot} @username · "
+                     f"{no_contact[slot]} eslatma kutmoqda")
         else:
             L.append(f"• {name}: bugun eslatma yo'q")
+    if fallback_reason:
+        L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
+                 "(tayyor matnlar alohida keladi)")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
     if stats["aktiv_n"]:
         L.append(f"💳 Aktiv obuna (so'ralmaydi): {stats['aktiv_n']} loyiha, {_fmt(stats['aktiv_sum'])}")
@@ -414,11 +468,55 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     if not owner_pdf(cur_rows, tab, today, f"snapshot {snap_day}",
                      push_lines=L[1:], title=dd_title):
         send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
+    # Userbot butunlay ishlamagan kun: egaga 4 TAYYOR matn — qo'lda yuborish uchun
+    if fallback_reason and not dry_run:
+        for slot, _c, text in msgs:
+            send_owner(f"📋 {by_slot[slot][0]} uchun tayyor matn "
+                       f"({contacts.get(slot, '?')}):\n\n{text}")
     if not dry_run:
         _save_state({"date": today.isoformat(), "tab": tab, "sent": sent,
-                     "waiting": waiting})
-    log(f"push tayyor: {len(sent)} PM'ga ketdi, {len(waiting)} kutmoqda")
+                     "failed": failed, "no_contact": no_contact})
+    log(f"push tayyor: {len(sent)} yuborildi, {len(failed)} xato, "
+        f"{len(no_contact)} kontaktsiz")
     return "sent", summary
+
+
+def test_to_saved(today=None, day=None):
+    """/pm_push test: xabarlarni PM'larga EMAS, eganing "Saved Messages"iga
+    yuboradi (jonli sinov; state yozilmaydi). Qaytadi: natija matni."""
+    import undiruv as _u  # noqa: F401 (parity: xuddi run_daily yo'li)
+
+    today = today or date.today()
+    day = day or today.isoformat()
+    cur_month = fetchmod.current_month_name(today)
+    prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
+    tab, cur_rows = _month_rows(day, cur_month, today)
+    if tab is None:
+        days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()
+                      if d.is_dir() and len(d.name) == 10) if diffmod.SNAPSHOTS.is_dir() else []
+        if days:
+            day = days[-1]
+            tab, cur_rows = _month_rows(day, cur_month, today)
+    if tab is None:
+        return f"«Undiruv {cur_month}» tabi topilmadi — sinov uchun ma'lumot yo'q."
+    _pt, prev_rows = _month_rows(day, prev_month, today)
+    per_pm, _stats = build_push(today, cur_rows, prev_rows or [], prev_month)
+    if not per_pm:
+        return "Bugun birorta PM uchun eslatma yo'q — sinovga xabar chiqmadi."
+    dd = today.strftime("%d.%m.%Y")
+    msgs = []
+    for pm_name, lines in per_pm.items():
+        text = (f"🧪 [SINOV — {pm_name} ko'radigan xabar]\n"
+                f"🔔 Undiruv eslatmasi — {dd}\n\n" + "\n".join(lines)
+                + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
+        msgs.append((_slot_key(pm_name), "me", text))
+    import userbot_sender
+
+    res = userbot_sender.send_messages(msgs)
+    ok_n = sum(1 for _s, ok2, _e in res if ok2)
+    lines = [f"🧪 Sinov: {ok_n}/{len(res)} xabar Saved Messages'ga yuborildi"]
+    lines += [f"• {s}: {'✅' if ok2 else '❌ ' + e[:60]}" for s, ok2, e in res]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

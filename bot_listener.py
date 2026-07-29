@@ -138,7 +138,7 @@ HELP = (
     "/hisobot — kunlik hisobotni hozir yaratish\n"
     "/audit — data sifat auditi\n"
     "/test_undiruv — undiruv filtri dry-run (to'liq ro'yxat, PM kesimida)\n"
-    "/pm_status — PM undiruv-push slotlari (kim ulangan) · /pm_push dry — sinov\n"
+    "/pm_status — PM kontaktlar/yetkazish holati · /pm_set <slot> <@u> · /pm_push test\n"
     "/ovoz — ovozli rejim holati (on/off) — ovozli savol yuborsangiz STT+TTS\n"
     "/dashboard — dashboard linki + oxirgi yangilanish\n"
     "/ack — tan olingan audit muammolari (/ack <kalit> [izoh] — qo'shish)\n"
@@ -1723,11 +1723,30 @@ def handle_update(upd):
 
         send_retry(pm_push.status_text(), attempts=2)
         return "pm-status"
+    if low.startswith("/pm_set"):
+        import pm_push
+
+        parts = text.split()
+        if len(parts) < 3:
+            send_retry("Format: /pm_set <slot> <@username|+998...>\n"
+                       "Slotlar: zubair, islom, abdufattoh, azizxoja", attempts=2)
+        else:
+            send_retry(pm_push.set_contact(parts[1].lower(), parts[2]), attempts=2)
+        return "pm-set"
     if low.startswith("/pm_push"):
-        # qo'lda ishga tushirish (test): /pm_push dry | /pm_push force
+        # qo'lda ishga tushirish: /pm_push dry | force | test (Saved Messages)
         import pm_push
 
         arg = low.split(None, 1)[1] if len(low.split()) > 1 else ""
+        if "test" in arg:
+            mid = send_status("🧪 Sinov: xabarlar Saved Messages'ingizga yuborilmoqda...")
+            try:
+                res = pm_push.test_to_saved()
+            except Exception as e:
+                res = f"Sinov ishlamadi: {type(e).__name__}: {str(e)[:150]}"
+            delete_status(mid)
+            send_retry(res, attempts=2)
+            return "pm-push-test"
         status, summary = pm_push.run_daily(force="force" in arg or "dry" in arg,
                                             dry_run="dry" in arg)
         # "sent" holatida egaga PDF (yoki matn fallback) run_daily ichida ketdi

@@ -133,6 +133,13 @@ def main():
         stt.ensure_model_async()
     except Exception as e:
         log(f"stt model preload boshlanmadi: {e}")
+    # Userbot session: TG_SESSION_B64 env -> /data (fayl bo'lsa tegilmaydi)
+    try:
+        import userbot_sender
+
+        userbot_sender.ensure_session()
+    except Exception as e:
+        log(f"userbot session tayyorlanmadi: {e}")
 
     from apscheduler.schedulers.background import BackgroundScheduler
 
