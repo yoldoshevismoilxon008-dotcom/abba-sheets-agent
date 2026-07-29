@@ -139,7 +139,7 @@ HELP = (
     "/audit — data sifat auditi\n"
     "/test_undiruv — undiruv filtri dry-run (to'liq ro'yxat, PM kesimida)\n"
     "/pm_status — PM kontaktlar/yetkazish holati · /pm_set <slot> <@u> · /pm_push test\n"
-    "/ovoz — ovozli rejim holati (on/off) — ovozli savol yuborsangiz STT+TTS\n"
+    "/ovoz — ovozli rejim (on/off) · /stt_status — model/disk holati\n"
     "/dashboard — dashboard linki + oxirgi yangilanish\n"
     "/ack — tan olingan audit muammolari (/ack <kalit> [izoh] — qo'shish)\n"
     "/dizayn — PDF dizayni: presetlar, matnli o'zgartirish; rasm yuborsangiz — "
@@ -1702,6 +1702,11 @@ def handle_update(upd):
         send_retry(pm_push.approve(slot) if cmd == "approve" else pm_push.reject(slot),
                    attempts=2)
         return f"pm-{cmd}"
+    if low.startswith("/stt_status"):
+        import stt
+
+        send_retry(stt.status_text(), attempts=2)
+        return "stt-status"
     if low.startswith("/ovoz"):
         import stt
 

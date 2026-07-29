@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -28,7 +29,9 @@ WHISPER_CANDIDATES = [
     "/usr/local/bin/whisper-cli",
     str(Path.home() / "uzbek-dictation/whisper.cpp/build/bin/whisper-cli"),
 ]
-MIN_MODEL_BYTES = 100 * 1024 * 1024  # 785MB model — 100MB'dan kichigi chala fayl
+MIN_MODEL_BYTES = 700 * 1024 * 1024  # 785MB model — 700MB'dan kichigi chala fayl
+DOWNLOAD_ATTEMPTS = 3
+_last_error = ""  # /stt_status uchun (process ichida)
 
 TTS_VOICES = {"sardor": "uz-UZ-SardorNeural", "madina": "uz-UZ-MadinaNeural"}
 TTS_MAX_CHARS = 500
@@ -61,51 +64,147 @@ def stt_ready():
 _model_lock = threading.Lock()
 
 
+def _set_err(msg):
+    global _last_error
+    _last_error = msg
+    log(msg)
+
+
+def _head_info(url, headers):
+    """(Content-Length, Content-Type) — bilinmasa (0, "")."""
+    import requests
+
+    try:
+        r = requests.head(url, headers=headers, timeout=30, allow_redirects=True)
+        return int(r.headers.get("Content-Length") or 0), r.headers.get("Content-Type", "")
+    except Exception:
+        return 0, ""
+
+
 def ensure_model():
-    """MODEL_URL env'dan modelni /data/models ga yuklab oladi (bir marta).
-    HF: https://huggingface.co/<u>/<repo>/resolve/main/ggml-rubaistt.bin
-    (private bo'lsa MODEL_TOKEN=hf_...); GDrive direct link ham bo'ladi."""
-    if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > MIN_MODEL_BYTES:
-        return True
+    """MODEL_URL env'dan modelni /data/models ga ATOMIK yuklab oladi:
+    <path>.part → tugagach rename (yarim fayl asosiy nom bilan QOLMAYDI).
+    Startup'da mavjud fayl HEAD Content-Length bilan solishtiriladi — mos
+    kelmasa/chala (<700MB) bo'lsa o'chirilib qayta yuklanadi. 3 urinish,
+    imkon bo'lsa Range bilan resume. HF: .../resolve/main/ggml-rubaistt.bin
+    (private bo'lsa MODEL_TOKEN=hf_...)."""
+    global _last_error
     url = os.environ.get("MODEL_URL", "").strip()
+    headers = {}
+    tok = os.environ.get("MODEL_TOKEN", "").strip()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    expected, ctype = _head_info(url, headers) if url else (0, "")
+
+    # 1) Mavjud faylning butunligi
+    if MODEL_PATH.exists():
+        sz = MODEL_PATH.stat().st_size
+        if sz >= MIN_MODEL_BYTES and (not expected or sz == expected):
+            return True
+        _set_err(f"mavjud model chala ({sz >> 20} MB, kutilgan "
+                 f"{expected >> 20 if expected else '≥700'} MB) — o'chirilib qayta yuklanadi")
+        MODEL_PATH.unlink(missing_ok=True)
     if not url:
-        log("MODEL_URL berilmagan — model yuklab olinmaydi")
+        _set_err("MODEL_URL berilmagan — model yuklab olinmaydi")
+        return False
+    if "text/html" in ctype.lower():
+        _set_err("MODEL_URL HTML qaytardi (GDrive virus-scan sahifasi bo'lishi mumkin) — "
+                 "HuggingFace linkiga o'ting")
         return False
     if not _model_lock.acquire(blocking=False):
         return False  # boshqa thread yuklayapti
+
     try:
         import requests
 
-        headers = {}
-        tok = os.environ.get("MODEL_TOKEN", "").strip()
-        if tok:
-            headers["Authorization"] = f"Bearer {tok}"
         MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # 2) Disk joyi (part'dagi mavjud qism hisobga olinadi)
         part = MODEL_PATH.with_suffix(".part")
-        log(f"model yuklab olinmoqda: {url[:80]}…")
-        with requests.get(url, headers=headers, stream=True, timeout=60,
-                          allow_redirects=True) as r:
-            r.raise_for_status()
-            done = 0
-            with open(part, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1 << 20):
-                    f.write(chunk)
-                    done += len(chunk)
-                    if done % (100 << 20) < (1 << 20):
-                        log(f"  … {done >> 20} MB")
-        if part.stat().st_size < MIN_MODEL_BYTES:
-            part.unlink(missing_ok=True)
-            log(f"XATO: yuklangan fayl juda kichik ({part.stat().st_size if part.exists() else 0} b) — "
-                "MODEL_URL noto'g'ri (HTML sahifa bo'lishi mumkin)")
+        have = part.stat().st_size if part.exists() else 0
+        need = max(expected, 800 << 20) - have + (50 << 20)  # + zaxira
+        free = shutil.disk_usage(MODEL_PATH.parent).free
+        if free < need:
+            _set_err(f"joy yetarli emas: {free >> 20} MB bo'sh, {need >> 20} MB kerak")
             return False
-        part.rename(MODEL_PATH)
-        log(f"model tayyor: {MODEL_PATH} ({MODEL_PATH.stat().st_size >> 20} MB)")
-        return True
-    except Exception as e:
-        log(f"XATO: model yuklab olinmadi — {type(e).__name__}: {str(e)[:200]}")
+
+        exp_mb = expected >> 20 if expected else "?"
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                done = part.stat().st_size if part.exists() else 0
+                req_headers = dict(headers)
+                if done and expected:
+                    req_headers["Range"] = f"bytes={done}-"
+                    log(f"urinish {attempt}/{DOWNLOAD_ATTEMPTS}: {done >> 20} MB'dan davom (Range)")
+                else:
+                    done = 0
+                    log(f"urinish {attempt}/{DOWNLOAD_ATTEMPTS}: yuklab olish boshlandi ({url[:70]}…)")
+                with requests.get(url, headers=req_headers, stream=True,
+                                  timeout=(30, 180), allow_redirects=True) as r:
+                    if "text/html" in r.headers.get("Content-Type", "").lower():
+                        _set_err("MODEL_URL HTML qaytardi (GDrive virus-scan sahifasi "
+                                 "bo'lishi mumkin) — HuggingFace linkiga o'ting")
+                        part.unlink(missing_ok=True)
+                        return False
+                    if done and r.status_code != 206:
+                        done = 0  # server Range qo'llamadi — boshdan
+                    r.raise_for_status()
+                    mode = "ab" if done else "wb"
+                    next_mark = (done // (100 << 20) + 1) * (100 << 20)
+                    with open(part, mode) as f:
+                        for chunk in r.iter_content(chunk_size=1 << 20):
+                            f.write(chunk)
+                            done += len(chunk)
+                            if done >= next_mark:
+                                log(f"yuklandi {done >> 20}/{exp_mb} MB")
+                                next_mark += 100 << 20
+                sz = part.stat().st_size
+                if sz < (1 << 20):
+                    _set_err(f"MODEL_URL {sz} baytlik javob qaytardi (HTML sahifa "
+                             "bo'lishi mumkin) — HuggingFace linkiga o'ting")
+                    part.unlink(missing_ok=True)
+                    return False
+                if expected and sz != expected:
+                    raise IOError(f"hajm mos emas: {sz >> 20} MB != {exp_mb} MB")
+                if sz < MIN_MODEL_BYTES:
+                    raise IOError(f"fayl juda kichik: {sz >> 20} MB")
+                part.rename(MODEL_PATH)
+                _last_error = ""
+                log(f"model tayyor ({sz >> 20} MB)")
+                return True
+            except Exception as e:
+                _set_err(f"urinish {attempt}/{DOWNLOAD_ATTEMPTS} xato — "
+                         f"{type(e).__name__}: {str(e)[:150]}")
+                if attempt < DOWNLOAD_ATTEMPTS:
+                    time.sleep(5)
         return False
     finally:
         _model_lock.release()
+
+
+def status_text():
+    """/stt_status uchun bitta xabar: model/disk/binary/TTS holati."""
+    L = ["🎤 **STT holati:**"]
+    if MODEL_PATH.exists():
+        L.append(f"• Model: bor — {MODEL_PATH.stat().st_size >> 20} MB ({MODEL_PATH})")
+    else:
+        part = MODEL_PATH.with_suffix(".part")
+        p = f" (.part: {part.stat().st_size >> 20} MB yuklanmoqda)" if part.exists() else ""
+        L.append(f"• Model: YO'Q{p} — MODEL_URL: "
+                 f"{'bor' if os.environ.get('MODEL_URL') else 'berilmagan'}")
+    try:
+        du = shutil.disk_usage(DATA)
+        L.append(f"• Disk (/data): {du.free >> 20} MB bo'sh / {du.total >> 20} MB")
+    except Exception:
+        pass
+    wb = whisper_bin()
+    L.append(f"• whisper-cli: {wb or 'YO‘Q'}")
+    L.append(f"• ffmpeg: {'bor' if shutil.which('ffmpeg') else 'YO‘Q'}")
+    ok, why = stt_ready()
+    L.append(f"• Umumiy: {'tayyor ✅' if ok else 'sozlanmagan — ' + why}")
+    L.append(f"• TTS: {'on' if tts_enabled() else 'off'} ({tts_voice()})")
+    if _last_error:
+        L.append(f"• Oxirgi yuklash xatosi: {_last_error[:200]}")
+    return "\n".join(L)
 
 
 def ensure_model_async():
