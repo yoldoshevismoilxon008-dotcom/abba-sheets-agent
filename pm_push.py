@@ -326,13 +326,21 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
-             "aktiv_n": 0, "aktiv_sum": 0}
+             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": []}
     # Aktiv obuna (joriy oy) — pul so'ralmaydi, faqat ega jamlamasida ma'lumot
     for r in cur_rows:
         if undiruv.is_active_only(r):
             stats["aktiv_n"] += 1
             stats["aktiv_sum"] += round(r["aktiv"])
-    for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_rows]:
+    # Carryover: joriy oy tabida allaqachon to'langan/yuritilayotgan loyihalar
+    # o'tgan oy qoldig'i sifatida SO'RALMAYDI — faqat ega jamlamasida
+    # "sheet'ni tuzatish kerak" bloki
+    prev_real, closed = undiruv.carryover_filter(prev_rows, cur_rows)
+    stats["closed_carry"] = [
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
+        for r in closed
+    ]
+    for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
             continue
         summa = r["qoldiq"]
@@ -453,6 +461,13 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
                  "(tayyor matnlar alohida keladi)")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
+    if stats["closed_carry"]:
+        cc = stats["closed_carry"]
+        det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
+        more = f" +{len(cc) - 6}" if len(cc) > 6 else ""
+        L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan): "
+                 f"{len(cc)} ta, {_fmt(sum(i['summa'] for i in cc))} — sheet'ni tuzatish "
+                 f"kerak: {det}{more}")
     if stats["aktiv_n"]:
         L.append(f"💳 Aktiv obuna (so'ralmaydi): {stats['aktiv_n']} loyiha, {_fmt(stats['aktiv_sum'])}")
     if stats["pauza"]:

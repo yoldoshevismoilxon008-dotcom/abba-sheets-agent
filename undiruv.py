@@ -94,6 +94,30 @@ def is_active_only(r):
     return r["holat"] not in ("paid", "ketdi") and r["qoldiq"] <= 0 and r["aktiv"] > 0
 
 
+def _name_key(name):
+    """Loyiha nomini solishtirish kaliti — bo'shliq/registr farqiga chidamli."""
+    return " ".join(fetchmod.norm(name).split())
+
+
+def carryover_filter(prev_rows, cur_rows):
+    """O'tgan oy unpaid qatorlaridan JORIY OY tabida allaqachon yopilganlarini
+    ajratadi (pul undirilgan, faqat o'tgan oy tabi tuzatilmagan — PM'ga talab
+    KETMAYDI). Yopilgan deb hisoblanadi: joriy oyda shu nomli loyiha bor VA
+    (holati To'lov qilindi/Ketdi YOKI Undirildi > 0).
+    Qaytadi: (haqiqiy_carryover, joriy_oyda_yopilganlar)."""
+    cur_by_name = {_name_key(r["loyiha"]): r for r in cur_rows}
+    real, closed = [], []
+    for r in prev_rows:
+        if not is_unpaid(r):
+            continue
+        c = cur_by_name.get(_name_key(r["loyiha"]))
+        if c and (c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0):
+            closed.append(r)
+        else:
+            real.append(r)
+    return real, closed
+
+
 def parse_rows(vals, today):
     """Tab qiymatlari → [{loyiha, pm, qoldiq, undirildi, aktiv, kelishilgan,
     muddat: date|None, holat}]. Jami/summary qatorlari kirmaydi."""
