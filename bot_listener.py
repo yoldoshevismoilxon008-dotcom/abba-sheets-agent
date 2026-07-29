@@ -138,6 +138,7 @@ HELP = (
     "/hisobot — kunlik hisobotni hozir yaratish\n"
     "/audit — data sifat auditi\n"
     "/test_undiruv — undiruv filtri dry-run (to'liq ro'yxat, PM kesimida)\n"
+    "/pm_status — PM undiruv-push slotlari (kim ulangan) · /pm_push dry — sinov\n"
     "/dashboard — dashboard linki + oxirgi yangilanish\n"
     "/ack — tan olingan audit muammolari (/ack <kalit> [izoh] — qo'shish)\n"
     "/dizayn — PDF dizayni: presetlar, matnli o'zgartirish; rasm yuborsangiz — "
@@ -1560,8 +1561,19 @@ def handle_update(upd):
         kinds = ", ".join(k for k in upd if k != "update_id") or "nomalum"
         log(f"skip: message emas ({kinds})")
         return "skip"
-    # XAVFSIZLIK: faqat egasining chat'i. Boshqasiga JAVOB YO'Q, faqat log.
+    # XAVFSIZLIK: faqat egasining chat'i to'liq funksiyaga ega. Begona chat —
+    # faqat PM undiruv-push oqimi (onboarding /start pm_<slot>, ulangan PM'dan
+    # forward); qolgani JAVOBSIZ, faqat log.
     if str(chat) != str(CHAT_ID):
+        try:
+            import pm_push
+
+            r = pm_push.handle_incoming(chat, msg)
+            if r:
+                log(f"PM oqimi: {r} (chat_id={chat})")
+                return r
+        except Exception as e:
+            log(f"XATO pm_push.handle_incoming: {type(e).__name__}: {str(e)[:150]}")
         text_preview = (msg.get("text") or msg.get("caption") or "")[:60]
         log(f"IGNORE: begona chat_id={chat} (matn: {text_preview!r})")
         return "ignored"
@@ -1597,6 +1609,28 @@ def handle_update(upd):
     if low.startswith("/test_undiruv"):
         do_test_undiruv()
         return "test-undiruv"
+    if low.startswith("/approve_") or low.startswith("/reject_"):
+        import pm_push
+
+        cmd, slot = low.lstrip("/").split("_", 1)
+        slot = slot.split()[0].split("@")[0]
+        send_retry(pm_push.approve(slot) if cmd == "approve" else pm_push.reject(slot),
+                   attempts=2)
+        return f"pm-{cmd}"
+    if low.startswith("/pm_status"):
+        import pm_push
+
+        send_retry(pm_push.status_text(), attempts=2)
+        return "pm-status"
+    if low.startswith("/pm_push"):
+        # qo'lda ishga tushirish (test): /pm_push dry | /pm_push force
+        import pm_push
+
+        arg = low.split(None, 1)[1] if len(low.split()) > 1 else ""
+        status, summary = pm_push.run_daily(force="force" in arg or "dry" in arg,
+                                            dry_run="dry" in arg)
+        send_retry(summary or f"holat: {status}", attempts=2)
+        return "pm-push"
     if low.startswith("/ack"):
         arg = text[4:].strip()
         if not arg:

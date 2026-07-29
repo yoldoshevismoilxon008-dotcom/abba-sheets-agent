@@ -80,6 +80,13 @@ STATUS_LABEL = {"paid": "Undirildi ✅", "pauza": "Pauza ⏸", "ketdi": "Ketdi �
                 "pending": "Kutilmoqda"}
 
 
+def is_unpaid(r):
+    """YAGONA undirilmagan-filtr (summary, full_report va pm_push shu bitta
+    manbadan foydalanadi): faqat «To'lov qilindi» yoki «Ketdi» holati
+    to'xtatadi (Pauza so'ralaveradi) va qoldiq yoki aktiv summa > 0."""
+    return r["holat"] not in ("paid", "ketdi") and (r["qoldiq"] > 0 or r["aktiv"] > 0)
+
+
 def parse_rows(vals, today):
     """Tab qiymatlari → [{loyiha, pm, qoldiq, undirildi, aktiv, kelishilgan,
     muddat: date|None, holat}]. Jami/summary qatorlari kirmaydi."""
@@ -108,10 +115,12 @@ def parse_rows(vals, today):
             "loyiha": name,
             "pm": get(c_pm) or "—",
             "qoldiq": qoldiq,
+            "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
             "kelishilgan": (qoldiq + undirildi) if (qoldiq or undirildi) else aktiv,
             "muddat": parse_due(get(c_due), today),
+            "muddat_raw": get(c_due),
             "holat": _status(get(c_status)),
         })
     return rows
@@ -158,8 +167,7 @@ def summary(day, today=None):
     qoldiq = sum(r["qoldiq"] for r in rows)
     aktiv = sum(r["aktiv"] for r in rows)
 
-    def unpaid(r):
-        return r["holat"] not in ("paid", "ketdi") and (r["qoldiq"] > 0 or r["aktiv"] > 0)
+    unpaid = is_unpaid
 
     def item(r):
         return {
@@ -240,10 +248,7 @@ def full_report(rows, tab, today, source=""):
     aktiv = sum(r["aktiv"] for r in rows)
     pct = f"{undirildi / kelishilgan * 100:.1f}".replace(".", ",") if kelishilgan else "0"
     cnt = {k: sum(1 for r in rows if r["holat"] == k) for k in ("paid", "ketdi", "pauza")}
-
-    def unpaid(r):
-        return r["holat"] not in ("paid", "ketdi") and (r["qoldiq"] > 0 or r["aktiv"] > 0)
-
+    unpaid = is_unpaid
     L = [
         f"🧪 **Undiruv dry-run — {tab}**" + (f" ({source})" if source else ""),
         "Filtr: undirilmagan = holati «To'lov qilindi»/«Ketdi» EMAS va Summa(qoldiq) "

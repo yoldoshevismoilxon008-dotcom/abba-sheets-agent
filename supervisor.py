@@ -98,6 +98,28 @@ def run_daily():
             log("XATO: hisobot push 10 daqiqada tugamadi")
 
 
+def run_pm_push():
+    """PM'larga undiruv eslatmalari (09:30 — kunlik pipeline'dan keyin)."""
+    log("PM undiruv push boshlandi")
+    try:
+        import pm_push
+
+        status, _ = pm_push.run_daily()
+        log(f"PM undiruv push tugadi ({status})")
+    except Exception as e:
+        log(f"XATO: PM undiruv push yiqildi — {type(e).__name__}: {e}")
+        try:
+            import send as sendmod
+
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+            chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+            if token and chat:
+                sendmod.tg_send(token, chat,
+                                f"⚠️ PM undiruv push yiqildi: {str(e)[:200]}")
+        except Exception:
+            pass
+
+
 def main():
     log(f"boshlandi (DATA_DIR={DATA})")
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
@@ -112,8 +134,12 @@ def main():
         run_daily, "cron", hour=9, minute=0,
         misfire_grace_time=3 * 3600, coalesce=True,
     )
+    sched.add_job(
+        run_pm_push, "cron", hour=9, minute=30,
+        misfire_grace_time=3 * 3600, coalesce=True,
+    )
     sched.start()
-    log("scheduler tayyor: har kuni 09:00 (Asia/Tashkent)")
+    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv push (Asia/Tashkent)")
 
     import bot_listener
 
