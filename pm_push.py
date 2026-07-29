@@ -337,13 +337,13 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     # "sheet'ni tuzatish kerak" bloki
     prev_real, closed = undiruv.carryover_filter(prev_rows, cur_rows)
     stats["closed_carry"] = [
-        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq_net"])}
         for r in closed
     ]
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
             continue
-        summa = r["qoldiq"]
+        summa = r["qoldiq_net"]
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
         if r["holat"] == "pauza":
             stats["pauza"].append(f"{r['loyiha']} ({r['pm']})")

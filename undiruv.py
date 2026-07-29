@@ -82,10 +82,11 @@ STATUS_LABEL = {"paid": "Undirildi ✅", "pauza": "Pauza ⏸", "ketdi": "Ketdi �
 
 def is_unpaid(r):
     """YAGONA undirilmagan-filtr (summary, full_report, pm_push, PDF — bitta
-    manba): FAQAT «Summa» (D, shu oyda undirilishi kerak qoldiq) > 0 va holat
-    «To'lov qilindi»/«Ketdi» emas (Pauza so'ralaveradi). «Aktive Summary» —
-    OLDINDAN to'lagan obuna mijozlari puli, SO'RALMAYDI (is_active_only)."""
-    return r["holat"] not in ("paid", "ketdi") and r["qoldiq"] > 0
+    manba): NET qoldiq (Summa − Undirildi) > 0 va holat «To'lov qilindi»/
+    «Ketdi» emas (Pauza so'ralaveradi). Undirildi ≥ Summa bo'lsa qarz yopilgan
+    hisoblanadi — push'ga umuman kirmaydi. «Aktive Summary» — OLDINDAN to'lagan
+    obuna mijozlari puli, SO'RALMAYDI (is_active_only)."""
+    return r["holat"] not in ("paid", "ketdi") and r["qoldiq_net"] > 0
 
 
 def is_active_only(r):
@@ -146,6 +147,10 @@ def parse_rows(vals, today):
             "loyiha": name,
             "pm": get(c_pm) or "—",
             "qoldiq": qoldiq,
+            # KO'RSATILADIGAN/so'raladigan qarz: Summa − Undirildi (ba'zi
+            # tab'larda D kamaytirilmay, faqat E to'ldiriladi — masalan iyun
+            # tanho D=$2400 E=$2100 → real qarz $300)
+            "qoldiq_net": qoldiq - undirildi,
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
@@ -197,7 +202,8 @@ def summary(day, today=None):
         return None
     kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
     undirildi = sum(r["undirildi"] for r in rows)
-    qoldiq = sum(r["qoldiq"] for r in rows)
+    # Qoldiq = so'raladigan NET qarzlar yig'indisi (PM itemlar bilan aynan mos)
+    qoldiq = sum(r["qoldiq_net"] for r in rows if is_unpaid(r))
     aktiv = sum(r["aktiv"] for r in rows)
 
     unpaid = is_unpaid
@@ -205,7 +211,7 @@ def summary(day, today=None):
     def item(r):
         return {
             "pm": r["pm"], "loyiha": r["loyiha"],
-            "summa": round(r["qoldiq"]),
+            "summa": round(r["qoldiq_net"]),
             "muddat": _due_str(r["muddat"]),
             "kun": (today - r["muddat"]).days if r["muddat"] else None,
         }
@@ -285,7 +291,7 @@ def report_data(rows, tab, today, source=""):
         "totals": {
             "kelishilgan": round(kelishilgan),
             "undirildi": round(undirildi),
-            "qoldiq": round(sum(r["qoldiq"] for r in rows)),
+            "qoldiq": round(sum(r["qoldiq_net"] for r in rows if is_unpaid(r))),
             "aktiv": round(sum(r["aktiv"] for r in rows)),
             "pct": round(undirildi / kelishilgan * 100, 1) if kelishilgan else 0.0,
         },
@@ -299,7 +305,7 @@ def report_data(rows, tab, today, source=""):
     for r in rows:
         by_pm.setdefault(r["pm"], []).append(r)
     aktiv_pms, aktiv_n, aktiv_sum = [], 0, 0
-    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq"] for x in by_pm[p] if is_unpaid(x))):
+    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq_net"] for x in by_pm[p] if is_unpaid(x))):
         items = []
         for r in sorted((r for r in by_pm[pm] if is_unpaid(r)),
                         key=lambda r: (r["muddat"] is None, r["muddat"] or today)):
@@ -313,7 +319,7 @@ def report_data(rows, tab, today, source=""):
                 status, kun = "future", (r["muddat"] - today).days
             items.append({
                 "loyiha": r["loyiha"],
-                "summa": round(r["qoldiq"]),
+                "summa": round(r["qoldiq_net"]),
                 "muddat": _due_str(r["muddat"]) if r["muddat"] else "—",
                 "status": status,
                 "kun": kun,

@@ -176,13 +176,13 @@ def build_undiruv(day, now):
             r["pm"], r["loyiha"],
             (round(r["aktiv"]) if aktiv_only else round(r["kelishilgan"])) or "",
             round(r["undirildi"]) or "",
-            round(r["qoldiq"]) or "",
+            (round(r["qoldiq_net"]) if r["qoldiq_net"] > 0 else "") or "",
             undiruvmod._due_str(r["muddat"]),
             status_label(r),
         ])
     kelishilgan = round(sum(r["qoldiq"] + r["undirildi"] for r in rows))
     undirildi = round(sum(r["undirildi"] for r in rows))
-    qoldiq = round(sum(r["qoldiq"] for r in rows))
+    qoldiq = round(sum(r["qoldiq_net"] for r in rows if undiruvmod.is_unpaid(r)))
     aktiv = round(sum(r["aktiv"] for r in rows))
     pct = f"{undirildi / kelishilgan * 100:.1f}%".replace(".", ",") if kelishilgan else "—"
     out.append([])
