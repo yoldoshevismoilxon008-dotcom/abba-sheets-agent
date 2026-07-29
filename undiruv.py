@@ -228,6 +228,58 @@ def report_block(day, today=None):
     return "\n".join(L)
 
 
+def full_report(rows, tab, today, source=""):
+    """Dry-run: filtr natijasining TO'LIQ ro'yxati PM kesimida, qisqartirishsiz
+    (bot /test_undiruv buyrug'i — filtr mantiqini ko'rib tasdiqlash uchun).
+    Belgilar: ⏰ muddat o'tgan · 🔜 ≤4 kun · 📅 kelajak · 📋 sanasiz."""
+    if not rows:
+        return "🧪 Undiruv dry-run: qator topilmadi."
+    kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
+    undirildi = sum(r["undirildi"] for r in rows)
+    qoldiq = sum(r["qoldiq"] for r in rows)
+    aktiv = sum(r["aktiv"] for r in rows)
+    pct = f"{undirildi / kelishilgan * 100:.1f}".replace(".", ",") if kelishilgan else "0"
+    cnt = {k: sum(1 for r in rows if r["holat"] == k) for k in ("paid", "ketdi", "pauza")}
+
+    def unpaid(r):
+        return r["holat"] not in ("paid", "ketdi") and (r["qoldiq"] > 0 or r["aktiv"] > 0)
+
+    L = [
+        f"🧪 **Undiruv dry-run — {tab}**" + (f" ({source})" if source else ""),
+        "Filtr: undirilmagan = holati «To'lov qilindi»/«Ketdi» EMAS va Summa(qoldiq) "
+        "yoki Aktive Summary > 0. Muddat — «Final data» (KK.OO).",
+        "",
+        f"JAMI: kelishilgan {_fmt_usd(kelishilgan)} · undirildi {_fmt_usd(undirildi)} "
+        f"({pct}%) · qoldiq {_fmt_usd(qoldiq)} · aktiv {_fmt_usd(aktiv)}",
+        f"Loyihalar: {len(rows)} ta · ✅ to'langan {cnt['paid']} · ⛔ ketgan {cnt['ketdi']} "
+        f"· ⏸ pauza {cnt['pauza']}",
+    ]
+    by_pm = {}
+    for r in rows:
+        by_pm.setdefault(r["pm"], []).append(r)
+    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq"] or x["aktiv"] for x in by_pm[p] if unpaid(x))):
+        items = [r for r in by_pm[pm] if unpaid(r)]
+        paid = [r for r in by_pm[pm] if r["holat"] == "paid"]
+        tot = sum(r["qoldiq"] or r["aktiv"] for r in items)
+        L.append(f"\n▸ **{pm}** — undirilmagan {len(items)} ta, {_fmt_usd(tot)}:")
+        for r in sorted(items, key=lambda r: (r["muddat"] is None, r["muddat"] or today)):
+            if r["muddat"] is None:
+                mark, mud = "📋", "muddat yo'q"
+            elif r["muddat"] < today:
+                mark, mud = "⏰", f"{_due_str(r['muddat'])} ({(today - r['muddat']).days} kun o'tdi)"
+            elif (r["muddat"] - today).days <= DUE_SOON_DAYS:
+                mark, mud = "🔜", f"{_due_str(r['muddat'])} ({(r['muddat'] - today).days} kun qoldi)"
+            else:
+                mark, mud = "📅", _due_str(r["muddat"])
+            src_col = "qoldiq" if r["qoldiq"] else "aktiv"
+            extra = " ⏸" if r["holat"] == "pauza" else ""
+            L.append(f"  {mark} {r['loyiha']} — {_fmt_usd(r['qoldiq'] or r['aktiv'])} "
+                     f"({src_col}), {mud}{extra}")
+        if paid:
+            L.append(f"  ✅ to'langan: {len(paid)} ta, {_fmt_usd(sum(r['undirildi'] for r in paid))}")
+    return "\n".join(L)
+
+
 if __name__ == "__main__":
     import argparse
     import json
@@ -235,8 +287,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--date", default=date.today().isoformat())
     ap.add_argument("--json", action="store_true", help="summary'ni JSON ko'rinishida chiqarish")
+    ap.add_argument("--full", action="store_true", help="dry-run: to'liq ro'yxat PM kesimida")
     args = ap.parse_args()
     if args.json:
         print(json.dumps(summary(args.date), ensure_ascii=False, indent=1))
+    elif args.full:
+        rows, tab = load_rows(args.date)
+        print(full_report(rows, tab or "?", date.fromisoformat(args.date),
+                          source=f"snapshot {args.date}"))
     else:
         print(report_block(args.date) or "(undiruv ma'lumoti topilmadi)")
