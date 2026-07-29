@@ -81,10 +81,17 @@ STATUS_LABEL = {"paid": "Undirildi ✅", "pauza": "Pauza ⏸", "ketdi": "Ketdi �
 
 
 def is_unpaid(r):
-    """YAGONA undirilmagan-filtr (summary, full_report va pm_push shu bitta
-    manbadan foydalanadi): faqat «To'lov qilindi» yoki «Ketdi» holati
-    to'xtatadi (Pauza so'ralaveradi) va qoldiq yoki aktiv summa > 0."""
-    return r["holat"] not in ("paid", "ketdi") and (r["qoldiq"] > 0 or r["aktiv"] > 0)
+    """YAGONA undirilmagan-filtr (summary, full_report, pm_push, PDF — bitta
+    manba): FAQAT «Summa» (D, shu oyda undirilishi kerak qoldiq) > 0 va holat
+    «To'lov qilindi»/«Ketdi» emas (Pauza so'ralaveradi). «Aktive Summary» —
+    OLDINDAN to'lagan obuna mijozlari puli, SO'RALMAYDI (is_active_only)."""
+    return r["holat"] not in ("paid", "ketdi") and r["qoldiq"] > 0
+
+
+def is_active_only(r):
+    """Aktiv obuna qatori: Summa bo'sh/0, lekin Aktive Summary > 0 — pul
+    so'ralmaydi, faqat ma'lumot (ega jamlamasi/PDF'dagi alohida blok)."""
+    return r["holat"] not in ("paid", "ketdi") and r["qoldiq"] <= 0 and r["aktiv"] > 0
 
 
 def parse_rows(vals, today):
@@ -118,7 +125,9 @@ def parse_rows(vals, today):
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
-            "kelishilgan": (qoldiq + undirildi) if (qoldiq or undirildi) else aktiv,
+            # Kelishilgan = Summa(qoldiq) + Undirildi. Aktiv unga KIRMAYDI —
+            # u oldindan to'langan obuna (alohida ma'lumot ustuni).
+            "kelishilgan": qoldiq + undirildi,
             "muddat": parse_due(get(c_due), today),
             "muddat_raw": get(c_due),
             "holat": _status(get(c_status)),
@@ -172,7 +181,7 @@ def summary(day, today=None):
     def item(r):
         return {
             "pm": r["pm"], "loyiha": r["loyiha"],
-            "summa": round(r["qoldiq"] or r["aktiv"]),
+            "summa": round(r["qoldiq"]),
             "muddat": _due_str(r["muddat"]),
             "kun": (today - r["muddat"]).days if r["muddat"] else None,
         }
@@ -217,7 +226,7 @@ def report_block(day, today=None):
         f"💰 **Undiruv ({s['oy']})** — {s['tab']}",
         f"Kelishilgan {_fmt_usd(s['kelishilgan'])} · undirildi {_fmt_usd(s['undirildi'])} "
         f"({str(s['pct']).replace('.', ',')}%) · qoldiq {_fmt_usd(s['qoldiq'])}"
-        + (f" · aktiv {_fmt_usd(s['aktiv'])}" if s["aktiv"] else ""),
+        + (f" · 💳 aktiv obuna {_fmt_usd(s['aktiv'])} (so'ralmaydi)" if s["aktiv"] else ""),
     ]
     if s["muddat_otgan"]:
         tot = sum(i["summa"] for i in s["muddat_otgan"])
@@ -265,7 +274,8 @@ def report_data(rows, tab, today, source=""):
     by_pm = {}
     for r in rows:
         by_pm.setdefault(r["pm"], []).append(r)
-    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq"] or x["aktiv"] for x in by_pm[p] if is_unpaid(x))):
+    aktiv_pms, aktiv_n, aktiv_sum = [], 0, 0
+    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq"] for x in by_pm[p] if is_unpaid(x))):
         items = []
         for r in sorted((r for r in by_pm[pm] if is_unpaid(r)),
                         key=lambda r: (r["muddat"] is None, r["muddat"] or today)):
@@ -279,8 +289,7 @@ def report_data(rows, tab, today, source=""):
                 status, kun = "future", (r["muddat"] - today).days
             items.append({
                 "loyiha": r["loyiha"],
-                "summa": round(r["qoldiq"] or r["aktiv"]),
-                "manba": "qoldiq" if r["qoldiq"] else "aktiv",
+                "summa": round(r["qoldiq"]),
                 "muddat": _due_str(r["muddat"]) if r["muddat"] else "—",
                 "status": status,
                 "kun": kun,
@@ -295,6 +304,18 @@ def report_data(rows, tab, today, source=""):
             "paid_n": len(paid),
             "paid_sum": round(sum(r["undirildi"] for r in paid)),
         })
+        # Aktiv obuna (oldindan to'langan) — pul so'ralmaydi, faqat ma'lumot
+        act = [r for r in by_pm[pm] if is_active_only(r)]
+        if act:
+            aktiv_pms.append({
+                "name": pm,
+                "n": len(act),
+                "sum": round(sum(r["aktiv"] for r in act)),
+                "loyihalar": [r["loyiha"] for r in act],
+            })
+            aktiv_n += len(act)
+            aktiv_sum += round(sum(r["aktiv"] for r in act))
+    data["aktiv_obuna"] = {"n": aktiv_n, "sum": aktiv_sum, "pms": aktiv_pms}
     return data
 
 
@@ -311,8 +332,9 @@ def full_report(rows, tab, today, source=""):
     t, c = d["totals"], d["counts"]
     L = [
         f"🧪 **Undiruv dry-run — {tab}**" + (f" ({source})" if source else ""),
-        "Filtr: undirilmagan = holati «To'lov qilindi»/«Ketdi» EMAS va Summa(qoldiq) "
-        "yoki Aktive Summary > 0. Muddat — «Final data» (KK.OO).",
+        "Filtr: undirilmagan = «Summa» (shu oy qoldig'i) > 0 va holati «To'lov "
+        "qilindi»/«Ketdi» EMAS. Aktiv obuna (oldindan to'langan) so'ralmaydi — "
+        "alohida blokda. Muddat — «Final data» (KK.OO).",
         "",
         f"JAMI: kelishilgan {_fmt_usd(t['kelishilgan'])} · undirildi {_fmt_usd(t['undirildi'])} "
         f"({str(t['pct']).replace('.', ',')}%) · qoldiq {_fmt_usd(t['qoldiq'])} · aktiv {_fmt_usd(t['aktiv'])}",
@@ -320,6 +342,8 @@ def full_report(rows, tab, today, source=""):
         f"· ⏸ pauza {c['pauza']}",
     ]
     for pm in d["pms"]:
+        if not pm["n"] and not pm["paid_n"]:
+            continue
         L.append(f"\n▸ **{pm['name']}** — undirilmagan {pm['n']} ta, {_fmt_usd(pm['sum'])}:")
         for i in pm["items"]:
             if i["status"] == "nodate":
@@ -331,10 +355,17 @@ def full_report(rows, tab, today, source=""):
             else:
                 mud = i["muddat"]
             extra = " ⏸" if i["pauza"] else ""
-            L.append(f"  {STATUS_MARK[i['status']]} {i['loyiha']} — {_fmt_usd(i['summa'])} "
-                     f"({i['manba']}), {mud}{extra}")
+            L.append(f"  {STATUS_MARK[i['status']]} {i['loyiha']} — {_fmt_usd(i['summa'])}, {mud}{extra}")
         if pm["paid_n"]:
             L.append(f"  ✅ to'langan: {pm['paid_n']} ta, {_fmt_usd(pm['paid_sum'])}")
+    ao = d.get("aktiv_obuna") or {}
+    if ao.get("n"):
+        L.append(f"\n💳 **Aktiv obuna (oldindan to'langan — so'ralmaydi):** "
+                 f"{ao['n']} loyiha, {_fmt_usd(ao['sum'])}")
+        for p in ao["pms"]:
+            L.append(f"  • {p['name']}: {p['n']} ta, {_fmt_usd(p['sum'])} — "
+                     f"{', '.join(p['loyihalar'][:8])}"
+                     + (f" +{p['n'] - 8}" if p["n"] > 8 else ""))
     return "\n".join(L)
 
 
@@ -348,9 +379,14 @@ def pdf_caption(d, title=None):
         + (f" · aktiv {_fmt_usd(t['aktiv'])}" if t["aktiv"] else ""),
     ]
     for pm in d["pms"]:
+        if not pm["n"]:
+            continue
         od = sum(1 for i in pm["items"] if i["status"] == "overdue")
         L.append(f"{pm['name']}: {pm['n']} ta undirilmagan, {_fmt_usd(pm['sum'])}"
                  + (f" · 🔴 {od} muddat o'tgan" if od else ""))
+    ao = d.get("aktiv_obuna") or {}
+    if ao.get("n"):
+        L.append(f"💳 Aktiv obuna: {ao['n']} loyiha, {_fmt_usd(ao['sum'])} (so'ralmaydi)")
     L.append("📎 Batafsil PDF ichida")
     return "\n".join(L)[:1024]
 

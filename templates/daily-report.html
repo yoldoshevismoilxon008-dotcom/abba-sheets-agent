@@ -150,7 +150,7 @@
     <div class="uk"><div class="l">Kelishilgan</div><div class="v">{{ undiruv.kelishilgan_disp }}</div></div>
     <div class="uk"><div class="l">Undirildi</div><div class="v c-green">{{ undiruv.undirildi_disp }}</div></div>
     <div class="uk"><div class="l">Qoldiq</div><div class="v c-orange">{{ undiruv.qoldiq_disp }}</div></div>
-    {% if undiruv.aktiv %}<div class="uk"><div class="l">Aktiv (ehtimoliy)</div><div class="v muted">{{ undiruv.aktiv_disp }}</div></div>{% endif %}
+    {% if undiruv.aktiv %}<div class="uk"><div class="l">Aktiv obuna</div><div class="v muted">{{ undiruv.aktiv_disp }}</div></div>{% endif %}
     <div class="uk"><div class="l">Bajarilish</div><div class="v">{{ undiruv.pct|string|replace(".", ",") }}%</div></div>
   </div>
   {% if undiruv.muddat_otgan %}

@@ -291,11 +291,17 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     muddat o'tgan yoki ≤PUSH_DUE_DAYS kun. Sanasizlar PM'ga ketmaydi (stats'da).
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
-    stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0}
+    stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
+             "aktiv_n": 0, "aktiv_sum": 0}
+    # Aktiv obuna (joriy oy) — pul so'ralmaydi, faqat ega jamlamasida ma'lumot
+    for r in cur_rows:
+        if undiruv.is_active_only(r):
+            stats["aktiv_n"] += 1
+            stats["aktiv_sum"] += round(r["aktiv"])
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_rows]:
         if not undiruv.is_unpaid(r):
             continue
-        summa = r["qoldiq"] or r["aktiv"]
+        summa = r["qoldiq"]
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
         if r["holat"] == "pauza":
             stats["pauza"].append(f"{r['loyiha']} ({r['pm']})")
@@ -393,6 +399,8 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         else:
             L.append(f"• {name}: bugun eslatma yo'q")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
+    if stats["aktiv_n"]:
+        L.append(f"💳 Aktiv obuna (so'ralmaydi): {stats['aktiv_n']} loyiha, {_fmt(stats['aktiv_sum'])}")
     if stats["pauza"]:
         L.append(f"⏸ Pauza: {', '.join(stats['pauza'][:8])}")
     if stats["bad_sum"] or stats["no_date"]:

@@ -158,20 +158,25 @@ def build_undiruv(day, now):
     today = date.fromisoformat(day)
 
     def status_label(r):
-        if r["holat"] == "pending" and r["muddat"] and r["muddat"] < today:
+        # Aktiv obuna (oldindan to'langan) — pul so'ralmaydi, muddat o'tgan
+        # hisoblanmaydi
+        if undiruvmod.is_active_only(r):
+            return "Aktiv obuna 💳"
+        if undiruvmod.is_unpaid(r) and r["muddat"] and r["muddat"] < today:
             return "MUDDAT O'TDI 🔴"
         return undiruvmod.STATUS_LABEL[r["holat"]]
 
-    order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Pauza ⏸": 2, "Ketdi ⛔": 3,
-             "Undirildi ✅": 4}
+    order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Aktiv obuna 💳": 2,
+             "Pauza ⏸": 3, "Ketdi ⛔": 4, "Undirildi ✅": 5}
     out = [[f"UNDIRUV — {tab}", "", "", "", "", "", ""], list(HEADERS_UNDIRUV)]
     for r in sorted(rows, key=lambda r: (order.get(status_label(r), 9),
                                          r["muddat"] or today)):
+        aktiv_only = undiruvmod.is_active_only(r)
         out.append([
             r["pm"], r["loyiha"],
-            round(r["kelishilgan"]) or "",
+            (round(r["aktiv"]) if aktiv_only else round(r["kelishilgan"])) or "",
             round(r["undirildi"]) or "",
-            round(r["qoldiq"] or r["aktiv"]) or "",
+            round(r["qoldiq"]) or "",
             undiruvmod._due_str(r["muddat"]),
             status_label(r),
         ])
@@ -183,7 +188,7 @@ def build_undiruv(day, now):
     out.append([])
     out.append(["JAMI (kelishilgan)", "", kelishilgan, undirildi, qoldiq, "", pct])
     if aktiv:
-        out.append(["Aktiv (ehtimoliy)", "", aktiv, "", aktiv, "", ""])
+        out.append(["Aktiv obuna (so'ralmaydi)", "", aktiv, "", "", "", ""])
     out.append(["Yangilangan", now, "", "", "", "", ""])
     return out
 

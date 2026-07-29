@@ -231,6 +231,10 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         pm["items"] = items
         pms.append(pm)
     d = dict(data, pms=pms)
+    ao = data.get("aktiv_obuna") or {}
+    if ao.get("n"):
+        ao = dict(ao, sum_d=usd(ao.get("sum", 0)),
+                  pms=[dict(p, sum_d=usd(p.get("sum", 0))) for p in ao.get("pms", [])])
     return tpl.render(
         data=d,
         t=t_disp,
@@ -240,6 +244,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,
         overdue_sum=usd(overdue_sum),
+        aktiv_obuna=ao if ao.get("n") else None,
         push_info=data.get("push_info") or [],
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )

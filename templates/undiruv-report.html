@@ -75,7 +75,7 @@
     <div class="k"><div class="l">Undirildi</div><div class="v c-green">{{ t.undirildi_d }}</div></div>
     <div class="k"><div class="l">Bajarilish</div><div class="v">{{ t.pct_d }}%</div></div>
     <div class="k"><div class="l">Qoldiq</div><div class="v c-orange">{{ t.qoldiq_d }}</div></div>
-    {% if data.totals.aktiv %}<div class="k"><div class="l">Aktiv (ehtimoliy)</div><div class="v muted">{{ t.aktiv_d }}</div></div>{% endif %}
+    {% if data.totals.aktiv %}<div class="k"><div class="l">Aktiv obuna</div><div class="v muted">{{ t.aktiv_d }}</div></div>{% endif %}
   </div>
   <div class="counts">Loyihalar: {{ data.counts.jami }} ta · ✅ to'langan {{ data.counts.paid }} ·
     ⛔ ketgan {{ data.counts.ketdi }} · ⏸ pauza {{ data.counts.pauza }}</div>
@@ -94,7 +94,7 @@
       {% for i in pm["items"] %}
       <tr class="{{ i.status }}">
         <td>{{ i.loyiha }}{% if i.pauza %} ⏸{% endif %}</td>
-        <td class="sum">{{ i.summa_d }} <span class="src">{{ i.manba }}</span></td>
+        <td class="sum">{{ i.summa_d }}</td>
         <td class="due">{{ i.muddat }}</td>
         <td class="st">{{ i.st_label }}</td>
       </tr>
@@ -105,6 +105,21 @@
   </div>
   {% endfor %}
 </div>
+
+{% if aktiv_obuna and aktiv_obuna.n %}
+<div class="panel push-info" style="margin-top: 4mm;">
+  <h3>💳 Aktiv obuna — oldindan to'langan, so'ralmaydi ({{ aktiv_obuna.n }} loyiha · {{ aktiv_obuna.sum_d }})</h3>
+  <table>
+    {% for p in aktiv_obuna.pms %}
+    <tr>
+      <td style="width: 22mm; font-weight: 600;">{{ p.name }}</td>
+      <td>{{ p.loyihalar|join(" · ") }}</td>
+      <td class="sum">{{ p.sum_d }} <span class="src">{{ p.n }} ta</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 
 {% if push_info %}
 <div class="panel push-info">
