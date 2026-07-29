@@ -139,6 +139,7 @@ HELP = (
     "/audit — data sifat auditi\n"
     "/test_undiruv — undiruv filtri dry-run (to'liq ro'yxat, PM kesimida)\n"
     "/pm_status — PM undiruv-push slotlari (kim ulangan) · /pm_push dry — sinov\n"
+    "/ovoz — ovozli rejim holati (on/off) — ovozli savol yuborsangiz STT+TTS\n"
     "/dashboard — dashboard linki + oxirgi yangilanish\n"
     "/ack — tan olingan audit muammolari (/ack <kalit> [izoh] — qo'shish)\n"
     "/dizayn — PDF dizayni: presetlar, matnli o'zgartirish; rasm yuborsangiz — "
@@ -1108,6 +1109,77 @@ def audit_qa_data(findings, source, today, ai_lines):
     return qa
 
 
+# ---------- ovozli xabarlar (faqat ega) ----------
+
+VOICE_MAX_SEC = 180
+
+
+def send_voice_file(path, caption=""):
+    """Telegram sendVoice (OGG/Opus)."""
+    try:
+        with open(path, "rb") as f:
+            r = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendVoice",
+                data={"chat_id": CHAT_ID, "caption": caption[:1024]},
+                files={"voice": ("javob.ogg", f, "audio/ogg")},
+                timeout=120,
+            )
+        if r.status_code != 200:
+            log(f"sendVoice {r.status_code}: {r.text[:150]}")
+            return False
+        return True
+    except Exception as e:
+        log(f"sendVoice xato: {type(e).__name__}: {str(e)[:120]}")
+        return False
+
+
+def handle_voice(msg):
+    """Egadan ovozli xabar: STT → matn → odatiy Q&A oqimi → javob xulosasi
+    TTS ovoz bilan ham qaytadi. STT/TTS FAQAT egaga (PM voice — forward)."""
+    import stt
+
+    v = msg.get("voice") or msg.get("audio") or {}
+    dur = int(v.get("duration") or 0)
+    if dur > VOICE_MAX_SEC:
+        send_retry(f"Ovozli xabar {VOICE_MAX_SEC // 60} daqiqadan oshmasin — "
+                   "qisqartirib qayta yuboring.", attempts=2)
+        return "voice-long"
+    ok, why = stt.stt_ready()
+    if not ok:
+        log(f"STT tayyor emas: {why}")
+        send_retry("🎤 Ovozli rejim hali sozlanmagan (model/binary yetib kelmagan) — "
+                   "hozircha matn yozing.", attempts=2)
+        return "voice-nostt"
+    mid = send_status("🎤 Eshityapman...")
+    typing()
+    path = None
+    try:
+        path = design.download(TOKEN, v["file_id"], "voice.ogg")
+        text = stt.transcribe(path)
+    except Exception as e:
+        log(f"STT xato: {type(e).__name__}: {str(e)[:200]}")
+        if not edit_status(mid, "🎤 Transkripsiya xatosi — keyinroq urinib ko'ring."):
+            send_retry("🎤 Transkripsiya xatosi — keyinroq urinib ko'ring.", attempts=2)
+        return "voice-err"
+    finally:
+        if path:
+            Path(path).unlink(missing_ok=True)
+    if not text:
+        edit_status(mid, "🎤 Tushunolmadim — aniqroq qayta yozib ko'ring (yoki matn yozing).")
+        return "voice-empty"
+    delete_status(mid)
+    send_retry(f"🎤 Eshitdim: «{text}»", attempts=2)
+    log(f"VOICE→SAVOL: {text[:200]!r} ({dur}s)")
+    ans = do_question(text)
+    if ans and stt.tts_enabled():
+        try:
+            ogg = stt.tts(ans, DATA / "qa-pdf" / "voice-javob.ogg")
+            send_voice_file(ogg)
+        except Exception as e:
+            log(f"TTS xato (javob matnda qoldi): {type(e).__name__}: {str(e)[:150]}")
+    return "voice"
+
+
 # ---------- savol / buyruqlar ----------
 
 def do_question(q):
@@ -1187,6 +1259,7 @@ def do_question(q):
         f"fetch_ms={int((t_fetch - t0) * 1000)} claude_ms={int((t_claude - t_fetch) * 1000)} "
         f"ctx={len(data_text)} hist={len(hist_data)} ans={len(ans)}"
     )
+    return ans  # ovozli oqim (handle_voice) TTS xulosa uchun ishlatadi
 
 
 def do_audit():
@@ -1587,11 +1660,13 @@ def handle_update(upd):
         text_preview = (msg.get("text") or msg.get("caption") or "")[:60]
         log(f"IGNORE: begona chat_id={chat} (matn: {text_preview!r})")
         return "ignored"
+    if msg.get("voice") or msg.get("audio"):
+        return handle_voice(msg)
     if msg.get("document") or msg.get("photo"):
         return handle_media(msg)
     text = (msg.get("text") or "").strip()
     if not text:
-        send_retry("Faqat matn yoki rasm qabul qilaman.", attempts=2)
+        send_retry("Faqat matn, rasm yoki ovozli xabar qabul qilaman.", attempts=2)
         return "non-text"
     # Kutilayotgan dizayn tasdig'i bo'lsa — «tasdiq»/«bekor» so'zlarini ushlaymiz
     p = design.load_pending()
@@ -1627,6 +1702,22 @@ def handle_update(upd):
         send_retry(pm_push.approve(slot) if cmd == "approve" else pm_push.reject(slot),
                    attempts=2)
         return f"pm-{cmd}"
+    if low.startswith("/ovoz"):
+        import stt
+
+        arg = low.split(None, 1)[1].strip() if len(low.split()) > 1 else ""
+        if arg in ("on", "off"):
+            stt.set_tts(arg == "on")
+            send_retry(f"🔊 Javob ovozi: {'yoqildi ✅' if arg == 'on' else 'o‘chirildi'} "
+                       "(ovozli savollar baribir qabul qilinadi).", attempts=2)
+        else:
+            ok, why = stt.stt_ready()
+            send_retry(
+                f"🎤 STT: {'tayyor ✅' if ok else 'sozlanmagan — ' + why}\n"
+                f"🔊 Javob ovozi (TTS): {'on' if stt.tts_enabled() else 'off'}\n"
+                "Boshqarish: /ovoz on · /ovoz off", attempts=2,
+            )
+        return "ovoz"
     if low.startswith("/pm_status"):
         import pm_push
 

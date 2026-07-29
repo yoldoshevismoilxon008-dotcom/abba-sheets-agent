@@ -126,6 +126,13 @@ def main():
     boot_secrets()
     boot_brand()
     boot_seed()
+    # STT modeli (785MB) — fonda, bot bloklanmaydi; MODEL_URL bo'lmasa jim
+    try:
+        import stt
+
+        stt.ensure_model_async()
+    except Exception as e:
+        log(f"stt model preload boshlanmadi: {e}")
 
     from apscheduler.schedulers.background import BackgroundScheduler
 
