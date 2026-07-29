@@ -326,7 +326,7 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
-             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": []}
+             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "conflict": []}
     # Aktiv obuna (joriy oy) — pul so'ralmaydi, faqat ega jamlamasida ma'lumot
     for r in cur_rows:
         if undiruv.is_active_only(r):
@@ -343,6 +343,11 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
             continue
+        if r.get("ziddiyat"):
+            stats["conflict"].append(
+                {"loyiha": r["loyiha"], "pm": r["pm"],
+                 "d": round(r["qoldiq"]), "e": round(r["undirildi"])}
+            )
         summa = r["qoldiq_net"]
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
         if r["holat"] == "pauza":
@@ -461,6 +466,12 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
                  "(tayyor matnlar alohida keladi)")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
+    if stats["conflict"]:
+        cf = stats["conflict"]
+        det = ", ".join(f"{i['loyiha']} ({i['pm']}, D={_fmt(i['d'])} E={_fmt(i['e'])})"
+                        for i in cf[:6])
+        L.append(f"⚠️ Ziddiyatli qator (Undirildi > Summa): {len(cf)} ta — sheet'ni "
+                 f"tekshirish kerak: {det}" + (f" +{len(cf) - 6}" if len(cf) > 6 else ""))
     if stats["closed_carry"]:
         cc = stats["closed_carry"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])

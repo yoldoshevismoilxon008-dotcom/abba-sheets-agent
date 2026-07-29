@@ -143,14 +143,19 @@ def parse_rows(vals, today):
         if not name:
             continue
         qoldiq, undirildi, aktiv = money(get(c_left)), money(get(c_paid)), money(get(c_active))
+        # KO'RSATILADIGAN/so'raladigan qarz: Summa − Undirildi, FAQAT natija
+        # ≥ 0 bo'lsa (ba'zi tab'larda D kamaytirilmay faqat E to'ldiriladi —
+        # iyun tanho D=$2400 E=$2100 → $300). Undirildi > Summa bo'lsa —
+        # ZIDDIYATLI qator (ba'zi qatorlarda D allaqachon net yuritiladi,
+        # masalan Stirkauz D=$350 E=$1000): qoldiq = Summa deb olinadi,
+        # qator push'da QOLADI, ega jamlamasida "sheet'ni tekshirish" bloki.
+        raw_net = qoldiq - undirildi
         rows.append({
             "loyiha": name,
             "pm": get(c_pm) or "—",
             "qoldiq": qoldiq,
-            # KO'RSATILADIGAN/so'raladigan qarz: Summa − Undirildi (ba'zi
-            # tab'larda D kamaytirilmay, faqat E to'ldiriladi — masalan iyun
-            # tanho D=$2400 E=$2100 → real qarz $300)
-            "qoldiq_net": qoldiq - undirildi,
+            "qoldiq_net": raw_net if raw_net >= 0 else qoldiq,
+            "ziddiyat": qoldiq > 0 and undirildi > qoldiq,
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
