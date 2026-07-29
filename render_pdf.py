@@ -191,6 +191,73 @@ def build_html(data, theme=None, logo_uri=None):
     )
 
 
+# ---------- Undiruv hisobot PDF (egaga: 09:31 jamlama, /test_undiruv) ----------
+
+def build_undiruv_html(data, theme=None, logo_uri=None):
+    """undiruv.report_data() strukturasi → HTML. data'da ixtiyoriy "push_info"
+    (satrlar ro'yxati — 09:31 jamlama bloki) bo'lishi mumkin."""
+    from jinja2 import Environment, FileSystemLoader
+
+    if theme is None:
+        theme, _ = load_theme()
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
+    tpl = env.get_template("undiruv-report.html")
+    usd = lambda v: f"${v:,.0f}".replace(",", " ")
+    t = dict(data.get("totals", {}))
+    t_disp = {k + "_d": usd(t.get(k, 0)) for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv")}
+    t_disp["pct_d"] = str(t.get("pct", 0)).replace(".", ",")
+    pms = []
+    overdue_n, overdue_sum = 0, 0
+    for pm in data.get("pms", []):
+        pm = dict(pm)
+        pm["sum_d"] = usd(pm.get("sum", 0))
+        pm["paid_sum_d"] = usd(pm.get("paid_sum", 0))
+        items = []
+        for i in pm.get("items", []):
+            i = dict(i)
+            i["summa_d"] = usd(i.get("summa", 0))
+            st, kun = i.get("status"), i.get("kun")
+            if st == "overdue":
+                i["st_label"] = f"🔴 {kun} kun o'tdi"
+                overdue_n += 1
+                overdue_sum += i.get("summa", 0)
+            elif st == "soon":
+                i["st_label"] = "⏳ bugun" if kun == 0 else f"⏳ {kun} kun qoldi"
+            elif st == "future":
+                i["st_label"] = f"📅 {kun} kun"
+            else:
+                i["st_label"] = "📋 sana yo'q"
+            items.append(i)
+        pm["items"] = items
+        pms.append(pm)
+    d = dict(data, pms=pms)
+    return tpl.render(
+        data=d,
+        t=t_disp,
+        theme=theme,
+        logo_uri=logo_uri if logo_uri is not None else logo_data_uri(),
+        oy_title=str(data.get("oy", "?")).capitalize(),
+        date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
+        overdue_n=overdue_n,
+        overdue_sum=usd(overdue_sum),
+        push_info=data.get("push_info") or [],
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+    )
+
+
+def render_undiruv(data, out_pdf, keep_html=False, theme_name=None):
+    """Undiruv report_data → PDF. Kunlik render() bilan bir xil theme-fallback."""
+    theme, resolved = load_theme(theme_name)
+    try:
+        return _render_with(data, out_pdf, theme, keep_html, builder=build_undiruv_html)
+    except Exception as e:
+        if resolved == "default":
+            raise
+        log(f"theme '{resolved}' bilan undiruv render yiqildi ({e}) — default fallback")
+        theme, _ = load_theme("default")
+        return _render_with(data, out_pdf, theme, keep_html, builder=build_undiruv_html)
+
+
 # ---------- Q&A infografik PDF (bot javoblari uchun) ----------
 
 # Semantik rang nomi → theme kaliti (Claude JSON'da faqat shu nomlarni beradi)

@@ -32,7 +32,7 @@ DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
 CHATS_FILE = DATA / "pm_chats.json"
 STATE_FILE = DATA / "undiruv_push_state.json"
 
-PUSH_DUE_DAYS = 5  # muddatgacha shuncha kun qolganda eslatish boshlanadi
+PUSH_DUE_DAYS = undiruv.PUSH_DUE_DAYS  # yagona chegara — undiruv.py'da
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
@@ -72,6 +72,33 @@ def send_to(chat_id, text):
 def send_owner(text):
     _token, owner = _owner()
     return send_to(owner, text)
+
+
+def _send_doc_owner(path, caption, filename):
+    """Egaga PDF hujjat (testda monkeypatch qilinadi)."""
+    import send as sendmod
+
+    token, owner = _owner()
+    sendmod.tg_send_document(token, owner, str(path), caption, filename=filename)
+    return True
+
+
+def owner_pdf(rows, tab, today, source, push_lines=None, title=None):
+    """Egaga dizaynli undiruv PDF (render_pdf pipeline, abba logo, theme).
+    Muvaffaqiyatda True; yiqilsa False — chaqiruvchi matn fallback yuboradi."""
+    try:
+        import render_pdf
+
+        d = undiruv.report_data(rows, tab, today, source=source)
+        if push_lines:
+            d["push_info"] = push_lines
+        out = DATA / "qa-pdf" / f"Undiruv-{d['oy']}-{today.isoformat()}.pdf"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        render_pdf.render_undiruv(d, out)
+        return _send_doc_owner(out, undiruv.pdf_caption(d, title=title), out.name)
+    except Exception as e:
+        log(f"undiruv PDF bo'lmadi ({type(e).__name__}: {str(e)[:150]}) — matn rejimi")
+        return False
 
 
 # ---------- slotlar / mapping ----------
@@ -372,8 +399,14 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"⚠️ Data: Summa son emas — {stats['bad_sum']} qator · sanasiz — "
                  f"{stats['no_date']} qator (PM'ga ketmadi)")
     summary = "\n".join(L)
+    # Egaga: dizaynli PDF (jamlama bloki bilan); yiqilsa matn fallback.
+    # dry_run'da ham egaga PDF ketadi (sinov ko'rinishi), faqat PM'lar va
+    # state chetda qoladi.
+    dd_title = ("🧪 [DRY] " if dry_run else "📤 ") + f"Undiruv push jamlamasi — {dd}"
+    if not owner_pdf(cur_rows, tab, today, f"snapshot {snap_day}",
+                     push_lines=L[1:], title=dd_title):
+        send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
     if not dry_run:
-        send_owner(summary)
         _save_state({"date": today.isoformat(), "tab": tab, "sent": sent,
                      "waiting": waiting})
     log(f"push tayyor: {len(sent)} PM'ga ketdi, {len(waiting)} kutmoqda")

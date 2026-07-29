@@ -1271,9 +1271,19 @@ def do_test_undiruv():
         edit_status(mid, f"«Undiruv {fetchmod.current_month_name(today)}» tabi o'qilmadi "
                          "(jonli ham, snapshot ham).")
         return
-    delete_status(mid)
-    ok = send_retry(undiruvmod.full_report(rows, tab, today, source=src))
-    log(f"/test_undiruv {'yuborildi' if ok else 'YUBORILMADI'} ({len(rows)} qator, {src})")
+    # Dizaynli PDF (render_pdf pipeline); yiqilsa avvalgi matn ko'rinishi
+    import pm_push as pmp
+
+    pdf_ok = pmp.owner_pdf(rows, tab, today, src,
+                           title=f"🧪 Undiruv dry-run — {tab} ({src})")
+    if pdf_ok:
+        delete_status(mid)
+        ok = True
+    else:
+        delete_status(mid)
+        ok = send_retry(undiruvmod.full_report(rows, tab, today, source=src))
+    log(f"/test_undiruv {'yuborildi' if ok else 'YUBORILMADI'} "
+        f"({'PDF' if pdf_ok else 'matn'}, {len(rows)} qator, {src})")
 
 
 def do_hisobot():
@@ -1629,7 +1639,11 @@ def handle_update(upd):
         arg = low.split(None, 1)[1] if len(low.split()) > 1 else ""
         status, summary = pm_push.run_daily(force="force" in arg or "dry" in arg,
                                             dry_run="dry" in arg)
-        send_retry(summary or f"holat: {status}", attempts=2)
+        # "sent" holatida egaga PDF (yoki matn fallback) run_daily ichida ketdi
+        if status == "skip":
+            send_retry("Bugun allaqachon yuborilgan — qayta: /pm_push force", attempts=2)
+        elif status == "no-tab":
+            send_retry(summary, attempts=2)
         return "pm-push"
     if low.startswith("/ack"):
         arg = text[4:].strip()
