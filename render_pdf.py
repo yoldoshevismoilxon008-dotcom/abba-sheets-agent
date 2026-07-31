@@ -342,6 +342,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         logo_uri=logo_uri,
         reconcile_warn=reconcile_warn,
         snapshot_banner=snapshot_banner,
+        pm_col_warn=data.get("pm_col_warn", ""),
         oy_title=str(data.get("oy", "?")).capitalize(),
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,

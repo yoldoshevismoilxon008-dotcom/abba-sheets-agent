@@ -147,9 +147,14 @@ def parse_rows(vals, today):
         # So'raladigan qoldiq = D (AYIRMASIZ). E'ni ayirish (eski qoldiq_net)
         # noto'g'ri edi — iyul'da har qatorni ikki marta ayirar edi.
         status_raw = get(c_status)
+        pm_val = get(c_pm)  # c_pm=None (ustun yo'q) yoki katak bo'sh → ""
         rows.append({
             "loyiha": name,
-            "pm": get(c_pm) or "—",
+            "pm": pm_val or "—",
+            # PM aniqlanmagan qator PM'ga yo'naltirilmasin (jim "—" ga ketmasin);
+            # pm_col_present: tabda umuman "Ma'sul shaxs" ustuni bormi (avgust yo'q)
+            "pm_missing": not pm_val,
+            "pm_col_present": c_pm is not None,
             "qoldiq": qoldiq,
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,

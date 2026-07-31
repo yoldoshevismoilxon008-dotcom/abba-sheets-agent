@@ -94,6 +94,11 @@ def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source
         d = undiruv.report_data(rows, tab, today, source=source)
         # data_source berilmasa — display source satridan chiqaramiz
         d["data_source"] = data_source or ("snapshot" if str(source).startswith("snapshot") else "live")
+        # PM ustuni tabda umuman yo'q bo'lsa — PDF boshiga qora banner
+        if rows and not rows[0].get("pm_col_present", True):
+            n = sum(1 for r in rows if undiruv.is_unpaid(r))
+            d["pm_col_warn"] = (f"⚠️ «{tab}» tabida «Ma'sul shaxs» ustuni YO'Q — "
+                                f"{n} qator PM'ga yo'naltirilmadi")
         if push_lines:
             d["push_info"] = push_lines
         out = DATA / "qa-pdf" / f"Undiruv-{d['oy']}-{today.isoformat()}.pdf"
@@ -344,7 +349,11 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
-             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "status_blank": []}
+             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "status_blank": [],
+             "pm_missing": [], "pm_col_missing": False, "pm_col_tab": ""}
+    # PM ustuni tabda UMUMAN yo'qmi (avgust holati) — joriy oy qatorlaridan
+    if cur_rows and not cur_rows[0].get("pm_col_present", True):
+        stats["pm_col_missing"] = True
     # Aktiv obuna (joriy oy) — pul so'ralmaydi, faqat ega jamlamasida ma'lumot
     for r in cur_rows:
         if undiruv.is_active_only(r):
@@ -383,6 +392,11 @@ def build_push(today, cur_rows, prev_rows, prev_month):
             qoldi = "bugun oxirgi kun" if days_left == 0 else f"{days_left} kun qoldi"
             line = (f"⏳ Undiruv: {name} — qoldiq {_fmt(summa)}, "
                     f"muddat {undiruv._due_str(r['muddat'])} ({qoldi})")
+        # PM aniqlanmagan (ustun yo'q yoki katak bo'sh) — PM'GA YO'NALTIRILMAYDI,
+        # egaga ogohlantirish + qo'lda yuborish uchun tayyor matn
+        if r.get("pm_missing"):
+            stats["pm_missing"].append({"loyiha": r["loyiha"], "line": line})
+            continue
         per_pm.setdefault(r["pm"], []).append(line)
     # Summa katagi son emas (bo'sh ham, raqamli ham emas — masalan #REF!, matn)
     import re as _re
@@ -430,6 +444,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     # Manba: jonli bo'lmasa (birortasi snapshot) — banner chiqadi
     data_source = "snapshot" if "snapshot" in (cur_src, prev_src) else "live"
     per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month)
+    stats["pm_col_tab"] = tab  # guard xabari uchun
 
     contacts = load_contacts()
     slots = slots_from_config()
@@ -471,11 +486,16 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
             log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
             sent[slot] = len(by_slot[slot][1])
 
-    # Egaga jamlama — boshida 🧊 SNAPSHOT banner (jonli emas) + reconciliation guard
+    # Egaga jamlama — boshida bannerlar: 🧊 SNAPSHOT + PM-ustun guard + reconcile
     L = []
     _banner = undiruv.snapshot_banner(data_source, snap_day)
     if _banner:
         L.append(_banner)
+    # PM ustuni UMUMAN yo'q (avgust) — qora banner, PM'ga push yuborilmaydi
+    if stats.get("pm_col_missing"):
+        n = len(stats["pm_missing"])
+        L.append(f"⚠️ **{stats['pm_col_tab']}** tabida «Ma'sul shaxs» ustuni YO'Q — "
+                 f"{n} qator PM'ga yo'naltirilmadi (qo'lda yuborish uchun matn quyida).")
     _warn = undiruv.reconcile_warn(undiruv.totals(cur_rows))
     if _warn:
         L.append(_warn)
@@ -507,6 +527,13 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan): "
                  f"{len(cc)} ta, {_fmt(sum(i['summa'] for i in cc))} — sheet'ni tuzatish "
                  f"kerak: {det}{more}")
+    # PM ustuni BOR, lekin ayrim kataklar bo'sh (ustun umuman yo'q bo'lsa
+    # yuqorida qora banner chiqqan — bu yerda takrorlanmaydi)
+    if stats["pm_missing"] and not stats["pm_col_missing"]:
+        pmm = stats["pm_missing"]
+        det = ", ".join(i["loyiha"] for i in pmm[:8]) + (f" +{len(pmm) - 8}" if len(pmm) > 8 else "")
+        L.append(f"⚠️ PM'siz {len(pmm)} qator (PM katagi bo'sh — PM'ga ketmadi, "
+                 f"qo'lda yuboring): {det}")
     if stats["aktiv_n"]:
         L.append(f"💳 Aktiv obuna (so'ralmaydi): {stats['aktiv_n']} loyiha, {_fmt(stats['aktiv_sum'])}")
     if stats["pauza"]:
@@ -530,6 +557,14 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         for slot, _c, text in msgs:
             send_owner(f"📋 {by_slot[slot][0]} uchun tayyor matn "
                        f"({contacts.get(slot, '?')}):\n\n{text}")
+    # PM aniqlanmagan qatorlar (ustun yo'q yoki katak bo'sh) — qo'lda yuborish
+    # uchun tayyor matn (userbot fallback'i kabi). dry'da ham egaga ko'rsatiladi.
+    if stats["pm_missing"]:
+        pmm_text = "\n".join(i["line"] for i in stats["pm_missing"])
+        why = (f"«{stats['pm_col_tab']}» tabida PM ustuni yo'q"
+               if stats["pm_col_missing"] else "PM katagi bo'sh")
+        send_owner(f"📋 PM aniqlanmagan {len(stats['pm_missing'])} qator ({why}) — "
+                   f"tegishli PM'ga QO'LDA yuboring:\n\n{pmm_text}")
     if not dry_run:
         _save_state({"date": today.isoformat(), "tab": tab, "sent": sent,
                      "failed": failed, "no_contact": no_contact})
