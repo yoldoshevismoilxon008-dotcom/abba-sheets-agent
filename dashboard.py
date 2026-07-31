@@ -172,23 +172,24 @@ def build_undiruv(day, now):
     for r in sorted(rows, key=lambda r: (order.get(status_label(r), 9),
                                          r["muddat"] or today)):
         aktiv_only = undiruvmod.is_active_only(r)
+        unpaid = undiruvmod.is_unpaid(r)
         out.append([
             r["pm"], r["loyiha"],
             (round(r["aktiv"]) if aktiv_only else round(r["kelishilgan"])) or "",
             round(r["undirildi"]) or "",
-            (round(r["qoldiq_net"]) if r["qoldiq_net"] > 0 else "") or "",
+            (round(r["qoldiq"]) if unpaid else "") or "",  # so'raladigan qarz = D
             undiruvmod._due_str(r["muddat"]),
             status_label(r),
         ])
-    kelishilgan = round(sum(r["qoldiq"] + r["undirildi"] for r in rows))
-    undirildi = round(sum(r["undirildi"] for r in rows))
-    qoldiq = round(sum(r["qoldiq_net"] for r in rows if undiruvmod.is_unpaid(r)))
-    aktiv = round(sum(r["aktiv"] for r in rows))
-    pct = f"{undirildi / kelishilgan * 100:.1f}%".replace(".", ",") if kelishilgan else "—"
+    # YAGONA jamlama manbai — Telegram/PDF bilan aynan mos (undiruv.totals)
+    t = undiruvmod.totals(rows)
+    pct = f"{str(t['pct']).replace('.', ',')}%" if t["kelishilgan"] else "—"
     out.append([])
-    out.append(["JAMI (kelishilgan)", "", kelishilgan, undirildi, qoldiq, "", pct])
-    if aktiv:
-        out.append(["Aktiv obuna (so'ralmaydi)", "", aktiv, "", "", "", ""])
+    out.append(["JAMI (kelishilgan)", "", t["kelishilgan"], t["undirildi"], t["qoldiq"], "", pct])
+    if t["aktiv"]:
+        out.append(["Aktiv obuna (so'ralmaydi)", "", t["aktiv"], "", "", "", ""])
+    if t["status_blank_n"]:
+        out.append([f"⚠️ Status bo'sh: {t['status_blank_n']} ta qator", "", "", "", "", "", ""])
     out.append(["Yangilangan", now, "", "", "", "", ""])
     return out
 

@@ -81,12 +81,11 @@ STATUS_LABEL = {"paid": "Undirildi ✅", "pauza": "Pauza ⏸", "ketdi": "Ketdi �
 
 
 def is_unpaid(r):
-    """YAGONA undirilmagan-filtr (summary, full_report, pm_push, PDF — bitta
-    manba): NET qoldiq (Summa − Undirildi) > 0 va holat «To'lov qilindi»/
-    «Ketdi» emas (Pauza so'ralaveradi). Undirildi ≥ Summa bo'lsa qarz yopilgan
-    hisoblanadi — push'ga umuman kirmaydi. «Aktive Summary» — OLDINDAN to'lagan
+    """YAGONA undirilmagan-filtr (summary, full_report, pm_push, PDF, dashboard
+    — bitta manba): «Summa» (D, qolgan qarz) > 0 va holat «To'lov qilindi»/
+    «Ketdi» emas (Pauza so'ralaveradi). «Aktive Summary» — OLDINDAN to'lagan
     obuna mijozlari puli, SO'RALMAYDI (is_active_only)."""
-    return r["holat"] not in ("paid", "ketdi") and r["qoldiq_net"] > 0
+    return r["holat"] not in ("paid", "ketdi") and r["qoldiq"] > 0
 
 
 def is_active_only(r):
@@ -143,28 +142,27 @@ def parse_rows(vals, today):
         if not name:
             continue
         qoldiq, undirildi, aktiv = money(get(c_left)), money(get(c_paid)), money(get(c_active))
-        # KO'RSATILADIGAN/so'raladigan qarz: Summa − Undirildi, FAQAT natija
-        # ≥ 0 bo'lsa (ba'zi tab'larda D kamaytirilmay faqat E to'ldiriladi —
-        # iyun tanho D=$2400 E=$2100 → $300). Undirildi > Summa bo'lsa —
-        # ZIDDIYATLI qator (ba'zi qatorlarda D allaqachon net yuritiladi,
-        # masalan Stirkauz D=$350 E=$1000): qoldiq = Summa deb olinadi,
-        # qator push'da QOLADI, ega jamlamasida "sheet'ni tekshirish" bloki.
-        raw_net = qoldiq - undirildi
+        # KONVENSIYA (2026-07-30, 27/27 paid qator isbotladi): «Summa» (D) =
+        # QOLGAN QARZ, «Undirildi» (E) = shu paytgacha yig'ilgani, Bitim = D+E.
+        # So'raladigan qoldiq = D (AYIRMASIZ). E'ni ayirish (eski qoldiq_net)
+        # noto'g'ri edi — iyul'da har qatorni ikki marta ayirar edi.
+        status_raw = get(c_status)
         rows.append({
             "loyiha": name,
             "pm": get(c_pm) or "—",
             "qoldiq": qoldiq,
-            "qoldiq_net": raw_net if raw_net >= 0 else qoldiq,
-            "ziddiyat": qoldiq > 0 and undirildi > qoldiq,
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
             # Kelishilgan = Summa(qoldiq) + Undirildi. Aktiv unga KIRMAYDI —
             # u oldindan to'langan obuna (alohida ma'lumot ustuni).
             "kelishilgan": qoldiq + undirildi,
+            # Status katagi bo'sh (paid/ketdi belgilanmagan) — D>0 bo'lsa qarz
+            # sanaladi (kam ko'rsatishdan xavfsizroq), lekin egaga ⚠️ belgi.
+            "status_blank": not status_raw,
             "muddat": parse_due(get(c_due), today),
             "muddat_raw": get(c_due),
-            "holat": _status(get(c_status)),
+            "holat": _status(status_raw),
         })
     return rows
 
@@ -199,24 +197,61 @@ def _due_str(d):
     return f"{d.day:02d}.{d.month:02d}" if d else "—"
 
 
+def totals(rows):
+    """YAGONA jamlama manbai — report_data, summary, dashboard uchtasi shundan
+    o'qiydi (aks holda Telegram va Dashboard zid raqam ko'rsatadi).
+      kelishilgan = Σ(D + E)                  — barcha qatorlar
+      undirildi   = Σ E                        — barcha qatorlar
+      qoldiq      = Σ D  (is_unpaid qatorlar)  — so'raladigan qarz (= D, ayirmasiz)
+      aktiv       = Σ Aktive Summary
+      pct         = undirildi / kelishilgan
+      status_blank_n = status bo'sh, lekin qarz sanalgan qatorlar soni (⚠️)
+    Paid qatorlarda D=0 bo'lgani uchun qoldiq = kelishilgan − undirildi bilan
+    yopiladi (agar paid+D>0 anomaliya bo'lsa — o'sha farq ogohlantirish belgisi)."""
+    kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
+    undirildi = sum(r["undirildi"] for r in rows)
+    qoldiq = sum(r["qoldiq"] for r in rows if is_unpaid(r))
+    aktiv = sum(r["aktiv"] for r in rows)
+    # RECONCILIATION GUARD: kelishilgan−undirildi = Σ D(barcha) qoldiq = Σ D
+    # (unpaid); ular teng bo'lishi shart (paid qatorlarda D=0). Farq bo'lsa —
+    # jim BUG (masalan paid+D>0 yoki qoldiq ta'rifi buzilgan). Crash EMAS —
+    # gap saqlanadi, jamlama/PDF boshida ko'rinadigan ogohlantirish chiqadi.
+    gap = round(kelishilgan) - round(undirildi) - round(qoldiq)
+    return {
+        "kelishilgan": round(kelishilgan),
+        "undirildi": round(undirildi),
+        "qoldiq": round(qoldiq),
+        "aktiv": round(aktiv),
+        "pct": round(undirildi / kelishilgan * 100, 1) if kelishilgan else 0.0,
+        "status_blank_n": sum(1 for r in rows if is_unpaid(r) and r.get("status_blank")),
+        "reconcile_gap": gap,
+    }
+
+
+def reconcile_warn(t):
+    """Ogohlantirish satri yoki "" — raqamlar yopilmasa (jamlama/PDF boshiga)."""
+    g = (t or {}).get("reconcile_gap") or 0
+    if not g:
+        return ""
+    kel_und = t["kelishilgan"] - t["undirildi"]
+    return (f"⚠️ Raqamlar yopilmadi: kelishilgan−undirildi = {_fmt_usd(kel_und)}, "
+            f"ro'yxat = {_fmt_usd(t['qoldiq'])} (farq {_fmt_usd(g)}) — sheet'da "
+            "yopilgan qatorda qoldiq qolgan bo'lishi mumkin, tekshiring.")
+
+
 def summary(day, today=None):
     """report.json uchun 'undiruv' bloki. Ma'lumot bo'lmasa None."""
     today = today or date.fromisoformat(day)
     rows, tab = load_rows(day, today)
     if not rows:
         return None
-    kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
-    undirildi = sum(r["undirildi"] for r in rows)
-    # Qoldiq = so'raladigan NET qarzlar yig'indisi (PM itemlar bilan aynan mos)
-    qoldiq = sum(r["qoldiq_net"] for r in rows if is_unpaid(r))
-    aktiv = sum(r["aktiv"] for r in rows)
-
+    t = totals(rows)
     unpaid = is_unpaid
 
     def item(r):
         return {
             "pm": r["pm"], "loyiha": r["loyiha"],
-            "summa": round(r["qoldiq_net"]),
+            "summa": round(r["qoldiq"]),
             "muddat": _due_str(r["muddat"]),
             "kun": (today - r["muddat"]).days if r["muddat"] else None,
         }
@@ -233,11 +268,13 @@ def summary(day, today=None):
     return {
         "oy": fetchmod.current_month_name(today),
         "tab": tab,
-        "kelishilgan": round(kelishilgan),
-        "undirildi": round(undirildi),
-        "qoldiq": round(qoldiq),
-        "aktiv": round(aktiv),
-        "pct": round(undirildi / kelishilgan * 100, 1) if kelishilgan else 0.0,
+        "kelishilgan": t["kelishilgan"],
+        "undirildi": t["undirildi"],
+        "qoldiq": t["qoldiq"],
+        "aktiv": t["aktiv"],
+        "pct": t["pct"],
+        "status_blank_n": t["status_blank_n"],
+        "reconcile_gap": t["reconcile_gap"],
         "muddat_otgan": overdue,
         "muddat_yaqin": soon,
     }
@@ -257,7 +294,10 @@ def report_block(day, today=None):
     s = summary(day, today)
     if not s:
         return ""
-    L = [
+    L = []
+    if s.get("reconcile_gap"):
+        L.append(reconcile_warn(s))
+    L += [
         f"💰 **Undiruv ({s['oy']})** — {s['tab']}",
         f"Kelishilgan {_fmt_usd(s['kelishilgan'])} · undirildi {_fmt_usd(s['undirildi'])} "
         f"({str(s['pct']).replace('.', ',')}%) · qoldiq {_fmt_usd(s['qoldiq'])}"
@@ -277,6 +317,8 @@ def report_block(day, today=None):
         L.append(f"🔜 Muddati ≤{DUE_SOON_DAYS} kun: {det}")
     if not s["muddat_otgan"] and not s["muddat_yaqin"]:
         L.append("⏰ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q ✅")
+    if s.get("status_blank_n"):
+        L.append(f"⚠️ Status bo'sh (tasdiqlanmagan qarz): {s['status_blank_n']} ta qator")
     return "\n".join(L)
 
 
@@ -287,19 +329,11 @@ def report_data(rows, tab, today, source=""):
     """Undiruv hisobotining YAGONA hisob-kitob manbasi — full_report (matn),
     PDF (render_pdf.build_undiruv_html) va caption shu strukturadan quriladi.
     Item status: overdue / soon (≤PUSH_DUE_DAYS) / future / nodate."""
-    kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
-    undirildi = sum(r["undirildi"] for r in rows)
     data = {
         "tab": tab,
         "oy": (fetchmod.norm(tab).split() or ["?"])[-1],
         "source": source,
-        "totals": {
-            "kelishilgan": round(kelishilgan),
-            "undirildi": round(undirildi),
-            "qoldiq": round(sum(r["qoldiq_net"] for r in rows if is_unpaid(r))),
-            "aktiv": round(sum(r["aktiv"] for r in rows)),
-            "pct": round(undirildi / kelishilgan * 100, 1) if kelishilgan else 0.0,
-        },
+        "totals": totals(rows),
         "counts": {
             "jami": len(rows),
             **{k: sum(1 for r in rows if r["holat"] == k) for k in ("paid", "ketdi", "pauza")},
@@ -310,7 +344,7 @@ def report_data(rows, tab, today, source=""):
     for r in rows:
         by_pm.setdefault(r["pm"], []).append(r)
     aktiv_pms, aktiv_n, aktiv_sum = [], 0, 0
-    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq_net"] for x in by_pm[p] if is_unpaid(x))):
+    for pm in sorted(by_pm, key=lambda p: -sum(x["qoldiq"] for x in by_pm[p] if is_unpaid(x))):
         items = []
         for r in sorted((r for r in by_pm[pm] if is_unpaid(r)),
                         key=lambda r: (r["muddat"] is None, r["muddat"] or today)):
@@ -324,11 +358,12 @@ def report_data(rows, tab, today, source=""):
                 status, kun = "future", (r["muddat"] - today).days
             items.append({
                 "loyiha": r["loyiha"],
-                "summa": round(r["qoldiq_net"]),
+                "summa": round(r["qoldiq"]),
                 "muddat": _due_str(r["muddat"]) if r["muddat"] else "—",
                 "status": status,
                 "kun": kun,
                 "pauza": r["holat"] == "pauza",
+                "status_blank": bool(r.get("status_blank")),
             })
         paid = [r for r in by_pm[pm] if r["holat"] == "paid"]
         data["pms"].append({
@@ -365,7 +400,10 @@ def full_report(rows, tab, today, source=""):
         return "🧪 Undiruv dry-run: qator topilmadi."
     d = report_data(rows, tab, today, source)
     t, c = d["totals"], d["counts"]
-    L = [
+    L = []
+    if t.get("reconcile_gap"):
+        L.append(reconcile_warn(t))
+    L += [
         f"🧪 **Undiruv dry-run — {tab}**" + (f" ({source})" if source else ""),
         "Filtr: undirilmagan = «Summa» (shu oy qoldig'i) > 0 va holati «To'lov "
         "qilindi»/«Ketdi» EMAS. Aktiv obuna (oldindan to'langan) so'ralmaydi — "
@@ -390,9 +428,13 @@ def full_report(rows, tab, today, source=""):
             else:
                 mud = i["muddat"]
             extra = " ⏸" if i["pauza"] else ""
+            extra += " ⚠️status bo'sh" if i.get("status_blank") else ""
             L.append(f"  {STATUS_MARK[i['status']]} {i['loyiha']} — {_fmt_usd(i['summa'])}, {mud}{extra}")
         if pm["paid_n"]:
             L.append(f"  ✅ to'langan: {pm['paid_n']} ta, {_fmt_usd(pm['paid_sum'])}")
+    if t.get("status_blank_n"):
+        L.append(f"\n⚠️ Status bo'sh (tasdiqlanmagan qarz): {t['status_blank_n']} ta qator — "
+                 "D>0 bo'lgani uchun qarz sanaldi; sheet'da holatni belgilash tavsiya etiladi.")
     ao = d.get("aktiv_obuna") or {}
     if ao.get("n"):
         L.append(f"\n💳 **Aktiv obuna (oldindan to'langan — so'ralmaydi):** "

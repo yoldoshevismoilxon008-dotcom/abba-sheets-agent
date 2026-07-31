@@ -326,7 +326,7 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
-             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "conflict": []}
+             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "status_blank": []}
     # Aktiv obuna (joriy oy) — pul so'ralmaydi, faqat ega jamlamasida ma'lumot
     for r in cur_rows:
         if undiruv.is_active_only(r):
@@ -337,18 +337,17 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     # "sheet'ni tuzatish kerak" bloki
     prev_real, closed = undiruv.carryover_filter(prev_rows, cur_rows)
     stats["closed_carry"] = [
-        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq_net"])}
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
         for r in closed
     ]
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
             continue
-        if r.get("ziddiyat"):
-            stats["conflict"].append(
-                {"loyiha": r["loyiha"], "pm": r["pm"],
-                 "d": round(r["qoldiq"]), "e": round(r["undirildi"])}
-            )
-        summa = r["qoldiq_net"]
+        summa = r["qoldiq"]  # so'raladigan qarz = D (ayirmasiz)
+        # PM'ga ketadigan xabar TOZA qoladi (⚠️ chalg'itmasin) — status-bo'sh
+        # belgisi faqat ega jamlamasi/PDF'da ko'rinadi
+        if r.get("status_blank"):
+            stats["status_blank"].append(f"{r['loyiha']} ({r['pm']})")
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
         if r["holat"] == "pauza":
             stats["pauza"].append(f"{r['loyiha']} ({r['pm']})")
@@ -450,8 +449,12 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
             log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
             sent[slot] = len(by_slot[slot][1])
 
-    # Egaga jamlama (yetkazish holati bilan)
-    L = [f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, snapshot: {snap_day})"]
+    # Egaga jamlama (yetkazish holati bilan) — boshida reconciliation guard
+    L = []
+    _warn = undiruv.reconcile_warn(undiruv.totals(cur_rows))
+    if _warn:
+        L.append(_warn)
+    L.append(f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, snapshot: {snap_day})")
     for slot, name in slots.items():
         if slot in sent:
             L.append(f"• {name} ({contacts.get(slot, '?')}): {sent[slot]} eslatma yuborildi ✅")
@@ -466,12 +469,11 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
                  "(tayyor matnlar alohida keladi)")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
-    if stats["conflict"]:
-        cf = stats["conflict"]
-        det = ", ".join(f"{i['loyiha']} ({i['pm']}, D={_fmt(i['d'])} E={_fmt(i['e'])})"
-                        for i in cf[:6])
-        L.append(f"⚠️ Ziddiyatli qator (Undirildi > Summa): {len(cf)} ta — sheet'ni "
-                 f"tekshirish kerak: {det}" + (f" +{len(cf) - 6}" if len(cf) > 6 else ""))
+    if stats["status_blank"]:
+        sb = stats["status_blank"]
+        det = ", ".join(sb[:6]) + (f" +{len(sb) - 6}" if len(sb) > 6 else "")
+        L.append(f"⚠️ Status bo'sh: {len(sb)} ta qator — D>0 bo'lgani uchun qarz "
+                 f"sanaldi; sheet'da holatni belgilang: {det}")
     if stats["closed_carry"]:
         cc = stats["closed_carry"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
@@ -491,8 +493,10 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     # dry_run'da ham egaga PDF ketadi (sinov ko'rinishi), faqat PM'lar va
     # state chetda qoladi.
     dd_title = ("🧪 [DRY] " if dry_run else "📤 ") + f"Undiruv push jamlamasi — {dd}"
+    # push_info bloki: jamlama satrlari (📤-sarlavhasiz; reconciliation warn qoladi)
+    push_lines = [x for x in L if not x.startswith("📤 Undiruv push jamlamasi")]
     if not owner_pdf(cur_rows, tab, today, f"snapshot {snap_day}",
-                     push_lines=L[1:], title=dd_title):
+                     push_lines=push_lines, title=dd_title):
         send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
     # Userbot butunlay ishlamagan kun: egaga 4 TAYYOR matn — qo'lda yuborish uchun
     if fallback_reason and not dry_run:

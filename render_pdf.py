@@ -330,12 +330,15 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         # Prime'da header navy — to'q fon uchun oq logo varianti (bo'lsa)
         logo_uri = logo_data_uri("light" if design.get("header_bg", "").lower() not in
                                  ("#ffffff", "#fff", "") else None)
+    import undiruv as _u
+    reconcile_warn = _u.reconcile_warn(data.get("totals") or {})
     return tpl.render(
         data=d,
         t=t_disp,
         theme=theme,
         design=design,
         logo_uri=logo_uri,
+        reconcile_warn=reconcile_warn,
         oy_title=str(data.get("oy", "?")).capitalize(),
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,

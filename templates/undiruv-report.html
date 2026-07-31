@@ -115,6 +115,11 @@
 </div>
 
 <div class="wrap">
+  {% if reconcile_warn %}
+  <div style="background: var(--chip-red-bg); color: var(--chip-red-text);
+              border-radius: var(--radius); padding: 2.4mm 3.2mm; margin-bottom: var(--sp-2);
+              font-size: 9.5px; font-weight: 700;">{{ reconcile_warn }}</div>
+  {% endif %}
   <div class="kpis">
     <div class="kpi"><div class="l">Kelishilgan</div><div class="v">{{ t.kelishilgan_d }}</div>
       <div class="s">{{ data.counts.jami }} loyiha</div></div>
@@ -145,7 +150,7 @@
       <table>
         {% for i in pm["items"] %}
         <tr class="{{ i.status }}">
-          <td>{{ i.loyiha }}{% if i.pauza %} ⏸{% endif %}</td>
+          <td>{{ i.loyiha }}{% if i.pauza %} ⏸{% endif %}{% if i.status_blank %} ⚠️{% endif %}</td>
           <td class="sum">{{ i.summa_d }}</td>
           <td class="due">{{ i.muddat }}</td>
           <td class="st">{{ i.st_label }}</td>
