@@ -146,6 +146,7 @@
 
 {% if undiruv %}
 <div class="undiruv">
+  {% if undiruv.source == "snapshot" %}<div style="background:#0F1111;color:#fff;border-radius:2mm;padding:1.6mm 2.4mm;margin-bottom:1.6mm;font-size:9.5px;font-weight:800;">🧊 SNAPSHOT — JONLI MA'LUMOT EMAS</div>{% endif %}
   <h3>💰 Undiruv ({{ undiruv.oy }}) — {{ undiruv.tab }}</h3>
   <div class="u-kpis">
     <div class="uk"><div class="l">Kelishilgan</div><div class="v">{{ undiruv.kelishilgan_disp }}</div></div>

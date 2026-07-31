@@ -176,17 +176,65 @@ def find_tab(snap, today=None):
     return None
 
 
-def load_rows(day, today=None):
-    """Kun snapshotidan undiruv qatorlari. Qaytaradi: (rows, tab_nomi) yoki ([], None)."""
-    today = today or date.fromisoformat(day)
+def smm_sheet_id():
+    """Undiruv manba sheet'i (pm_kpi=false) id'si — jonli o'qish uchun."""
+    for s in fetchmod.load_config(include_qa_only=True):
+        if not s.get("pm_kpi", True):
+            return s["id"]
+    return None
+
+
+def fetch_live_month(month_name, today):
+    """JONLI: SMM sheet'dan "Undiruv <month_name>" tabini bevosita o'qiydi
+    (readonly gspread). Qaytadi: (tab, rows) yoki (None, []). Xato — chaqiruvchi
+    ushlaydi (snapshot fallback)."""
+    sid = smm_sheet_id()
+    if not sid:
+        return None, []
+    gc = fetchmod.gclient()
+    sh = gc.open_by_key(sid)
+    want = f"undiruv {fetchmod.norm(month_name)}"
+    tab = next((w.title for w in sh.worksheets() if fetchmod.norm(w.title) == want), None)
+    if not tab:
+        return None, []
+    ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(tab)], "undiruv-live")
+    vals = next(iter(ranges.values())).get("values", [])
+    return tab, parse_rows(vals, today)
+
+
+def load_rows(day=None, today=None, prefer_live=True):
+    """Undiruv qatorlari. prefer_live=True (default): avval JONLI o'qiladi
+    (production 09:00/09:30 uchun MAJBURIY jonli), xato bo'lsagina snapshot
+    fallback. Qaytadi: (rows, tab, source) — source ∈ {'live','snapshot','none'}.
+    day — snapshot fallback kuni (default: bugun)."""
+    today = today or (date.fromisoformat(day) if day else date.today())
+    month = fetchmod.current_month_name(today)
+    if prefer_live:
+        try:
+            tab, rows = fetch_live_month(month, today)
+            if tab is not None:
+                return rows, tab, "live"
+            log(f"jonli: «Undiruv {month}» tabi topilmadi — snapshot fallback")
+        except Exception as e:
+            log(f"jonli o'qish xato ({month}): {type(e).__name__}: {str(e)[:120]} — snapshot fallback")
+    day = day or today.isoformat()
     for snap in diffmod.load_day(day)[0].values():
         if snap.get("pm_kpi", True):
             continue
         rng = find_tab(snap, today)
         if rng:
             vals = snap["ranges"][rng].get("values", [])
-            return parse_rows(vals, today), fetchmod.tab_of_range(rng)
-    return [], None
+            return parse_rows(vals, today), fetchmod.tab_of_range(rng), "snapshot"
+    return [], None, "none"
+
+
+def snapshot_banner(source, snap_day=None):
+    """source='snapshot' bo'lsa — qalin ogohlantirish banneri (PDF/Telegram
+    boshiga). Jonli bo'lsa "" (banner yo'q)."""
+    if source != "snapshot":
+        return ""
+    extra = f" ({snap_day})" if snap_day else ""
+    return f"🧊 **SNAPSHOT — JONLI MA'LUMOT EMAS**{extra} · raqamlar eskirgan bo'lishi mumkin"
 
 
 def _fmt_usd(v):
@@ -239,10 +287,11 @@ def reconcile_warn(t):
             "yopilgan qatorda qoldiq qolgan bo'lishi mumkin, tekshiring.")
 
 
-def summary(day, today=None):
-    """report.json uchun 'undiruv' bloki. Ma'lumot bo'lmasa None."""
+def summary(day, today=None, prefer_live=True):
+    """report.json uchun 'undiruv' bloki. Ma'lumot bo'lmasa None.
+    prefer_live: production'da JONLI o'qiladi (snapshot faqat fallback)."""
     today = today or date.fromisoformat(day)
-    rows, tab = load_rows(day, today)
+    rows, tab, source = load_rows(day, today, prefer_live=prefer_live)
     if not rows:
         return None
     t = totals(rows)
@@ -275,6 +324,8 @@ def summary(day, today=None):
         "pct": t["pct"],
         "status_blank_n": t["status_blank_n"],
         "reconcile_gap": t["reconcile_gap"],
+        "source": source,
+        "day": day,
         "muddat_otgan": overdue,
         "muddat_yaqin": soon,
     }
@@ -295,6 +346,9 @@ def report_block(day, today=None):
     if not s:
         return ""
     L = []
+    banner = snapshot_banner(s.get("source"), s.get("day"))
+    if banner:
+        L.append(banner)
     if s.get("reconcile_gap"):
         L.append(reconcile_warn(s))
     L += [
@@ -480,8 +534,8 @@ if __name__ == "__main__":
     if args.json:
         print(json.dumps(summary(args.date), ensure_ascii=False, indent=1))
     elif args.full:
-        rows, tab = load_rows(args.date)
+        rows, tab, source = load_rows(args.date)
         print(full_report(rows, tab or "?", date.fromisoformat(args.date),
-                          source=f"snapshot {args.date}"))
+                          source=source))
     else:
         print(report_block(args.date) or "(undiruv ma'lumoti topilmadi)")

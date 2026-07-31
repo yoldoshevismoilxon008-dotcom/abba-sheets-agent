@@ -84,13 +84,16 @@ def _send_doc_owner(path, caption, filename):
     return True
 
 
-def owner_pdf(rows, tab, today, source, push_lines=None, title=None):
+def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source=None):
     """Egaga dizaynli undiruv PDF (render_pdf pipeline, abba logo, theme).
+    data_source ∈ {'live','snapshot'} — 'snapshot' bo'lsa PDF boshiga 🧊 banner.
     Muvaffaqiyatda True; yiqilsa False — chaqiruvchi matn fallback yuboradi."""
     try:
         import render_pdf
 
         d = undiruv.report_data(rows, tab, today, source=source)
+        # data_source berilmasa — display source satridan chiqaramiz
+        d["data_source"] = data_source or ("snapshot" if str(source).startswith("snapshot") else "live")
         if push_lines:
             d["push_info"] = push_lines
         out = DATA / "qa-pdf" / f"Undiruv-{d['oy']}-{today.isoformat()}.pdf"
@@ -303,9 +306,9 @@ def _save_state(d):
 
 
 def _month_rows(day, month_name, today):
-    """Snapshot'dan "Undiruv <month_name>" qatorlari (topilmasa (None, [])).
-    Joriy va o'tgan oy uchun bitta yo'l — undiruv.parse_rows (yagona parser)."""
-    want = f"undiruv {month_name}"
+    """SNAPSHOT'dan "Undiruv <month_name>" qatorlari (topilmasa (None, [])).
+    Faqat fallback — production jonli o'qiydi (_month_rows_src)."""
+    want = f"undiruv {fetchmod.norm(month_name)}"
     for snap in diffmod.load_day(day)[0].values():
         if snap.get("pm_kpi", True):
             continue
@@ -314,6 +317,21 @@ def _month_rows(day, month_name, today):
                 vals = snap["ranges"][rng].get("values", [])
                 return fetchmod.tab_of_range(rng), undiruv.parse_rows(vals, today)
     return None, []
+
+
+def _month_rows_src(month_name, today, day):
+    """JONLI-birinchi (undiruv.fetch_live_month), xato/topilmasa SNAPSHOT
+    fallback. Qaytadi: (tab, rows, source) — source ∈ {'live','snapshot','none'}.
+    Production 09:00/09:30 HAR DOIM jonli o'qishi uchun."""
+    try:
+        tab, rows = undiruv.fetch_live_month(month_name, today)
+        if tab is not None:
+            return tab, rows, "live"
+        log(f"jonli: «Undiruv {month_name}» topilmadi — snapshot fallback")
+    except Exception as e:
+        log(f"jonli o'qish xato ({month_name}): {type(e).__name__}: {str(e)[:120]} — snapshot")
+    tab, rows = _month_rows(day, month_name, today)
+    return tab, rows, ("snapshot" if tab else "none")
 
 
 def _fmt(v):
@@ -388,17 +406,19 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     cur_month = fetchmod.current_month_name(today)
     prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
     snap_day = day
-    tab, cur_rows = _month_rows(snap_day, cur_month, today)
-    if tab is None:
-        # bugungi snapshot bo'lmasa oxirgi mavjud kundan urinamiz
+    # JONLI-birinchi (production MAJBURIY jonli); jonli xato bo'lsa snapshot
+    tab, cur_rows, cur_src = _month_rows_src(cur_month, today, snap_day)
+    if tab is None and cur_src == "none":
+        # snapshot ham bugun yo'q — oxirgi mavjud kundan urinamiz
         days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()
                       if d.is_dir() and len(d.name) == 10) if diffmod.SNAPSHOTS.is_dir() else []
         if days and days[-1] != snap_day:
             snap_day = days[-1]
             tab, cur_rows = _month_rows(snap_day, cur_month, today)
+            cur_src = "snapshot" if tab else "none"
     if tab is None:
         msg = (f"⚠️ Undiruv push: joriy oy tabi «Undiruv {cur_month}» topilmadi "
-               f"(snapshot: {snap_day}) — PM'larga hech narsa yuborilmadi. "
+               f"(jonli va snapshot) — PM'larga hech narsa yuborilmadi. "
                "Yangi oy tabi ochilganda avtomatik davom etadi.")
         if not dry_run:
             send_owner(msg)
@@ -406,7 +426,9 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         log("joriy oy tabi yo'q — ogohlantirish yuborildi")
         return "no-tab", msg
 
-    _ptab, prev_rows = _month_rows(snap_day, prev_month, today)
+    _ptab, prev_rows, prev_src = _month_rows_src(prev_month, today, snap_day)
+    # Manba: jonli bo'lmasa (birortasi snapshot) — banner chiqadi
+    data_source = "snapshot" if "snapshot" in (cur_src, prev_src) else "live"
     per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month)
 
     contacts = load_contacts()
@@ -449,12 +471,16 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
             log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
             sent[slot] = len(by_slot[slot][1])
 
-    # Egaga jamlama (yetkazish holati bilan) — boshida reconciliation guard
+    # Egaga jamlama — boshida 🧊 SNAPSHOT banner (jonli emas) + reconciliation guard
     L = []
+    _banner = undiruv.snapshot_banner(data_source, snap_day)
+    if _banner:
+        L.append(_banner)
     _warn = undiruv.reconcile_warn(undiruv.totals(cur_rows))
     if _warn:
         L.append(_warn)
-    L.append(f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, snapshot: {snap_day})")
+    manba = "jonli holat" if data_source == "live" else f"snapshot {snap_day}"
+    L.append(f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, manba: {manba})")
     for slot, name in slots.items():
         if slot in sent:
             L.append(f"• {name} ({contacts.get(slot, '?')}): {sent[slot]} eslatma yuborildi ✅")
@@ -495,8 +521,9 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     dd_title = ("🧪 [DRY] " if dry_run else "📤 ") + f"Undiruv push jamlamasi — {dd}"
     # push_info bloki: jamlama satrlari (📤-sarlavhasiz; reconciliation warn qoladi)
     push_lines = [x for x in L if not x.startswith("📤 Undiruv push jamlamasi")]
-    if not owner_pdf(cur_rows, tab, today, f"snapshot {snap_day}",
-                     push_lines=push_lines, title=dd_title):
+    pdf_src = "jonli holat" if data_source == "live" else f"snapshot {snap_day}"
+    if not owner_pdf(cur_rows, tab, today, pdf_src, push_lines=push_lines,
+                     title=dd_title, data_source=data_source):
         send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
     # Userbot butunlay ishlamagan kun: egaga 4 TAYYOR matn — qo'lda yuborish uchun
     if fallback_reason and not dry_run:

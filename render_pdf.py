@@ -332,6 +332,8 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
                                  ("#ffffff", "#fff", "") else None)
     import undiruv as _u
     reconcile_warn = _u.reconcile_warn(data.get("totals") or {})
+    snapshot_banner = ("🧊 SNAPSHOT — JONLI MA'LUMOT EMAS · raqamlar eskirgan bo'lishi mumkin"
+                       if data.get("data_source") == "snapshot" else "")
     return tpl.render(
         data=d,
         t=t_disp,
@@ -339,6 +341,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         design=design,
         logo_uri=logo_uri,
         reconcile_warn=reconcile_warn,
+        snapshot_banner=snapshot_banner,
         oy_title=str(data.get("oy", "?")).capitalize(),
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,

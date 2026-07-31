@@ -149,7 +149,7 @@ def build_undiruv(day, now):
     import undiruv as undiruvmod
 
     try:
-        rows, tab = undiruvmod.load_rows(day)
+        rows, tab, source = undiruvmod.load_rows(day)  # jonli-birinchi
     except Exception as e:
         log(f"undiruv o'qilmadi: {e}")
         return None
@@ -168,7 +168,8 @@ def build_undiruv(day, now):
 
     order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Aktiv obuna 💳": 2,
              "Pauza ⏸": 3, "Ketdi ⛔": 4, "Undirildi ✅": 5}
-    out = [[f"UNDIRUV — {tab}", "", "", "", "", "", ""], list(HEADERS_UNDIRUV)]
+    src_tag = "  🧊 SNAPSHOT (jonli emas)" if source == "snapshot" else ""
+    out = [[f"UNDIRUV — {tab}{src_tag}", "", "", "", "", "", ""], list(HEADERS_UNDIRUV)]
     for r in sorted(rows, key=lambda r: (order.get(status_label(r), 9),
                                          r["muddat"] or today)):
         aktiv_only = undiruvmod.is_active_only(r)

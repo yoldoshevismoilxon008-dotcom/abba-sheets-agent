@@ -1317,29 +1317,11 @@ def do_test_undiruv():
     typing()
     mid = send_status("🧪 Undiruv dry-run — jonli o'qilmoqda...")
     today = date.today()
-    cfg = fetchmod.load_config(include_qa_only=True)
-    s = next((x for x in cfg if not x.get("pm_kpi", True)), None)
-    if not s:
-        edit_status(mid, "SMM sheet (pm_kpi: false) config'da topilmadi.")
-        return
-    rows, tab, src = [], None, ""
-    try:
-        sh = tgc().open_by_key(s["id"])
-        tabs = [w.title for w in sh.worksheets()]
-        want = "undiruv " + fetchmod.current_month_name(today)
-        tab = next((t for t in tabs if fetchmod.norm(t) == want), None)
-        if tab:
-            ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(tab)], "test_undiruv")
-            vals = next(iter(ranges.values())).get("values", [])
-            rows = undiruvmod.parse_rows(vals, today)
-            src = "jonli holat " + datetime.now().strftime("%d.%m %H:%M")
-    except Exception as e:
-        log(f"/test_undiruv jonli o'qilmadi: {type(e).__name__}: {str(e)[:120]}")
-    if not rows:
-        latest = latest_day()
-        if latest:
-            rows, tab = undiruvmod.load_rows(latest, today)
-            src = f"snapshot {latest} — jonli o'qib bo'lmadi"
+    # Yagona loader: jonli-birinchi, snapshot fallback (source qaytaradi)
+    rows, tab, source = undiruvmod.load_rows(today.isoformat(), today, prefer_live=True)
+    src = ("jonli holat " + datetime.now().strftime("%d.%m %H:%M")) if source == "live" \
+        else (f"snapshot {today.isoformat()} — jonli o'qib bo'lmadi" if source == "snapshot"
+              else "manba yo'q")
     if not rows:
         edit_status(mid, f"«Undiruv {fetchmod.current_month_name(today)}» tabi o'qilmadi "
                          "(jonli ham, snapshot ham).")
@@ -1347,7 +1329,7 @@ def do_test_undiruv():
     # Dizaynli PDF (render_pdf pipeline); yiqilsa avvalgi matn ko'rinishi
     import pm_push as pmp
 
-    pdf_ok = pmp.owner_pdf(rows, tab, today, src,
+    pdf_ok = pmp.owner_pdf(rows, tab, today, src, data_source=source,
                            title=f"🧪 Undiruv dry-run — {tab} ({src})")
     if pdf_ok:
         delete_status(mid)
