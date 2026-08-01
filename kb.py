@@ -650,6 +650,14 @@ def search(query, k=8, *, use_rerank=True):
     """FTS5 + (ixtiyoriy) Claude re-rank.
     [{chunk_id, doc_id, ord, heading, text, uid, title, origin, source, vault_path, score}]"""
     init_db()
+    # Bo'sh KB — Claude query-expansion'ni umuman chaqirmaymiz (fast savollar tez qolsin)
+    conn0 = _connect()
+    try:
+        has_any = conn0.execute("SELECT 1 FROM chunks LIMIT 1").fetchone()
+    finally:
+        conn0.close()
+    if not has_any:
+        return []
     match = _fts_query(_expand_query(query))
     if not match:
         return []

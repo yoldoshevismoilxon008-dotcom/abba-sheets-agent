@@ -144,6 +144,9 @@ HELP = (
     "/ack — tan olingan audit muammolari (/ack <kalit> [izoh] — qo'shish)\n"
     "/dizayn — PDF dizayni: presetlar, matnli o'zgartirish; rasm yuborsangiz — "
     "referens tahlili (caption'da \"logo\" bo'lsa — logo)\n"
+    "/bilim — bilim bazasi hujjatlari · /bilim <so'rov> — qidirish · "
+    "/bilim_stat — statistika · /unut <id> — arxivlash · /eslab_qol <matn> — matn saqlash "
+    "(PDF/DOCX/TXT/CSV/XLSX yuborsangiz — avtomatik bazaga tushadi)\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
     "/help — shu yordam"
 )
@@ -1200,9 +1203,24 @@ def do_question(q):
     extra_sel = prev_selection() if ref else None
     data_text, sel, src = build_data(q, extra_sel, force_live=needs_live(q))
     t_fetch = time.monotonic()
+    # --- Bilim bazasi (KB) — Q&A prompt'iga qo'shimcha kontekst.
+    # KB yiqilsa Q&A ISHLASHDA DAVOM ETADI (try/except). Budjet MAX_DATA_CHARS'dan ayiriladi.
+    KB_BUDGET = 12_000
+    kb_ctx = ""
+    try:
+        import kb as kbmod
+
+        kb_budget = min(KB_BUDGET, max(0, MAX_DATA_CHARS - len(data_text)))
+        if kb_budget > 500:
+            kb_ctx = kbmod.context_for(q, budget_chars=kb_budget, use_rerank=(mode != "fast"))
+    except Exception as e:
+        log(f"kb: context xato — {e}")
+
     hist_data = ""
     if mode != "fast":
-        hist_data = build_history_data(q, sel["sheets"], MAX_DATA_CHARS - len(data_text))
+        hist_data = build_history_data(
+            q, sel["sheets"], MAX_DATA_CHARS - len(data_text) - len(kb_ctx)
+        )
         edit_status(mid, f"🧠 Tahlil qilinyapti... ({'chuqur' if mode == 'deep' else 'maksimal'} rejim)")
     typing()
     kpi_rules, kpi_mode = analyze.kpi_block()
@@ -1215,6 +1233,7 @@ def do_question(q):
         .replace("{{KPI_RULES}}", kpi_rules)
         .replace("{{KPI_MODE}}", kpi_mode)
         .replace("{{HISTORY_DATA}}", hist_data or "(tarixiy ma'lumot talab qilinmadi)")
+        .replace("{{KNOWLEDGE}}", kb_ctx or "(bilim bazasida mos ma'lumot topilmadi)")
         .replace("{{FORMAT}}", PDF_FORMAT if mode != "fast" else TEXT_FORMAT)
         .replace("{{DATA}}", data_text)
     )
@@ -1465,18 +1484,66 @@ def do_hisobot():
     log(f"/hisobot {'yuborildi' if ok else 'YUBORILMADI'} ({len(ans)} belgi)")
 
 
+# Bilim bazasi (KB) hujjat turlari — NUQTASIZ (design.LOGO_EXTS kabi)
+KB_EXTS = {"pdf", "docx", "txt", "md", "csv", "xlsx", "html", "rtf"}
+KB_MIMES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # docx
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",        # xlsx
+    "text/plain", "text/markdown", "text/csv", "text/html",
+    "application/rtf", "text/rtf",
+}
+KB_MAX_FILE = 25 * 1024 * 1024
+
+
+def handle_kb_document(path, name, caption):
+    """Hujjatni bilim bazasiga qo'shadi. Faqat is_kb bo'lganda chaqiriladi —
+    rasm/logo/referens dizayn oqimiga TEGMAYDI. KB yiqilsa xato xabari, bot ishlaydi."""
+    mid = send_status("📥 Hujjat o'qilyapti va bazaga qo'shilyapti...")
+    try:
+        import kb as kbmod
+
+        r = kbmod.ingest_file(path, source="telegram", origin=name, caption=caption)
+    except Exception as e:
+        log(f"kb ingest xato ({name}): {type(e).__name__}: {e}")
+        m = f"⚠️ Hujjatni o'qib bo'lmadi: {str(e)[:160]}"
+        if not edit_status(mid, m):
+            send_retry(m, attempts=2)
+        return "kb-error"
+    if r["status"] == "unchanged":
+        m = f"ℹ️ «{r['title']}» allaqachon bazada, o'zgarish yo'q."
+    else:
+        verb = "yangilandi" if r["status"] == "updated" else "qo'shildi"
+        tags = ", ".join(r.get("tags") or []) or "—"
+        lines = [f"✅ «{r['title']}» bazaga {verb} — {r['n_chunks']} bo'lak · teglar: {tags}"]
+        if r.get("summary"):
+            lines += ["", r["summary"][:400]]
+        m = "\n".join(lines)
+    if not edit_status(mid, m):
+        send_retry(m, attempts=2)
+    return "kb-ok"
+
+
 def handle_media(msg):
     """Rasm/hujjat qabul qilish (FAQAT egasidan — chaqiruvchi tekshirgan).
-    Caption'da "logo" → logo-draft; boshqa rasm → dizayn referensi (vision)."""
+    Caption'da "logo" → logo-draft; boshqa rasm → dizayn referensi (vision);
+    hujjat (PDF/DOCX/…) → bilim bazasi (KB)."""
     doc, photos = msg.get("document"), msg.get("photo")
     caption = (msg.get("caption") or "").strip()
+    is_kb = False
     if doc:
         name = doc.get("file_name") or "fayl"
         mime = doc.get("mime_type") or ""
         size = doc.get("file_size") or 0
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-        if not (mime.startswith("image/") or ext in design.LOGO_EXTS):
-            send_retry("Faqat rasm fayllari qabul qilinadi (PNG/JPG/SVG/WebP).", attempts=2)
+        is_image = mime.startswith("image/") or ext in design.LOGO_EXTS
+        is_kb = ext in KB_EXTS or mime in KB_MIMES
+        if not (is_image or is_kb):
+            send_retry(
+                f"Bu turdagi faylni hali o'qiy olmayman ({ext or mime or '?'}). "
+                "Rasm (PNG/JPG/SVG/WebP) yoki hujjat (PDF/DOCX/TXT/MD/CSV/XLSX/HTML) yuboring.",
+                attempts=2,
+            )
             return "media-reject"
         file_id = doc["file_id"]
     else:
@@ -1484,8 +1551,9 @@ def handle_media(msg):
         file_id = biggest["file_id"]
         size = biggest.get("file_size") or 0
         name = "photo.jpg"
-    if size and size > design.MAX_FILE:
-        send_retry("Fayl juda katta — limit 10MB.", attempts=2)
+    limit = KB_MAX_FILE if is_kb else design.MAX_FILE
+    if size and size > limit:
+        send_retry(f"Fayl juda katta — limit {limit // (1024 * 1024)}MB.", attempts=2)
         return "media-reject"
     try:
         path = design.download(TOKEN, file_id, name)
@@ -1494,6 +1562,9 @@ def handle_media(msg):
         send_retry("⚠️ Faylni yuklab olib bo'lmadi, qayta urinib ko'ring.", attempts=2)
         return "media-error"
     log(f"media qabul qilindi: {path.name} ({size or '?'} bayt, caption={caption!r})")
+
+    if is_kb:
+        return handle_kb_document(path, name, caption)
 
     if "logo" in caption.lower():
         design.set_logo_draft(path)
@@ -1807,6 +1878,106 @@ def handle_update(upd):
         else:
             send_retry("Dashboard hali ulanmagan — config.yaml ga dashboard_id kiritilishi kerak.", attempts=2)
         return "dashboard"
+    if low.startswith("/bilim_stat"):
+        try:
+            import kb as kbmod
+
+            s = kbmod.stats()
+        except Exception as e:
+            send_retry(f"⚠️ Bilim bazasi statistikasi olinmadi: {str(e)[:160]}", attempts=2)
+            return "kb-stat-err"
+        by = ", ".join(f"{k}: {v}" for k, v in (s["by_source"] or {}).items()) or "—"
+        li = s.get("last_ingest")
+        li_txt = f"{li['origin']} ({li['status']}, {li['ts']})" if li else "—"
+        send_retry(
+            "📚 **Bilim bazasi**\n"
+            f"• Hujjatlar: {s['docs']} ta (arxivda {s['docs_archived']})\n"
+            f"• Bo'laklar: {s['chunks']} ta\n"
+            f"• Hajm: {s['bytes_db'] / (1024 * 1024):.1f} MB\n"
+            f"• Manba kesimi: {by}\n"
+            f"• Oxirgi ingest: {li_txt}",
+            attempts=2,
+        )
+        return "kb-stat"
+    if low.startswith("/bilim"):
+        arg = text[len("/bilim"):].strip()
+        try:
+            import kb as kbmod
+
+            if arg:
+                res = kbmod.search(arg, k=5, use_rerank=True)
+                if not res:
+                    send_retry(f"«{arg}» bo'yicha bazada mos ma'lumot topilmadi.", attempts=2)
+                    return "kb-search-empty"
+                L = [f"🔎 **«{arg}»** — {len(res)} natija:"]
+                for r in res:
+                    snip = " ".join((r["text"] or "").split())[:180]
+                    head = f" › {r['heading']}" if r.get("heading") else ""
+                    L.append(f"\n**{r['title']}**{head}\n{snip}…")
+                send_retry("\n".join(L)[:3800], attempts=2)
+                return "kb-search"
+            docs = kbmod.list_docs(limit=20)
+            if not docs:
+                send_retry("📚 Bilim bazasi bo'sh. Hujjat yuboring yoki /eslab_qol <matn>.", attempts=2)
+                return "kb-empty"
+            L = ["📚 **Oxirgi hujjatlar:**"]
+            for d in docs:
+                tg = ", ".join(d["tags"][:4]) if d["tags"] else "—"
+                L.append(f"• #{d['id']} · {d['title']} · [{tg}] · {d['created_at'][:10]}")
+            L.append("\nQidirish: /bilim <so'rov> · O'chirish: /unut <id> · Statistika: /bilim_stat")
+            send_retry("\n".join(L)[:3800], attempts=2)
+            return "kb-list"
+        except Exception as e:
+            log(f"/bilim xato: {e}")
+            send_retry(f"⚠️ Bilim bazasi bilan ishlashda xato: {str(e)[:160]}", attempts=2)
+            return "kb-err"
+    if low.startswith("/unut"):
+        arg = text[len("/unut"):].strip()
+        if not arg:
+            send_retry("Foydalanish: /unut <id | nom>. Ro'yxat: /bilim", attempts=2)
+            return "kb-unut-usage"
+        try:
+            import kb as kbmod
+
+            ok = kbmod.archive(arg)
+        except Exception as e:
+            send_retry(f"⚠️ O'chirishda xato: {str(e)[:160]}", attempts=2)
+            return "kb-unut-err"
+        send_retry(
+            f"🗑 «{arg}» arxivlandi (bazadan yashirildi, qaytarish mumkin)." if ok
+            else f"«{arg}» topilmadi. Ro'yxat: /bilim",
+            attempts=2,
+        )
+        return "kb-unut"
+    if low.startswith("/eslab_qol"):
+        arg = text[len("/eslab_qol"):].strip()
+        if len(arg) < 10:
+            send_retry(
+                "Foydalanish: /eslab_qol <matn> — botga eslab qolish uchun matn "
+                "(kamida 10 belgi). Fayl uchun to'g'ridan-to'g'ri hujjat yuboring.",
+                attempts=2,
+            )
+            return "kb-remember-usage"
+        mid = send_status("💾 Bazaga saqlanyapti...")
+        try:
+            import kb as kbmod
+
+            title0 = arg.split("\n", 1)[0][:60]
+            r = kbmod.ingest_text(arg, source="telegram", origin=f"eslatma: {title0}")
+        except Exception as e:
+            log(f"/eslab_qol xato: {e}")
+            m = f"⚠️ Saqlanmadi: {str(e)[:160]}"
+            if not edit_status(mid, m):
+                send_retry(m, attempts=2)
+            return "kb-remember-err"
+        if r["status"] == "unchanged":
+            m = "ℹ️ Bu allaqachon bazada bor edi."
+        else:
+            tags = ", ".join(r.get("tags") or []) or "—"
+            m = f"✅ Eslab qoldim — «{r['title']}» ({r['n_chunks']} bo'lak · teglar: {tags})"
+        if not edit_status(mid, m):
+            send_retry(m, attempts=2)
+        return "kb-remember"
     if text.startswith("/"):
         send_retry("Bunday buyruq yo'q. " + HELP, attempts=2)
         return "unknown-cmd"
