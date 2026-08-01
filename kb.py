@@ -222,6 +222,16 @@ def _split_large(text, max_chars=MAX_CHARS, overlap=OVERLAP):
                 cur = (cur + "\n" + line) if cur else line
         if cur:
             units.append(cur)
+    # 1b) xavfsizlik: hali ham max'dan katta unit (uzun bitta satr, split nuqtasi yo'q)
+    #     — belgilar bo'yicha majburiy bo'lamiz (aks holda ulkan chunk chiqadi)
+    safe = []
+    for u in units:
+        if len(u) <= max_chars:
+            safe.append(u)
+        else:
+            for i in range(0, len(u), max_chars):
+                safe.append(u[i:i + max_chars])
+    units = safe
     # 2) unitlarni max_chars gacha yig'ish, ustma-ust (overlap) bilan
     pieces, cur = [], ""
     for u in units:
