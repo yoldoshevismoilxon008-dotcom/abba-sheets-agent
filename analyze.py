@@ -178,11 +178,13 @@ def find_claude():
     raise RuntimeError("claude CLI topilmadi — .env da CLAUDE_BIN ni ko'rsating")
 
 
-def run_claude(prompt, effort=None, allowed_tools=None):
+def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
     """effort: None (default — settings'dagi max) yoki 'low'..'max'.
     --effort FLAG ishlatiladi — settings.json'dagi global env'ni ham yengadi
     (env-override ishonchsiz: settings o'z qiymatini qaytadan qo'yadi).
-    allowed_tools: masalan ["Read"] — vision (rasm o'qish) uchun."""
+    allowed_tools: masalan ["Read"] — vision (rasm o'qish) uchun.
+    timeout: None → CLAUDE_TIMEOUT (mavjud chaqiruvlar o'zgarmaydi); KB kabi
+    qisqa chaqiruvlar timeout=30 beradi — osilgan chaqiruv poll loop'ni bloklamasin."""
     cmd = [find_claude(), "-p", "--output-format", "text"]
     model = os.environ.get("CLAUDE_MODEL", "").strip()
     if model:
@@ -192,7 +194,8 @@ def run_claude(prompt, effort=None, allowed_tools=None):
     if allowed_tools:
         cmd += ["--allowedTools", ",".join(allowed_tools)]
     r = subprocess.run(
-        cmd, input=prompt, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
+        cmd, input=prompt, capture_output=True, text=True,
+        timeout=timeout if timeout is not None else CLAUDE_TIMEOUT,
     )
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError(f"claude -p xato (kod {r.returncode}): {r.stderr.strip()[:400]}")

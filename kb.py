@@ -5,11 +5,11 @@ SQLite FTS5 + Claude re-rank. Embedding yo'q (v1). DB: DATA/knowledge.db.
 Ommaviy API:
     init_db()                              — sxema (idempotent, har startda)
     ingest_text(text, *, source, origin, ...) -> dict
-    ingest_file(path, *, source, origin, caption="") -> dict
-    archive(uid_or_title) -> bool          — /unut (archived=1, o'chirmaydi)
+    ingest_file(path, *, source, origin, caption="") -> dict   # content_key=True
+    archive(uid_or_title) -> dict          — /unut (ok|not_found|ambiguous; ommaviy emas)
     stats() -> dict
-    search(query, k=8, *, use_rerank=True) -> list[dict]
-    context_for(query, budget_chars=12_000, *, use_rerank=True) -> str
+    search(query, k=8, *, use_rerank=True, use_expansion=True) -> list[dict]
+    context_for(query, budget_chars=12_000, *, use_rerank=True, use_expansion=True) -> str
     list_docs(limit=30, tag=None) -> list[dict]
 
 Qat'iy tamoyil: KB Claude sababli YIQILMAYDI — metadata/query/re-rank
@@ -31,11 +31,27 @@ DB_PATH = DATA / "knowledge.db"
 PROMPTS = BASE / "prompts"
 
 SCHEMA_VERSION = 1
-MAX_CHARS = 3000      # bo'lak maksimal hajmi
-OVERLAP = 300         # katta bo'lak bo'linganda ustma-ust
-MERGE_MIN = 200       # kichik bo'lak keyingisiga qo'shiladi
-META_SNIPPET = 6000   # metadata uchun birinchi N belgi
-CTX_BUDGET = 12_000   # context_for standart budjet
+MAX_CHARS = 3000            # bo'lak maksimal hajmi
+OVERLAP = 300              # katta bo'lak bo'linganda ustma-ust
+MERGE_MIN = 200            # kichik bo'lak keyingisiga qo'shiladi
+META_SNIPPET = 6000       # metadata uchun birinchi N belgi
+CTX_BUDGET = 12_000       # context_for standart budjet
+MAX_EXTRACT_CHARS = 4_000_000   # bitta hujjatdan olinadigan maks matn (xavfsizlik)
+MAX_CHUNKS = 2000         # bitta hujjat maks bo'lak soni (oshsa kesiladi)
+CLAUDE_TIMEOUT = 30       # KB Claude chaqiruvlari uchun qattiq timeout (sekund)
+
+# O'zbek/tipografik apostrof variantlari → bitta ASCII ' (index va query BIR XIL)
+_APOS = {
+    "ʻ": "'", "ʼ": "'", "‘": "'", "’": "'",
+    "`": "'", "´": "'", "ʹ": "'", "′": "'",
+}
+_APOS_RE = re.compile("[" + "".join(_APOS) + "]")
+
+
+def _canon_apos(s):
+    """Barcha apostrof/tipografik variantlarni ASCII ' ga keltiradi.
+    _normalize (saqlash/indeks) va _fts_query (so'rov) — IKKALASIDA bir xil."""
+    return _APOS_RE.sub("'", s or "")
 
 
 def log(msg):
@@ -133,8 +149,9 @@ def init_db():
 # ======================================================================
 
 def _normalize(text):
-    """Deterministik normalize — content_hash barqaror bo'lishi uchun."""
-    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    """Deterministik normalize — content_hash barqaror bo'lishi uchun.
+    Apostrof variantlari ASCII ' ga (qidiruv cross-match ishlashi uchun)."""
+    text = _canon_apos((text or "").replace("\r\n", "\n").replace("\r", "\n"))
     out, blank = [], 0
     for ln in text.split("\n"):
         ln = ln.rstrip()
@@ -152,8 +169,14 @@ def _sha(s):
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def _uid(source, origin):
-    return _sha(f"{source}:{origin}")[:16]
+def _uid(source, origin, extra=None):
+    """Hujjat identifikatori. extra (odatda content_hash) berilsa — kontent-manzilli:
+    bir xil origin (masalan ikkita boshqa 'document.pdf') endi bitta uid olmaydi,
+    birinchisining chunk'lari o'chib ketmaydi (FIX: uid kolliziyasi)."""
+    key = f"{source}:{origin}"
+    if extra:
+        key += f":{extra}"
+    return _sha(key)[:16]
 
 
 # ======================================================================
@@ -295,7 +318,7 @@ def _read_text_file(path):
 def _extract_pdf(path):
     from pypdf import PdfReader
     reader = PdfReader(str(path))
-    parts = []
+    parts, total = [], 0
     for page in reader.pages:
         try:
             t = page.extract_text() or ""
@@ -303,18 +326,31 @@ def _extract_pdf(path):
             t = ""
         if t.strip():
             parts.append(t.strip())
+            total += len(t)
+            if total >= MAX_EXTRACT_CHARS:   # ulkan PDF — xotira/timeout xavfsizligi
+                break
     return "\n\n".join(parts)
 
 
 def _extract_docx(path):
     import docx
     d = docx.Document(str(path))
-    parts = [p.text for p in d.paragraphs if p.text and p.text.strip()]
+    parts, total = [], 0
+    for p in d.paragraphs:
+        if p.text and p.text.strip():
+            parts.append(p.text)
+            total += len(p.text)
+            if total >= MAX_EXTRACT_CHARS:
+                return "\n\n".join(parts)
     for tbl in d.tables:
         for row in tbl.rows:
             cells = [(c.text or "").strip() for c in row.cells]
             if any(cells):
-                parts.append(" | ".join(cells))
+                line = " | ".join(cells)
+                parts.append(line)
+                total += len(line)
+                if total >= MAX_EXTRACT_CHARS:
+                    return "\n\n".join(parts)
     return "\n\n".join(parts)
 
 
@@ -333,14 +369,18 @@ def _extract_html(path):
 def _extract_xlsx(path):
     from openpyxl import load_workbook
     wb = load_workbook(str(path), read_only=True, data_only=True)
-    parts = []
+    parts, total = [], 0
     try:
         for ws in wb.worksheets:
             parts.append(f"## {ws.title}")
             for row in ws.iter_rows(values_only=True):
                 cells = ["" if v is None else str(v) for v in row]
                 if any(c.strip() for c in cells):
-                    parts.append(", ".join(cells))
+                    line = ", ".join(cells)
+                    parts.append(line)
+                    total += len(line)
+                    if total >= MAX_EXTRACT_CHARS:   # ulkan xlsx — xavfsizlik
+                        return "\n".join(parts)
     finally:
         wb.close()
     return "\n".join(parts)
@@ -354,22 +394,23 @@ def _extract_rtf(path):
 
 
 def extract_file(path):
-    """Kengaytmaga qarab matn ajratadi. Noma'lum — matn sifatida o'qiladi."""
+    """Kengaytmaga qarab matn ajratadi. Noma'lum — matn sifatida o'qiladi.
+    Yakuniy matn MAX_EXTRACT_CHARS bilan cheklanadi (chunk soni ceiling'i ingest_text'da)."""
     path = Path(path)
     ext = path.suffix.lower().lstrip(".")
-    if ext in _TEXT_EXTS:
-        return _read_text_file(path)
     if ext == "pdf":
-        return _extract_pdf(path)
-    if ext == "docx":
-        return _extract_docx(path)
-    if ext in ("html", "htm"):
-        return _extract_html(path)
-    if ext == "xlsx":
-        return _extract_xlsx(path)
-    if ext == "rtf":
-        return _extract_rtf(path)
-    return _read_text_file(path)
+        text = _extract_pdf(path)
+    elif ext == "docx":
+        text = _extract_docx(path)
+    elif ext in ("html", "htm"):
+        text = _extract_html(path)
+    elif ext == "xlsx":
+        text = _extract_xlsx(path)
+    elif ext == "rtf":
+        text = _extract_rtf(path)
+    else:   # md/txt/csv/tsv/log/noma'lum — matn sifatida
+        text = _read_text_file(path)
+    return text[:MAX_EXTRACT_CHARS] if text and len(text) > MAX_EXTRACT_CHARS else text
 
 
 # ======================================================================
@@ -377,9 +418,12 @@ def extract_file(path):
 # ======================================================================
 
 def _ask_claude(prompt, effort="low"):
-    """analyze.run_claude ustidan yupqa qatlam (test uchun monkeypatch qulay)."""
+    """analyze.run_claude ustidan yupqa qatlam (test uchun monkeypatch qulay).
+    QATTIQ timeout=CLAUDE_TIMEOUT (30s) — osilgan chaqiruv botni bloklamasin;
+    timeout/xato → chaqiruvchi fallback qiladi (meta→fayl nomi, query→tokenizatsiya,
+    rerank→BM25 tartibi)."""
     import analyze
-    return analyze.run_claude(prompt, effort=effort)
+    return analyze.run_claude(prompt, effort=effort, timeout=CLAUDE_TIMEOUT)
 
 
 def _load_prompt(name):
@@ -453,15 +497,21 @@ def _safe_log_ingest(source, origin, status, n_chunks, err):
 
 
 def ingest_text(text, *, source, origin, title=None, mime="text/plain",
-                tags=None, vault_path=None):
+                tags=None, vault_path=None, content_key=False):
     """Matnni normalize → chunk → metadata (Claude) → upsert.
-    Qaytadi: {uid, title, n_chunks, status: new|updated|unchanged, tags, summary}"""
+    content_key=True → uid kontent-manzilli (bir xil origin'li boshqa kontent
+    ustiga yozilmaydi; ingest_file/eslatma shu rejimda). Qaytadi:
+    {uid, title, n_chunks, status: new|updated|unchanged, tags, summary, warn}"""
     init_db()
     norm = _normalize(text)
     if not norm:
         raise ValueError("bo'sh matn — ingest qilinmadi")
-    uid = _uid(source, origin)
+    warn_parts = []
+    if len(norm) > MAX_EXTRACT_CHARS:
+        norm = norm[:MAX_EXTRACT_CHARS]
+        warn_parts.append(f"matn {MAX_EXTRACT_CHARS} belgida kesildi")
     chash = _sha(norm)
+    uid = _uid(source, origin, chash if content_key else None)
     now = _now()
 
     conn = _connect()
@@ -477,7 +527,7 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
             return {
                 "uid": uid, "title": row["title"], "n_chunks": row["n_chunks"],
                 "status": "unchanged", "tags": json.loads(row["tags"] or "[]"),
-                "summary": row["summary"] or "",
+                "summary": row["summary"] or "", "warn": "",
             }
 
         meta = _extract_metadata(norm, origin, title_hint=title)
@@ -488,6 +538,9 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
         chunks = chunk_text(norm)
         if not chunks:
             raise ValueError("chunk chiqmadi (bo'sh matn)")
+        if len(chunks) > MAX_CHUNKS:
+            warn_parts.append(f"{len(chunks)} bo'lakdan {MAX_CHUNKS} tasi saqlandi")
+            chunks = chunks[:MAX_CHUNKS]
 
         tags_json = json.dumps(meta["tags"], ensure_ascii=False)
         nbytes = len(norm.encode("utf-8"))
@@ -523,6 +576,7 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
         return {
             "uid": uid, "title": meta["title"], "n_chunks": len(chunks),
             "status": status, "tags": meta["tags"], "summary": meta["summary"],
+            "warn": "; ".join(warn_parts),
         }
     except Exception as e:
         conn.rollback()
@@ -537,7 +591,8 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
 
 
 def ingest_file(path, *, source, origin, caption=""):
-    """Kengaytmaga qarab extractor → ingest_text."""
+    """Kengaytmaga qarab extractor → ingest_text (content_key=True —
+    bir xil nomli boshqa fayl birinchisining chunk'larini o'chirmasin)."""
     path = Path(path)
     text = extract_file(path)
     if not text or not text.strip():
@@ -545,35 +600,58 @@ def ingest_file(path, *, source, origin, caption=""):
     if caption and caption.strip():
         text = f"[Izoh: {caption.strip()}]\n\n{text}"
     mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-    return ingest_text(text, source=source, origin=origin, mime=mime)
+    return ingest_text(text, source=source, origin=origin, mime=mime, content_key=True)
+
+
+def _like_escape(s):
+    """LIKE meta-belgilarini (\\ % _) neytrallaydi — '%' bilan ommaviy arxivlashning oldi."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def archive(uid_or_title):
-    """/unut — archived=1 (o'chirmaydi). uid | id | title bo'yicha topadi."""
+    """/unut — archived=1 (o'chirmaydi). HECH QACHON ommaviy arxivlamaydi.
+    Qaytadi dict:
+      {status:"ok", n:1, id, title}                — aniq 1 ta arxivlandi
+      {status:"not_found"}                          — mos yo'q
+      {status:"ambiguous", candidates:[{id,title}]} — 2+ mos, aniq id kerak"""
     init_db()
     key = str(uid_or_title).strip()
     if not key:
-        return False
+        return {"status": "not_found"}
     conn = _connect()
     try:
-        cur = conn.execute(
-            "UPDATE docs SET archived=1, updated_at=? WHERE uid=? AND archived=0", (_now(), key)
-        )
-        n = cur.rowcount
-        if n == 0 and key.isdigit():
-            cur = conn.execute(
-                "UPDATE docs SET archived=1, updated_at=? WHERE id=? AND archived=0",
-                (_now(), int(key)),
+        # 1) uid aniq → 2) id aniq (faqat shu ikkisi to'g'ridan-to'g'ri arxivlaydi)
+        row = conn.execute(
+            "SELECT id, title FROM docs WHERE uid=? AND archived=0", (key,)
+        ).fetchone()
+        if not row and key.isdigit():
+            row = conn.execute(
+                "SELECT id, title FROM docs WHERE id=? AND archived=0", (int(key),)
+            ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE docs SET archived=1, updated_at=? WHERE id=?", (_now(), row["id"])
             )
-            n = cur.rowcount
-        if n == 0:
-            cur = conn.execute(
-                "UPDATE docs SET archived=1, updated_at=? WHERE title LIKE ? AND archived=0",
-                (_now(), f"%{key}%"),
+            conn.commit()
+            return {"status": "ok", "n": 1, "id": row["id"], "title": row["title"]}
+        # 3) title bo'yicha — LIKE escaped, AYNAN 1 ta bo'lsagina arxivlanadi
+        rows = conn.execute(
+            "SELECT id, title FROM docs WHERE archived=0 AND title LIKE ? ESCAPE '\\' "
+            "ORDER BY id LIMIT 11",
+            (f"%{_like_escape(key)}%",),
+        ).fetchall()
+        if not rows:
+            return {"status": "not_found"}
+        if len(rows) == 1:
+            conn.execute(
+                "UPDATE docs SET archived=1, updated_at=? WHERE id=?", (_now(), rows[0]["id"])
             )
-            n = cur.rowcount
-        conn.commit()
-        return n > 0
+            conn.commit()
+            return {"status": "ok", "n": 1, "id": rows[0]["id"], "title": rows[0]["title"]}
+        return {
+            "status": "ambiguous",
+            "candidates": [{"id": r["id"], "title": r["title"]} for r in rows[:10]],
+        }
     finally:
         conn.close()
 
@@ -611,10 +689,11 @@ def _expand_query(query):
 
 
 def _fts_query(keywords):
-    """Kalit so'zlar → FTS5 prefix MATCH (har token `token*`, OR bilan)."""
+    """Kalit so'zlar → FTS5 prefix MATCH (har token `token*`, OR bilan).
+    Apostrof _normalize bilan BIR XIL kanonikalizatsiya qilinadi (cross-match)."""
     tokens = []
     for kw in keywords:
-        for tok in re.findall(r"\w+", kw, re.UNICODE):
+        for tok in re.findall(r"\w+", _canon_apos(kw), re.UNICODE):
             tl = tok.lower()
             if len(tl) >= 2 and tl not in tokens:
                 tokens.append(tl)
@@ -640,17 +719,20 @@ def _rerank(query, cands, k):
             s = str(x).strip().lstrip("-")
             if s.isdigit():
                 order.append(int(x))
+        order = list(dict.fromkeys(order))   # dedupe — Claude [0,0,0,1] qaytarsa takror bo'lmasin
         return order[:k] or None
     except Exception as e:
         log(f"re-rank fallback: {e}")
         return None
 
 
-def search(query, k=8, *, use_rerank=True):
+def search(query, k=8, *, use_rerank=True, use_expansion=True):
     """FTS5 + (ixtiyoriy) Claude re-rank.
+    use_expansion=False → Claude query-expansion o'chiq (oddiy tokenizatsiya) —
+    fast rejim savollariga latency qo'shmaslik uchun.
     [{chunk_id, doc_id, ord, heading, text, uid, title, origin, source, vault_path, score}]"""
     init_db()
-    # Bo'sh KB — Claude query-expansion'ni umuman chaqirmaymiz (fast savollar tez qolsin)
+    # Bo'sh KB — Claude'ni ham, so'rovni ham qurmaymiz (fast savollar tez qolsin)
     conn0 = _connect()
     try:
         has_any = conn0.execute("SELECT 1 FROM chunks LIMIT 1").fetchone()
@@ -658,7 +740,8 @@ def search(query, k=8, *, use_rerank=True):
         conn0.close()
     if not has_any:
         return []
-    match = _fts_query(_expand_query(query))
+    keywords = _expand_query(query) if use_expansion else _fallback_keywords(query)
+    match = _fts_query(keywords)
     if not match:
         return []
     conn = _connect()
@@ -692,10 +775,11 @@ def search(query, k=8, *, use_rerank=True):
     return cands[:k]
 
 
-def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True):
-    """Q&A prompt'ga quyiladigan tayyor blok. Bo'sh bo'lsa "" qaytadi."""
+def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansion=True):
+    """Q&A prompt'ga quyiladigan tayyor blok. Bo'sh bo'lsa "" qaytadi.
+    use_expansion=False (fast rejim) → Claude query-expansion o'chiq."""
     try:
-        results = search(query, k=8, use_rerank=use_rerank)
+        results = search(query, k=8, use_rerank=use_rerank, use_expansion=use_expansion)
     except Exception as e:
         log(f"context_for xato: {e}")
         return ""

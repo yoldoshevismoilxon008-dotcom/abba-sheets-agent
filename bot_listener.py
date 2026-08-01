@@ -1212,7 +1212,11 @@ def do_question(q):
 
         kb_budget = min(KB_BUDGET, max(0, MAX_DATA_CHARS - len(data_text)))
         if kb_budget > 500:
-            kb_ctx = kbmod.context_for(q, budget_chars=kb_budget, use_rerank=(mode != "fast"))
+            # fast rejim: re-rank VA query-expansion o'chiq (Claude'siz — latency qo'shmaydi)
+            kb_ctx = kbmod.context_for(
+                q, budget_chars=kb_budget,
+                use_rerank=(mode != "fast"), use_expansion=(mode != "fast"),
+            )
     except Exception as e:
         log(f"kb: context xato — {e}")
 
@@ -1516,6 +1520,8 @@ def handle_kb_document(path, name, caption):
         verb = "yangilandi" if r["status"] == "updated" else "qo'shildi"
         tags = ", ".join(r.get("tags") or []) or "—"
         lines = [f"✅ «{r['title']}» bazaga {verb} — {r['n_chunks']} bo'lak · teglar: {tags}"]
+        if r.get("warn"):
+            lines.append(f"⚠️ {r['warn']}")
         if r.get("summary"):
             lines += ["", r["summary"][:400]]
         m = "\n".join(lines)
@@ -1939,15 +1945,24 @@ def handle_update(upd):
         try:
             import kb as kbmod
 
-            ok = kbmod.archive(arg)
+            res = kbmod.archive(arg)
         except Exception as e:
             send_retry(f"⚠️ O'chirishda xato: {str(e)[:160]}", attempts=2)
             return "kb-unut-err"
-        send_retry(
-            f"🗑 «{arg}» arxivlandi (bazadan yashirildi, qaytarish mumkin)." if ok
-            else f"«{arg}» topilmadi. Ro'yxat: /bilim",
-            attempts=2,
-        )
+        st = res.get("status")
+        if st == "ok":
+            send_retry(
+                f"🗑 «{res['title']}» (#{res['id']}) arxivlandi — bazadan yashirildi "
+                "(qaytarish mumkin).", attempts=2,
+            )
+        elif st == "ambiguous":
+            lines = ["Bir nechta hujjat mos keldi — aniq ID bilan qayta yuboring "
+                     "(masalan /unut 7):"]
+            for c in res["candidates"]:
+                lines.append(f"• #{c['id']} · {c['title']}")
+            send_retry("\n".join(lines)[:2000], attempts=2)
+        else:
+            send_retry(f"«{arg}» topilmadi. Ro'yxat: /bilim", attempts=2)
         return "kb-unut"
     if low.startswith("/eslab_qol"):
         arg = text[len("/eslab_qol"):].strip()
@@ -1963,7 +1978,8 @@ def handle_update(upd):
             import kb as kbmod
 
             title0 = arg.split("\n", 1)[0][:60]
-            r = kbmod.ingest_text(arg, source="telegram", origin=f"eslatma: {title0}")
+            r = kbmod.ingest_text(arg, source="telegram", origin=f"eslatma: {title0}",
+                                  content_key=True)
         except Exception as e:
             log(f"/eslab_qol xato: {e}")
             m = f"⚠️ Saqlanmadi: {str(e)[:160]}"
@@ -1975,6 +1991,8 @@ def handle_update(upd):
         else:
             tags = ", ".join(r.get("tags") or []) or "—"
             m = f"✅ Eslab qoldim — «{r['title']}» ({r['n_chunks']} bo'lak · teglar: {tags})"
+            if r.get("warn"):
+                m += f"\n⚠️ {r['warn']}"
         if not edit_status(mid, m):
             send_retry(m, attempts=2)
         return "kb-remember"

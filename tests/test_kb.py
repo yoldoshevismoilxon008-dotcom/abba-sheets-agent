@@ -120,7 +120,8 @@ def test_archive_hides_doc():
     r = kb.ingest_text("# Arxiv\n\nArxiv testi matni ARXIVSOZ.",
                        source="telegram", origin="a.md")
     assert len(kb.list_docs()) == 1
-    assert kb.archive(r["uid"]) is True
+    res = kb.archive(r["uid"])
+    assert res["status"] == "ok" and res["n"] == 1
     assert len(kb.list_docs()) == 0            # ro'yxatdan yashiriladi
     assert len(kb.search("ARXIVSOZ", use_rerank=False)) == 0   # archived=0 filtri
 
@@ -139,6 +140,125 @@ def test_list_docs_tag_filter():
                    tags=["undiruv", "maxsus"])
     assert len(kb.list_docs(tag="maxsus")) == 1
     assert len(kb.list_docs(tag="yoqteg")) == 0
+
+
+# --- review fixlari testlari ---
+
+def test_timeout_fallback():
+    """BLOCKER 1: Claude timeout (yoki har xato) → ingest va qidiruv fallback bilan ishlaydi."""
+    import subprocess
+
+    def timeout(prompt, effort="low"):
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=30)
+
+    setup_kb(fake=timeout)
+    r = kb.ingest_text("# Hujjat\n\nMatn TIMEOUTSOZ ichida bor.",
+                       source="telegram", origin="t.md")
+    assert r["status"] == "new"                 # meta timeout → fayl nomi fallback
+    assert r["title"]
+    assert len(kb.search("TIMEOUTSOZ", use_rerank=False)) >= 1   # expansion timeout → tokenizatsiya
+
+
+def test_unut_never_mass_archives():
+    """BLOCKER 2: /unut % yoki umumiy substring butun bazani arxivlamaydi."""
+    setup_kb()
+    for i in range(3):
+        kb.ingest_text(f"# Hujjat {i}\n\nBazaviy matn raqam {i}.",
+                       source="telegram", origin=f"d{i}.md")
+    assert kb.stats()["docs"] == 3
+    # '%' — LIKE wildcard sifatida ishlamasin (escaped)
+    res = kb.archive("%")
+    assert res["status"] == "not_found"
+    assert kb.stats()["docs"] == 3              # HECH BIRI arxivlanmadi
+    # umumiy title substring (barchasi "Hujjat") → ambiguous, arxivlamaydi
+    res = kb.archive("Hujjat")
+    assert res["status"] == "ambiguous" and len(res["candidates"]) == 3
+    assert kb.stats()["docs"] == 3              # baribir arxivlanmadi
+    # aynan id bilan → faqat bittasi
+    res = kb.archive(str(res["candidates"][0]["id"]))
+    assert res["status"] == "ok"
+    assert kb.stats()["docs"] == 2
+
+
+def test_uid_collision_no_data_loss():
+    """FIX 3: bir xil nomli ('report.md') ikki boshqa fayl birini o'chirmasin."""
+    setup_kb()
+    d = Path(tempfile.mkdtemp(prefix="kbcol_"))
+    f = d / "report.md"
+    f.write_text("# Hisobot A\n\nBirinchi hujjat CONTENTALPHA ichida.", encoding="utf-8")
+    kb.ingest_file(f, source="telegram", origin="report.md")
+    f.write_text("# Hisobot B\n\nIkkinchi butunlay boshqa CONTENTBETA hujjat.", encoding="utf-8")
+    kb.ingest_file(f, source="telegram", origin="report.md")     # AYNAN bir xil origin
+    assert kb.stats()["docs"] == 2                                # ikkalasi saqlandi
+    assert len(kb.search("CONTENTALPHA", use_rerank=False)) >= 1  # birinchi O'CHMADI
+    assert len(kb.search("CONTENTBETA", use_rerank=False)) >= 1
+    # bir xil faylni qayta → unchanged (idempotent)
+    f.write_text("# Hisobot B\n\nIkkinchi butunlay boshqa CONTENTBETA hujjat.", encoding="utf-8")
+    assert kb.ingest_file(f, source="telegram", origin="report.md")["status"] == "unchanged"
+
+
+def test_apostrophe_cross_match():
+    """FIX 4: 'toʻlov' (U+02BB) va 'to'lov' (ASCII ') o'zaro mos kelsin."""
+    setup_kb()
+    kb.ingest_text("# Toʻlov tartibi\n\nMijoz toʻlovni oʻz vaqtida amalga oshirdi.",
+                   source="telegram", origin="p.md")
+    assert len(kb.search("to'lov", use_rerank=False)) >= 1        # ASCII ' → topadi
+    assert len(kb.search("toʻlov", use_rerank=False)) >= 1        # U+02BB → topadi
+    # teskari: ASCII bilan saqlab, U+02BB bilan qidirish
+    kb.ingest_text("# Koʻrsatkich\n\nKPI koʻrsatkichlari hisoblanadi ANIQSOZ.",
+                   source="telegram", origin="k.md")
+    assert len(kb.search("ko'rsatkich", use_rerank=False)) >= 1
+
+
+def test_rerank_dedupe():
+    """FIX 6: Claude [0,0,0,1] qaytarsa natijada takroriy chunk bo'lmasin."""
+    def fake(prompt, effort="low"):
+        p = prompt.lower()
+        if "kalit so" in p:
+            raise RuntimeError("expansion->fallback")
+        if "saralovchi" in p:
+            return "[0, 0, 0, 1]"               # ataylab takrorli
+        return FAKE_META
+
+    setup_kb(fake=fake)
+    # bir necha bo'lak "undiruv" so'zi bilan (rerank ishga tushishi uchun cands>k)
+    doc = "\n\n".join(
+        f"## Bo'lim {i}\n\nUndiruv qarz muddat to'lov haqida batafsil matn bo'lagi {i}."
+        for i in range(6)
+    )
+    kb.ingest_text("# Katta\n\n" + doc, source="telegram", origin="r.md")
+    res = kb.search("undiruv", k=2, use_rerank=True)
+    ids = [r["chunk_id"] for r in res]
+    assert len(ids) == len(set(ids))            # takror yo'q
+
+
+def test_use_expansion_false_skips_claude():
+    """FIX 7: fast rejim (use_expansion=False) Claude query-expansion'ni chaqirmasin."""
+    setup_kb()
+    kb.ingest_text("# Hujjat\n\nUndiruv qarz muddat matni bor.",
+                   source="telegram", origin="u.md")
+    seen = {"n": 0}
+    orig = kb._expand_query
+    kb._expand_query = lambda q: (seen.__setitem__("n", seen["n"] + 1), orig(q))[1]
+    try:
+        kb.search("undiruv", k=3, use_rerank=False, use_expansion=False)
+        assert seen["n"] == 0                    # expansion CHAQIRILMADI
+        kb.search("undiruv", k=3, use_rerank=False, use_expansion=True)
+        assert seen["n"] == 1                    # endi chaqirildi
+    finally:
+        kb._expand_query = orig
+
+
+def test_chunk_ceiling_and_warn():
+    """FIX 5: MAX_CHUNKS'dan oshsa kesiladi va ogohlantirish qaytadi."""
+    setup_kb()
+    body = "\n\n".join(
+        f"## Bo'lim {i}\n\n" + ("undiruv qarz matni bo'lagi. " * 8)   # ~230 belgi → alohida chunk
+        for i in range(kb.MAX_CHUNKS + 100)
+    )
+    r = kb.ingest_text("# Katta hujjat\n\n" + body, source="telegram", origin="big.md")
+    assert r["n_chunks"] == kb.MAX_CHUNKS
+    assert "bo'lak" in (r.get("warn") or "")
 
 
 # ---------------------------------------------------------------- skript rejimi
