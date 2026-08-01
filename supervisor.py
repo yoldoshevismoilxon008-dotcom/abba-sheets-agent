@@ -126,6 +126,14 @@ def main():
     boot_secrets()
     boot_brand()
     boot_seed()
+    # Bilim bazasi (KB) — sxema (idempotent). Yiqilsa bot baribir ko'tariladi.
+    try:
+        import kb
+
+        kb.init_db()
+        log("kb: init ok")
+    except Exception as e:
+        log(f"kb init o'tkazildi (KB o'chiq, Q&A ishlashda davom etadi): {e}")
     # STT modeli (785MB) — fonda, bot bloklanmaydi; MODEL_URL bo'lmasa jim
     try:
         import stt
