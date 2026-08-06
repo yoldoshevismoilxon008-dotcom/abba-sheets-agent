@@ -20,8 +20,15 @@ import diff as diffmod
 import fetch as fetchmod
 
 MONEY_RE = re.compile(r"[-\d.,]+")
-DDMM_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})$")
+DDMM_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})$")                 # 06.07 (yilsiz)
+DDMMYYYY_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$")  # 06.07.2026
+ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")             # 2026-07-06
+SERIAL_RE = re.compile(r"^\d+(?:\.\d+)?$")                        # 45874 (Sheets serial)
 DUE_SOON_DAYS = 4
+# Google Sheets serial → sana (epoch 1899-12-30 = serial 0). Aqlli chegara
+# (~1990..2089) — mayda sonlarni (masalan "5") sana deb o'qib yubormaslik uchun.
+_SERIAL_EPOCH = date(1899, 12, 30)
+_SERIAL_MIN, _SERIAL_MAX = 33000, 80000
 
 
 def log(msg):
@@ -40,16 +47,55 @@ def money(v):
         return 0.0
 
 
-def parse_due(v, today):
-    """"06.07" (KK.OO) → date (joriy yil). "0"/bo'sh/boshqa → None."""
-    m = DDMM_RE.match(str(v).strip())
-    if not m:
-        return None
-    dd, mm = int(m.group(1)), int(m.group(2))
+def _safe_date(y, mm, dd):
     try:
-        return date(today.year, mm, dd)
-    except ValueError:
+        return date(y, mm, dd)
+    except (ValueError, TypeError):
         return None
+
+
+def _serial_to_date(n):
+    """Google Sheets serial son → sana (epoch 1899-12-30). Chegaradan tashqari → None."""
+    from datetime import timedelta
+    try:
+        d = int(round(float(n)))
+    except (ValueError, TypeError):
+        return None
+    if not (_SERIAL_MIN <= d <= _SERIAL_MAX):
+        return None
+    return _SERIAL_EPOCH + timedelta(days=d)
+
+
+def parse_due(v, today):
+    """To'lov muddatini turli formatdan o'qiydi → date (yoki None):
+      DD.MM / D.M (yilsiz → joriy yil), DD.MM.YYYY, DD/MM/YYYY, ISO YYYY-MM-DD,
+      Google Sheets serial son (int/float yoki toza raqamli satr, epoch 1899-12-30).
+      Chetki bo'shliqlar va ',' ajratuvchi ("05,08") ham qabul qilinadi. Aniqlanmasa None.
+      Yil ko'rsatilmagan bo'lsagina joriy yil qo'yiladi (o'tgan/kelasi yil buzilmaydi)."""
+    if v is None or isinstance(v, bool):
+        return None
+    # 1) haqiqiy serial son (valueRenderOption o'zgarsa yoki katak date-tipli bo'lmasa)
+    if isinstance(v, (int, float)):
+        return _serial_to_date(v)
+    s = str(v).strip()
+    if not s:
+        return None
+    s = s.replace(",", ".")              # "05,08" → "05.08"
+    m = ISO_RE.match(s)                  # 2026-07-06
+    if m:
+        return _safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    m = DDMMYYYY_RE.match(s)             # 06.07.2026 / 06/07/26
+    if m:
+        dd, mm, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if yy < 100:
+            yy += 2000
+        return _safe_date(yy, mm, dd)
+    m = DDMM_RE.match(s)                 # 06.07 (yilsiz → joriy yil)
+    if m:
+        return _safe_date(today.year, int(m.group(2)), int(m.group(1)))
+    if SERIAL_RE.match(s):              # "45874" (toza raqamli satr — serial)
+        return _serial_to_date(s)
+    return None
 
 
 def _col(header, *needles):
@@ -172,13 +218,104 @@ def parse_rows(vals, today):
     return rows
 
 
-def find_tab(snap, today=None):
-    """Snapshot'dagi joriy oy "Undiruv <oy>" range kaliti (topilmasa None)."""
-    want = f"undiruv {fetchmod.current_month_name(today)}"
-    for rng in snap.get("ranges", {}):
-        if fetchmod.norm(fetchmod.tab_of_range(rng)) == want:
-            return rng
-    return None
+# ---- Oy-tab tanlash (mustahkam: imlo alias + yil suffiks + ambiguity) ----
+
+# Egaga ko'rsatiladigan oxirgi tab-ogohlantirishi (ambiguity/fallback). run_daily
+# fetch'dan keyin darrov consume_tab_note() bilan o'qib, jamlamaga qo'shadi.
+_TAB_NOTE = ""
+
+
+def consume_tab_note():
+    global _TAB_NOTE
+    n, _TAB_NOTE = _TAB_NOTE, ""
+    return n
+
+
+def _set_tab_note(n):
+    global _TAB_NOTE
+    _TAB_NOTE = n
+
+
+def _month_spellings(month):
+    """Oyning barcha imlo variantlari (sentyabr↔sentabr, oktyabr↔oktabr)."""
+    m = fetchmod.norm(month)
+    sp = {m}
+    for k, v in getattr(fetchmod, "MONTH_ALIASES", {}).items():
+        nk, nv = fetchmod.norm(k), fetchmod.norm(v)
+        if m in (nk, nv):
+            sp.update({nk, nv})
+    return sp
+
+
+def _tab_matches_month(norm_title, month):
+    """norm_title 'undiruv <oy>' bilan boshlanadimi (bo'sh/'('/oxiri chegarada)."""
+    for s in _month_spellings(month):
+        p = f"undiruv {s}"
+        if norm_title == p or norm_title.startswith(p + " ") or norm_title.startswith(p + "("):
+            return True
+    return False
+
+
+_YEAR_RE = re.compile(r"20\d{2}")
+
+
+def rank_month_tabs(titles, month, today=None):
+    """'undiruv <oy>' ga mos tab nomlari — eng mos birinchi. YIL QOIDASI:
+      (a) joriy yil suffiksi ('(2026)') ENG USTUN,
+      (b) suffikssiz aynan 'undiruv <oy>' — keyingi,
+      (c) BOSHQA yil suffiksli (2025/2024 arxiv) — HECH QACHON (kandidat emas),
+      (d) qolgan tenglikda eng ko'p undirilmagan — fetch_live_month hal qiladi.
+    Sabab: 'Undiruv avgust' aynan tenglikka mos, lekin u 2025 arxivi bo'lishi mumkin —
+    joriy yil suffiksli tab uni yutib o'tishi shart."""
+    today = today or date.today()
+    yr = str(today.year)
+    scored = []
+    for t in titles:
+        nt = fetchmod.norm(t)
+        if not _tab_matches_month(nt, month):
+            continue
+        years = _YEAR_RE.findall(nt)
+        if years and yr not in years:
+            continue                        # boshqa yil arxivi — HECH QACHON tanlanmaydi
+        prio = 0 if yr in years else 1      # (a) joriy-yil suffiksi → (b) suffikssiz
+        scored.append((prio, nt, t))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [t for _, _, t in scored]
+
+
+def _latest_month_tab(titles, today):
+    """Joriy oy tabi topilmaganda — mavjud eng so'nggi (≤ joriy oy) 'undiruv <oy>'
+    tabi. Boshqa yil arxivlari (2025/…) chetlab o'tiladi (hech qachon fallback emas)."""
+    today = today or date.today()
+    yr, cur_idx = str(today.year), today.month
+    best = None  # (idx, title)
+    for t in titles:
+        nt = fetchmod.norm(t)
+        if not nt.startswith("undiruv "):
+            continue
+        years = _YEAR_RE.findall(nt)
+        if years and yr not in years:
+            continue                        # boshqa yil arxivi — fallback ham emas
+        for idx, mon in enumerate(fetchmod.MONTHS, start=1):
+            if _tab_matches_month(nt, mon):
+                cand_idx = idx if idx <= cur_idx else idx - 12  # kelasi oy → o'tmishga
+                if best is None or cand_idx > best[0]:
+                    best = (cand_idx, t)
+                break
+    return best[1] if best else None
+
+
+def find_tab(snap, today=None, month=None):
+    """Snapshot'dagi "Undiruv <oy>" range kaliti (topilmasa None). month berilmasa
+    joriy oy. Mustahkam: imlo/yil-suffiks bo'yicha eng mosini oladi."""
+    month = month or fetchmod.current_month_name(today)
+    rng_by_norm = {rng: fetchmod.norm(fetchmod.tab_of_range(rng)) for rng in snap.get("ranges", {})}
+    matched = [rng for rng, nt in rng_by_norm.items() if _tab_matches_month(nt, month)]
+    if not matched:
+        return None
+    yr = str((today or date.today()).year)
+    matched.sort(key=lambda rng: (yr not in rng_by_norm[rng], -len(rng_by_norm[rng]), rng_by_norm[rng]))
+    return matched[0]
 
 
 def smm_sheet_id():
@@ -192,19 +329,51 @@ def smm_sheet_id():
 def fetch_live_month(month_name, today):
     """JONLI: SMM sheet'dan "Undiruv <month_name>" tabini bevosita o'qiydi
     (readonly gspread). Qaytadi: (tab, rows) yoki (None, []). Xato — chaqiruvchi
-    ushlaydi (snapshot fallback)."""
+    ushlaydi (snapshot fallback). consume_tab_note() bilan ega ogohlantirishini oladi.
+    Mustahkam: imlo/yil-suffiks; >1 mos → yil+eng-ko'p-undirilmagan bo'yicha tanlaydi
+    va ega uchun WARNING qoldiradi; joriy oy topilmasa — eng so'nggi oy tabi (fallback)."""
+    _set_tab_note("")
     sid = smm_sheet_id()
     if not sid:
         return None, []
     gc = fetchmod.gclient()
     sh = gc.open_by_key(sid)
-    want = f"undiruv {fetchmod.norm(month_name)}"
-    tab = next((w.title for w in sh.worksheets() if fetchmod.norm(w.title) == want), None)
-    if not tab:
-        return None, []
-    ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(tab)], "undiruv-live")
-    vals = next(iter(ranges.values())).get("values", [])
-    return tab, parse_rows(vals, today)
+    titles = [w.title for w in sh.worksheets()]
+
+    def _read(tab):
+        ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(tab)], "undiruv-live")
+        vals = next(iter(ranges.values())).get("values", [])
+        return parse_rows(vals, today)
+
+    matched = rank_month_tabs(titles, month_name, today)
+    if not matched:
+        # Joriy oy tabi umuman yo'q — eng so'nggi mavjud oy tabiga tushamiz (WARNING)
+        fb = _latest_month_tab(titles, today)
+        if not fb:
+            return None, []
+        note = (f"⚠️ «Undiruv {month_name}» tabi topilmadi — vaqtincha eng so'nggi "
+                f"«{fb}» tabidan o'qildi. Joriy oy tabini oching/nomlang.")
+        log(note)
+        _set_tab_note(note)
+        return fb, _read(fb)
+    if len(matched) == 1:
+        return matched[0], _read(matched[0])
+    # >1 mos: hammasini o'qib, (yil ustun, keyin eng ko'p undirilmagan) tanlaymiz
+    cands = []
+    for tab in matched:
+        rows = _read(tab)
+        cands.append((tab, rows, str((today or date.today()).year) in fetchmod.norm(tab),
+                      sum(1 for r in rows if is_unpaid(r))))
+    cands.sort(key=lambda c: (not c[2], -c[3]))
+    best = cands[0]
+    others = "; ".join(f"«{c[0]}» ({c[3]} undirilmagan)" for c in cands[1:])
+    # Yil-qoidasi arxivni allaqachon chetladi; bu — shaffoflik uchun ma'lumot
+    # (egaga "o'chir" deb turtki EMAS — arxiv tab ataylab saqlanishi mumkin).
+    note = (f"ℹ️ «{month_name}» oyiga {len(matched)} tab bor — joriy yil «{best[0]}» "
+            f"tanlandi ({best[3]} undirilmagan). Boshqa: {others} (e'tiborsiz qoldirildi).")
+    log(note)
+    _set_tab_note(note)
+    return best[0], best[1]
 
 
 def load_rows(day=None, today=None, prefer_live=True):

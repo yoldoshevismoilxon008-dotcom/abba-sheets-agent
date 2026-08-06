@@ -312,15 +312,15 @@ def _save_state(d):
 
 def _month_rows(day, month_name, today):
     """SNAPSHOT'dan "Undiruv <month_name>" qatorlari (topilmasa (None, [])).
-    Faqat fallback — production jonli o'qiydi (_month_rows_src)."""
-    want = f"undiruv {fetchmod.norm(month_name)}"
+    Faqat fallback — production jonli o'qiydi (_month_rows_src). Tab tanlash
+    undiruv.find_tab bilan (imlo/yil-suffiks mustahkam)."""
     for snap in diffmod.load_day(day)[0].values():
         if snap.get("pm_kpi", True):
             continue
-        for rng in snap.get("ranges", {}):
-            if fetchmod.norm(fetchmod.tab_of_range(rng)) == want:
-                vals = snap["ranges"][rng].get("values", [])
-                return fetchmod.tab_of_range(rng), undiruv.parse_rows(vals, today)
+        rng = undiruv.find_tab(snap, today, month=month_name)
+        if rng:
+            vals = snap["ranges"][rng].get("values", [])
+            return fetchmod.tab_of_range(rng), undiruv.parse_rows(vals, today)
     return None, []
 
 
@@ -350,7 +350,8 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
              "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "status_blank": [],
-             "pm_missing": [], "pm_col_missing": False, "pm_col_tab": ""}
+             "pm_missing": [], "pm_col_missing": False, "pm_col_tab": "",
+             "nodate_pm": {}, "nodate_n": 0}   # muddatsiz undirilmaganlar (PM kesimida)
     # PM ustuni tabda UMUMAN yo'qmi (avgust holati) — joriy oy qatorlaridan
     if cur_rows and not cur_rows[0].get("pm_col_present", True):
         stats["pm_col_missing"] = True
@@ -378,8 +379,16 @@ def build_push(today, cur_rows, prev_rows, prev_month):
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
         if r["holat"] == "pauza":
             stats["pauza"].append(f"{r['loyiha']} ({r['pm']})")
+        # Muddat yo'q, lekin qarz bor — YO'QOLMASIN: PM'i borlar PM xabaridagi
+        # "sana belgilanmagan" bo'limiga; PM'sizlar egaga (pm_missing).
         if r["muddat"] is None:
             stats["no_date"] += 1
+            stats["nodate_n"] += 1
+            nd = f"{name} — qoldiq {_fmt(summa)}"
+            if r.get("pm_missing"):
+                stats["pm_missing"].append({"loyiha": r["loyiha"], "line": "📅 " + nd + " (sanasiz)"})
+            else:
+                stats["nodate_pm"].setdefault(r["pm"], []).append(nd)
             continue
         days_left = (r["muddat"] - today).days
         if days_left > PUSH_DUE_DAYS:
@@ -420,8 +429,10 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     cur_month = fetchmod.current_month_name(today)
     prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
     snap_day = day
+    prev_tab = st.get("tab")           # o'tgan run tabi — yangi oy aniqlash uchun
     # JONLI-birinchi (production MAJBURIY jonli); jonli xato bo'lsa snapshot
     tab, cur_rows, cur_src = _month_rows_src(cur_month, today, snap_day)
+    tab_note = undiruv.consume_tab_note()   # tab ambiguity/fallback ogohlantirishi (egaga)
     if tab is None and cur_src == "none":
         # snapshot ham bugun yo'q — oxirgi mavjud kundan urinamiz
         days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()
@@ -445,23 +456,35 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     data_source = "snapshot" if "snapshot" in (cur_src, prev_src) else "live"
     per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month)
     stats["pm_col_tab"] = tab  # guard xabari uchun
+    # Yangi oy tabi birinchi marta o'qildi (o'tgan run boshqa tab edi)
+    new_month_tab = bool(prev_tab) and fetchmod.norm(prev_tab) != fetchmod.norm(tab)
 
     contacts = load_contacts()
     slots = slots_from_config()
-    by_slot = {}
-    for pm_name, lines in per_pm.items():
-        by_slot[_slot_key(pm_name)] = (pm_name, lines)
+    nodate_pm = stats.get("nodate_pm", {})
+    # by_slot: overdue/due-soon YOKI faqat-muddatsiz qatorli PM'lar ham kirsin
+    by_slot, slot_n = {}, {}
+    for pm_name in set(per_pm) | set(nodate_pm):
+        sk = _slot_key(pm_name)
+        by_slot[sk] = (pm_name, per_pm.get(pm_name, []))
+        slot_n[sk] = len(per_pm.get(pm_name, [])) + len(nodate_pm.get(pm_name, []))
 
     dd = today.strftime("%d.%m.%Y")
     # Xabarlarni tayyorlash (yetkazish: EGANING akkauntidan, userbot_sender)
     msgs, no_contact, texts = [], {}, {}
     for slot, (pm_name, lines) in by_slot.items():
-        text = (f"🔔 Undiruv eslatmasi — {dd}\n\n" + "\n".join(lines)
+        body = "\n".join(lines)
+        nd = nodate_pm.get(pm_name, [])
+        if nd:
+            nd_block = ("📅 Sana belgilanmagan — aniq to'lov sanasini yozing:\n"
+                        + "\n".join(f"• {x}" for x in nd))
+            body = (body + "\n\n" + nd_block) if body else nd_block
+        text = (f"🔔 Undiruv eslatmasi — {dd}\n\n" + body
                 + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
         texts[slot] = text
         c = contacts.get(slot)
         if not c:
-            no_contact[slot] = len(lines)
+            no_contact[slot] = slot_n[slot]
             continue
         msgs.append((slot, c, text))
 
@@ -473,7 +496,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
 
             for slot, ok2, err in userbot_sender.send_messages(msgs):
                 if ok2:
-                    sent[slot] = len(by_slot[slot][1])
+                    sent[slot] = slot_n[slot]
                 else:
                     failed[slot] = err
         except Exception as e:
@@ -484,13 +507,21 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     elif dry_run:
         for slot, _c, _t in msgs:
             log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
-            sent[slot] = len(by_slot[slot][1])
+            sent[slot] = slot_n[slot]
 
     # Egaga jamlama — boshida bannerlar: 🧊 SNAPSHOT + PM-ustun guard + reconcile
     L = []
     _banner = undiruv.snapshot_banner(data_source, snap_day)
     if _banner:
         L.append(_banner)
+    if tab_note:                       # tab ambiguity/fallback (2 tab, imlo, topilmadi)
+        L.append(tab_note)
+    if new_month_tab:                  # yangi oy tabi birinchi marta o'qildi
+        t = undiruv.totals(cur_rows)
+        n_unpaid = sum(1 for r in cur_rows if undiruv.is_unpaid(r))
+        L.append(f"🆕 Yangi oy tabi: «{tab}» — undirilmagan {n_unpaid} loyiha "
+                 f"{_fmt(t.get('qoldiq', 0))}; kelishilgan {_fmt(t.get('kelishilgan', 0))}, "
+                 f"undirildi {_fmt(t.get('undirildi', 0))} ({t.get('pct', 0):.0f}%).")
     # PM ustuni UMUMAN yo'q (avgust) — qora banner, PM'ga push yuborilmaydi
     if stats.get("pm_col_missing"):
         n = len(stats["pm_missing"])
@@ -539,8 +570,14 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     if stats["pauza"]:
         L.append(f"⏸ Pauza: {', '.join(stats['pauza'][:8])}")
     if stats["bad_sum"] or stats["no_date"]:
-        L.append(f"⚠️ Data: Summa son emas — {stats['bad_sum']} qator · sanasiz — "
-                 f"{stats['no_date']} qator (PM'ga ketmadi)")
+        parts = []
+        if stats["bad_sum"]:
+            parts.append(f"Summa son emas — {stats['bad_sum']} qator")
+        if stats["no_date"]:
+            nd_pm = sum(len(v) for v in stats.get("nodate_pm", {}).values())
+            parts.append(f"sanasiz — {stats['no_date']} qator "
+                         f"({nd_pm} tasi PM'ga «sana belgilanmagan» bo'limida yuborildi)")
+        L.append("⚠️ Data: " + " · ".join(parts))
     summary = "\n".join(L)
     # Egaga: dizaynli PDF (jamlama bloki bilan); yiqilsa matn fallback.
     # dry_run'da ham egaga PDF ketadi (sinov ko'rinishi), faqat PM'lar va
@@ -593,13 +630,20 @@ def test_to_saved(today=None, day=None):
         return f"«Undiruv {cur_month}» tabi topilmadi — sinov uchun ma'lumot yo'q."
     _pt, prev_rows = _month_rows(day, prev_month, today)
     per_pm, _stats = build_push(today, cur_rows, prev_rows or [], prev_month)
-    if not per_pm:
+    nodate_pm = _stats.get("nodate_pm", {})
+    if not per_pm and not nodate_pm:
         return "Bugun birorta PM uchun eslatma yo'q — sinovga xabar chiqmadi."
     dd = today.strftime("%d.%m.%Y")
     msgs = []
-    for pm_name, lines in per_pm.items():
+    for pm_name in set(per_pm) | set(nodate_pm):     # muddatli YOKI faqat-muddatsizlar
+        body = "\n".join(per_pm.get(pm_name, []))
+        nd = nodate_pm.get(pm_name, [])
+        if nd:
+            nd_block = ("📅 Sana belgilanmagan — aniq to'lov sanasini yozing:\n"
+                        + "\n".join(f"• {x}" for x in nd))
+            body = (body + "\n\n" + nd_block) if body else nd_block
         text = (f"🧪 [SINOV — {pm_name} ko'radigan xabar]\n"
-                f"🔔 Undiruv eslatmasi — {dd}\n\n" + "\n".join(lines)
+                f"🔔 Undiruv eslatmasi — {dd}\n\n" + body
                 + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
         msgs.append((_slot_key(pm_name), "me", text))
     import userbot_sender
