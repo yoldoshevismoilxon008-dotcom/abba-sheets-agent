@@ -450,6 +450,22 @@ def _fallback_title(origin):
     return (stem[:120] or "Hujjat")
 
 
+def _first_heading(text):
+    """Matndagi birinchi markdown sarlavhasi (# ...) matni; bo'lmasa ''."""
+    for line in (text or "").split("\n"):
+        m = _HEADING_RE.match(line)
+        if m:
+            return m.group(2).strip()
+    return ""
+
+
+def _light_meta(text, origin, title_hint=None):
+    """Claude'SIZ metadata — kichik fayllar uchun (narx tejash, meta_min_chars).
+    Sarlavha: title_hint → birinchi markdown sarlavha → fayl nomidan fallback."""
+    title = (title_hint or "").strip() or _first_heading(text) or _fallback_title(origin)
+    return {"title": title[:200], "lang": "uz", "tags": [], "summary": text.strip()[:300]}
+
+
 def _extract_metadata(text, origin, title_hint=None):
     """Claude bilan {title, lang, tags, summary}. Yiqilsa — fallback."""
     try:
@@ -497,11 +513,13 @@ def _safe_log_ingest(source, origin, status, n_chunks, err):
 
 
 def ingest_text(text, *, source, origin, title=None, mime="text/plain",
-                tags=None, vault_path=None, content_key=False):
+                tags=None, vault_path=None, content_key=False, meta_min_chars=0):
     """Matnni normalize → chunk → metadata (Claude) → upsert.
     content_key=True → uid kontent-manzilli (bir xil origin'li boshqa kontent
-    ustiga yozilmaydi; ingest_file/eslatma shu rejimda). Qaytadi:
-    {uid, title, n_chunks, status: new|updated|unchanged, tags, summary, warn}"""
+    ustiga yozilmaydi; ingest_file/eslatma shu rejimda).
+    meta_min_chars>0 → shu belgidan KICHIK matnga Claude metadata chaqirilmaydi,
+    light meta (fayl nomi + birinchi sarlavha) ishlatiladi (vault narx-nazorati).
+    Qaytadi: {uid, title, n_chunks, status: new|updated|unchanged, tags, summary, warn}"""
     init_db()
     norm = _normalize(text)
     if not norm:
@@ -530,7 +548,10 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
                 "summary": row["summary"] or "", "warn": "",
             }
 
-        meta = _extract_metadata(norm, origin, title_hint=title)
+        if meta_min_chars and len(norm) < meta_min_chars:
+            meta = _light_meta(norm, origin, title_hint=title)
+        else:
+            meta = _extract_metadata(norm, origin, title_hint=title)
         if tags:
             extra = [str(t).strip().lower() for t in tags if str(t).strip()]
             meta["tags"] = list(dict.fromkeys([*extra, *meta["tags"]]))[:10]
@@ -590,9 +611,11 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
         conn.close()
 
 
-def ingest_file(path, *, source, origin, caption=""):
+def ingest_file(path, *, source, origin, caption="", vault_path=None,
+                title=None, meta_min_chars=0):
     """Kengaytmaga qarab extractor → ingest_text (content_key=True —
-    bir xil nomli boshqa fayl birinchisining chunk'larini o'chirmasin)."""
+    bir xil nomli boshqa fayl birinchisining chunk'larini o'chirmasin).
+    vault_path/title/meta_min_chars → ingest_text ga uzatiladi (vault_sync uchun)."""
     path = Path(path)
     text = extract_file(path)
     if not text or not text.strip():
@@ -600,7 +623,29 @@ def ingest_file(path, *, source, origin, caption=""):
     if caption and caption.strip():
         text = f"[Izoh: {caption.strip()}]\n\n{text}"
     mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-    return ingest_text(text, source=source, origin=origin, mime=mime, content_key=True)
+    return ingest_text(text, source=source, origin=origin, mime=mime,
+                       content_key=True, vault_path=vault_path, title=title,
+                       meta_min_chars=meta_min_chars)
+
+
+def forget_origin(source, origin):
+    """Aynan shu source+origin hujjat(lar)ini arxivlaydi (vault'da fayl o'chganda).
+    Scoped — HECH QACHON ommaviy emas. Qaytadi: arxivlangan hujjat soni."""
+    init_db()
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE docs SET archived=1, updated_at=? "
+            "WHERE source=? AND origin=? AND archived=0",
+            (_now(), source, origin),
+        )
+        conn.commit()
+        n = cur.rowcount
+    finally:
+        conn.close()
+    if n:
+        _safe_log_ingest(source, origin, "archived", 0, None)
+    return n
 
 
 def _like_escape(s):
@@ -791,7 +836,13 @@ def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansio
         title = r.get("title") or "Hujjat"
         head = r.get("heading") or ""
         origin = r.get("origin") or r.get("source") or ""
-        loc = f"### {title}" + (f" › {head}" if head else "") + f"   (manba: {origin})\n"
+        vpath = r.get("vault_path") or ""
+        if r.get("source") == "vault" and vpath:
+            link = vpath[:-3] if vpath.endswith(".md") else vpath
+            manba = f"[[{link}]]"          # Obsidian wiki-link — bosib ochilsin
+        else:
+            manba = origin
+        loc = f"### {title}" + (f" › {head}" if head else "") + f"   (manba: {manba})\n"
         body = (r.get("text") or "").strip()
         block = loc + body + "\n---\n"
         if used + len(block) > budget_chars:

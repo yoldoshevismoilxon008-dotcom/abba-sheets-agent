@@ -261,6 +261,42 @@ def test_chunk_ceiling_and_warn():
     assert "bo'lak" in (r.get("warn") or "")
 
 
+def test_meta_gate_skips_claude_for_small():
+    """meta_min_chars: kichik matnga Claude metadata chaqirilMAYDI (vault narx-gate);
+    sarlavha birinchi markdown sarlavhadan olinadi. Katta matn — Claude ishlaydi."""
+    setup_kb()
+    calls = {"n": 0}
+
+    def counting(prompt, effort="low"):
+        calls["n"] += 1
+        return FAKE_META
+
+    kb._ask_claude = counting
+    r = kb.ingest_text("# Kichik eslatma\n\nJuda qisqa matn.", source="vault",
+                       origin="bilim/x.md", content_key=True, meta_min_chars=1500)
+    assert calls["n"] == 0                       # < 1500 belgi → Claude chaqirilmadi
+    assert r["title"] == "Kichik eslatma"        # birinchi sarlavhadan
+    assert r["tags"] == []
+    kb.ingest_text("# Katta\n\n" + ("Batafsil undiruv matni. " * 100), source="vault",
+                   origin="bilim/y.md", content_key=True, meta_min_chars=1500)
+    assert calls["n"] == 1                        # > 1500 belgi → Claude ishladi
+
+
+def test_forget_origin_scoped():
+    """forget_origin faqat aynan source+origin hujjatni arxivlaydi (ommaviy emas)."""
+    setup_kb()
+    kb.ingest_text("# A\n\nBirinchi hujjat ALFA.", source="vault",
+                   origin="kunlik/a.md", content_key=True)
+    kb.ingest_text("# B\n\nIkkinchi hujjat BETA.", source="vault",
+                   origin="kunlik/b.md", content_key=True)
+    assert kb.stats()["docs"] == 2
+    assert kb.forget_origin("vault", "kunlik/a.md") == 1
+    s = kb.stats()
+    assert s["docs"] == 1 and s["docs_archived"] == 1
+    assert kb.forget_origin("telegram", "kunlik/b.md") == 0   # boshqa source — tegilmaydi
+    assert kb.stats()["docs"] == 1
+
+
 # ---------------------------------------------------------------- skript rejimi
 
 def _run_all():
