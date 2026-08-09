@@ -2041,6 +2041,8 @@ def handle_update(upd):
                 m = (f"✅ Vault sinxron tugadi: +{c.get('ingested', 0)} yangi · "
                      f"{c.get('unchanged', 0)} o'zgarmagan · {c.get('archived', 0)} arxiv"
                      + (f" · {c.get('errors', 0)} xato" if c.get("errors") else ""))
+            elif status == "busy":
+                m = "⏳ Vault sinxron allaqachon ketyapti — biroz kuting."
             elif status == "unconfigured":
                 m = ("⚠️ .kbignore hali sozlanmagan (__UNCONFIGURED__ qatori turibdi) — "
                      "sinxron o'chiq. Maxfiy papkalarni qo'shib, o'sha qatorni o'chiring.")

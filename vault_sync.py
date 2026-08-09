@@ -22,8 +22,10 @@ Env:
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -41,6 +43,22 @@ UNCONFIGURED = "__UNCONFIGURED__"
 
 def log(msg):
     print(f"[vault_sync] {msg}", flush=True)
+
+
+# qo'lda /vault_sync (daemon thread) va scheduler jobi bir vaqtda run() chaqirmasin
+_LOCK = threading.Lock()
+_TOKEN_RE = re.compile(r"x-access-token:[^@]*@")
+
+
+def _sanitize(msg):
+    """PAT token qiymati + 'x-access-token:...@' naqshini «***» ga almashtiradi.
+    log / state / /vault_stat / notify — HAMMASI shu orqali chiqadi (token oqmasin)."""
+    s = str(msg)
+    s = _TOKEN_RE.sub("x-access-token:***@", s)
+    tok = os.environ.get("GH_TOKEN_VAULT", "").strip()
+    if tok:
+        s = s.replace(tok, "***")
+    return s
 
 
 # ---------------------------------------------------------------- .kbignore
@@ -92,24 +110,36 @@ def _always_ignore(rel):
 def _git(*args):
     r = subprocess.run(["git", *args], capture_output=True, text=True, timeout=GIT_TIMEOUT)
     if r.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args[:3])} → {r.stderr.strip()[:200]}")
+        # stderr token'li URL'ni o'z ichiga olishi mumkin → manbada sanitize
+        raise RuntimeError(_sanitize(f"git {' '.join(args[:3])} → {r.stderr.strip()[:200]}"))
     return r.stdout
 
 
+def _urls(repo, token):
+    """(auth_url, clean_url) — token'li (klon/fetch) va tokensiz (config'da qoladi)."""
+    return (f"https://x-access-token:{token}@github.com/{repo}.git",
+            f"https://github.com/{repo}.git")
+
+
 def _ensure_clone(repo, token):
-    """Shallow clone yoki pull → CLONE. Pull yiqilsa qayta klon. Monkeypatch qulay."""
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    """Read-only mirror → CLONE. Token .git/config'da SAQLANMAYDI: klondan keyin
+    origin tokensiz URL'ga o'zgartiriladi; yangilash token'li URL bilan `fetch` +
+    `reset --hard` (pull --rebase EMAS — shallow read-only mirror uchun to'g'riroq,
+    sinmaydi va lokal commit/rebase yaratmaydi)."""
+    auth_url, clean_url = _urls(repo, token)
     CLONE.parent.mkdir(parents=True, exist_ok=True)
     if not (CLONE / ".git").is_dir():
-        _git("clone", "--depth", "1", url, str(CLONE))
+        _git("clone", "--depth", "1", auth_url, str(CLONE))
+        _git("-C", str(CLONE), "remote", "set-url", "origin", clean_url)   # tokenni tashla
     else:
-        _git("-C", str(CLONE), "remote", "set-url", "origin", url)
         try:
-            _git("-C", str(CLONE), "pull", "--rebase", "-q")
+            _git("-C", str(CLONE), "fetch", "--depth", "1", auth_url, "HEAD")
+            _git("-C", str(CLONE), "reset", "--hard", "FETCH_HEAD")
         except RuntimeError as e:
-            log(f"pull yiqildi ({e}) — qayta klon")
+            log(f"fetch yiqildi ({_sanitize(str(e))}) — qayta klon")
             shutil.rmtree(CLONE, ignore_errors=True)
-            _git("clone", "--depth", "1", url, str(CLONE))
+            _git("clone", "--depth", "1", auth_url, str(CLONE))
+            _git("-C", str(CLONE), "remote", "set-url", "origin", clean_url)
     return CLONE
 
 
@@ -124,10 +154,12 @@ def _load_state():
 
 def _save_state(st):
     try:
+        if st.get("last_error"):
+            st = {**st, "last_error": _sanitize(st["last_error"])}
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
-        log(f"state saqlanmadi: {e}")
+        log(f"state saqlanmadi: {_sanitize(str(e))}")
 
 
 # ---------------------------------------------------------------- reconcile
@@ -191,29 +223,36 @@ def _reconcile(clone):
 
 
 def run():
-    """To'liq sinxron. HECH QACHON raise QILMAYDI — status dict qaytaradi."""
-    repo = os.environ.get("VAULT_REPO", "").strip()
-    token = os.environ.get("GH_TOKEN_VAULT", "").strip()
-    if not repo or not token:
-        return {"status": "disabled"}
+    """To'liq sinxron. HECH QACHON raise QILMAYDI — status dict qaytaradi.
+    Bir vaqtda faqat BITTA run() (qo'lda /vault_sync + scheduler to'qnashmasin):
+    lock ololmasa {"status": "busy"}."""
+    if not _LOCK.acquire(blocking=False):
+        return {"status": "busy"}
     try:
-        clone = _ensure_clone(repo, token)
-    except Exception as e:
-        msg = str(e)[:200]
-        st = _load_state()
-        st["last_error"] = f"git: {msg}"
-        _save_state(st)
-        log(f"git xato: {msg}")
-        return {"status": "git_error", "error": msg}
-    try:
-        return _reconcile(clone)
-    except Exception as e:
-        msg = f"{type(e).__name__}: {str(e)[:200]}"
-        st = _load_state()
-        st["last_error"] = msg
-        _save_state(st)
-        log(f"XATO reconcile: {msg}")
-        return {"status": "error", "error": msg}
+        repo = os.environ.get("VAULT_REPO", "").strip()
+        token = os.environ.get("GH_TOKEN_VAULT", "").strip()
+        if not repo or not token:
+            return {"status": "disabled"}
+        try:
+            clone = _ensure_clone(repo, token)
+        except Exception as e:
+            msg = _sanitize(str(e))[:200]
+            st = _load_state()
+            st["last_error"] = f"git: {msg}"
+            _save_state(st)
+            log(f"git xato: {msg}")
+            return {"status": "git_error", "error": msg}
+        try:
+            return _reconcile(clone)
+        except Exception as e:
+            msg = _sanitize(f"{type(e).__name__}: {str(e)[:200]}")
+            st = _load_state()
+            st["last_error"] = msg
+            _save_state(st)
+            log(f"XATO reconcile: {msg}")
+            return {"status": "error", "error": msg}
+    finally:
+        _LOCK.release()
 
 
 def stat():
@@ -233,7 +272,7 @@ def stat():
         "last_success_ts": st.get("last_success_ts"),
         "counts": st.get("counts") or {},
         "skipped_dirs": st.get("skipped_dirs") or [],
-        "last_error": st.get("last_error"),
+        "last_error": _sanitize(st["last_error"]) if st.get("last_error") else None,
     }
 
 

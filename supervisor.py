@@ -156,13 +156,14 @@ def run_vault_sync():
             if c.get("ingested") or c.get("archived") or c.get("errors"):
                 log(f"vault sinxron: {c}")     # o'zgarish bo'lmasa jim (log shishmasin)
         elif status in ("git_error", "error"):
-            log(f"vault sinxron XATO: {res.get('error')}")
+            err = vault_sync._sanitize(str(res.get("error", "")))
+            log(f"vault sinxron XATO: {err}")
             _notify_owner_once_daily(
-                "⚠️ Vault sinxron xatosi (bot ishlashda davom etmoqda):\n"
-                f"{str(res.get('error', ''))[:300]}"
+                "⚠️ Vault sinxron xatosi (bot ishlashda davom etmoqda):\n" + err[:300]
             )
         else:
-            log(f"vault sinxron: {status}")     # disabled/no_kbignore/unconfigured — kutilgan
+            # disabled / no_kbignore / unconfigured / busy — kutilgan holat, notify yo'q
+            log(f"vault sinxron: {status}")
     except Exception as e:
         log(f"XATO: vault sinxron yiqildi — {type(e).__name__}: {e}")
 

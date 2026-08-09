@@ -40,8 +40,10 @@ KBI="$VAULT/.kbignore"
   cat "$KBI"
 } >"$VAULT/.git/info/exclude"
 
-# .kbignore'ga keyin qo'shilgan, lekin allaqachon track qilingan fayllarni untrack
-# (exclude faqat untracked fayllarga ta'sir qiladi — bu retroaktiv olib tashlaydi)
+# .kbignore'ga keyin qo'shilgan, lekin track qilingan fayllarni KELAJAKDAGI push'dan
+# chiqaradi (untrack). DIQQAT: faqat kelgusi commit'larga ta'sir qiladi — fayl allaqachon
+# push qilingan bo'lsa GitHub TARIXIDA QOLADI. Bir marta push bo'lgan sir uchun .kbignore
+# YETARLI EMAS — sirni (token/parol) ROTATSIYA qilish shart.
 git -C "$VAULT" ls-files -ci --exclude-standard -z \
     | xargs -0 -r -I{} git -C "$VAULT" rm --cached -q -- {} 2>/dev/null || true
 

@@ -34,6 +34,10 @@ kunlik/shaxsiy/
 > `.git`, `.obsidian`, `.trash`, `.DS_Store` allaqachon avtomatik chetlab o'tiladi.
 > `.kbignore`'ni push'dan OLDIN to'g'rilash muhim — shunda maxfiy papka git
 > tarixiga umuman kirmaydi.
+> ⚠️ Maxfiy narsa **bir marta push bo'lib ketgan** bo'lsa, keyin `.kbignore`'ga
+> qo'shish YETARLI EMAS — u faqat kelgusi push'dan chiqaradi, GitHub **tarixida
+> qoladi**. Bunday holda `git rm --cached` ham tarixni tozalamaydi; sirni
+> (token/parol) **ROTATSIYA** qilish shart.
 
 ### 3. Vault remote + birinchi push (qo'lda, auth tekshirish uchun)
 ```bash

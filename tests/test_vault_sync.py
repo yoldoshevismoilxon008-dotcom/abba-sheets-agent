@@ -6,8 +6,10 @@ Har test toza kb DB + temp "clone" katalog quradi; git ham, Claude ham chaqirilm
 """
 
 import os
+import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,14 +17,24 @@ import kb            # noqa: E402
 import vault_sync as vs   # noqa: E402
 
 _ORIG_INGEST = kb.ingest_file
+_ORIG_GIT = vs._git
+_ORIG_ENSURE = vs._ensure_clone
+_ORIG_URLS = vs._urls
+
+
+def _seed_commit(repo, msg):
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c",
+                    "user.email=t@t", "commit", "-q", "-m", msg], check=True)
+    subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", "HEAD"], check=True)
 
 
 def _fake_claude(prompt, effort="low"):
     return '{"title":"T","lang":"uz","tags":["v"],"summary":"s"}'
 
 
-def setup(sentinel=False):
-    """Toza kb DB + vault_sync temp yo'llari + git monkeypatch. clone katalogini qaytaradi."""
+def setup():
+    """Toza kb DB + vault_sync temp yo'llari + monkeypatch reset. clone katalogini qaytaradi."""
     d = Path(tempfile.mkdtemp(prefix="vstest_"))
     kb.DATA = d
     kb.DB_PATH = d / "knowledge.db"
@@ -32,6 +44,9 @@ def setup(sentinel=False):
     vs.DATA = d
     vs.CLONE = d / "vault"
     vs.STATE = d / "vault_sync_state.json"
+    vs._git = _ORIG_GIT
+    vs._urls = _ORIG_URLS
+    vs._LOCK = threading.Lock()
     clone = d / "vault"
     clone.mkdir(parents=True, exist_ok=True)
     vs._ensure_clone = lambda repo, token: clone
@@ -190,6 +205,89 @@ def test_kbignore_matcher():
     assert vs._always_ignore(".obsidian/app.md")
     assert vs._always_ignore("bilim/.trash/old.md")
     assert not vs._always_ignore("bilim/a.md")
+
+
+# ---------------------------------------------------------------- review fixlari
+
+def test_sanitize_redacts_token():
+    """_sanitize: token qiymati + x-access-token:...@ naqshi «***» ga aylanadi."""
+    os.environ["GH_TOKEN_VAULT"] = "ghp_SECRET123"
+    out = vs._sanitize(
+        "fatal: unable to access "
+        "'https://x-access-token:ghp_SECRET123@github.com/o/r.git': 403")
+    assert "ghp_SECRET123" not in out and "***" in out
+    os.environ.pop("GH_TOKEN_VAULT", None)
+    # env'da token bo'lmasa ham URL naqshi redaktsiya bo'ladi
+    assert "OTHERTOK" not in vs._sanitize("https://x-access-token:OTHERTOK@github.com/o/r")
+
+
+def test_git_error_never_leaks_token():
+    """git xatosi stderr'da token bo'lsa ham: run()/state/stat — hech qayerda oqmaydi."""
+    setup()
+    os.environ["VAULT_REPO"] = "o/r"
+    os.environ["GH_TOKEN_VAULT"] = "ghp_LEAK999"
+
+    def boom(repo, token):
+        raise RuntimeError(f"fatal: 'https://x-access-token:{token}@github.com/o/r.git' 403")
+
+    vs._ensure_clone = boom
+    r = vs.run()
+    assert r["status"] == "git_error"
+    assert "ghp_LEAK999" not in r["error"]
+    assert "ghp_LEAK999" not in vs.STATE.read_text(encoding="utf-8")     # state fayli
+    import json as _j
+    assert "ghp_LEAK999" not in _j.dumps(vs.stat())                     # /vault_stat manbai
+
+
+def test_second_run_busy():
+    """Ikkinchi parallel run() lock ololmay {"status":"busy"} qaytaradi."""
+    setup()
+    assert vs._LOCK.acquire(blocking=False)          # "birinchi run" lockni ushlab turibdi
+    try:
+        assert vs.run()["status"] == "busy"
+    finally:
+        vs._LOCK.release()
+
+
+def test_ensure_clone_stores_no_token():
+    """Klondan keyin origin tokensiz URL'ga o'zgartiriladi (token .git/config'da qolmaydi)."""
+    setup()
+    vs._ensure_clone = _ORIG_ENSURE                  # haqiqiy funksiya
+    vs.CLONE = Path(tempfile.mkdtemp(prefix="vsclone_")) / "vault"
+    calls = []
+
+    def rec(*args):
+        calls.append(tuple(str(a) for a in args))
+        if args and args[0] == "clone":
+            (Path(args[-1]) / ".git").mkdir(parents=True, exist_ok=True)
+        return ""
+
+    vs._git = rec
+    vs._ensure_clone("owner/repo", "SECRETTOK")
+    seturl = [" ".join(c) for c in calls if "set-url" in " ".join(c)]
+    assert seturl, "clone'dan keyin set-url chaqirilmadi"
+    assert "https://github.com/owner/repo.git" in seturl[0]      # tokensiz URL config'ga
+    assert "SECRETTOK" not in seturl[0]
+
+
+def test_ensure_clone_fetch_reset_real_git():
+    """Haqiqiy git: klon + keyingi yangilash fetch+reset --hard (shallow sinmaydi)."""
+    setup()
+    vs._ensure_clone = _ORIG_ENSURE
+    base = Path(tempfile.mkdtemp(prefix="vsgit_"))
+    bare, seed = base / "bare.git", base / "seed"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True)
+    (seed / "a.md").write_text("# A1\n", encoding="utf-8")
+    _seed_commit(seed, "1")
+    vs.CLONE = base / "vault"
+    vs._urls = lambda repo, token: (f"file://{bare}", f"file://{bare}")
+    vs._ensure_clone("o/r", "tok")                   # birinchi → clone
+    assert (vs.CLONE / "a.md").read_text(encoding="utf-8").startswith("# A1")
+    (seed / "a.md").write_text("# A2\n", encoding="utf-8")
+    _seed_commit(seed, "2")
+    vs._ensure_clone("o/r", "tok")                   # ikkinchi → fetch + reset --hard
+    assert (vs.CLONE / "a.md").read_text(encoding="utf-8").startswith("# A2")
 
 
 # ---------------------------------------------------------------- skript rejimi
