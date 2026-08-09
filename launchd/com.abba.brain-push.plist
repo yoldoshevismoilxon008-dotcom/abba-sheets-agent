@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.abba.brain-push</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/ismoilxon/abba-sheets-agent/deploy/mac-sync/brain-push.sh</string>
+    </array>
+    <!-- Har 10 daqiqa: ~/claude-brain'da o'zgarish bo'lsa commit+push -->
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/ismoilxon/abba-sheets-agent/data/logs/brain-push-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ismoilxon/abba-sheets-agent/data/logs/brain-push-launchd.log</string>
+</dict>
+</plist>
