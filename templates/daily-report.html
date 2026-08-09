@@ -182,9 +182,10 @@
   <div class="u-ok">✅ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q</div>
   {% endif %}
 </div>
+{% if undiruv.lose %}
 <div class="lose">
-  <h3>🚪 Yo'qotilgan loyihalar (ketgan){% if undiruv.lose and undiruv.lose.count %} — {{ undiruv.lose.count }} ta · {{ undiruv.lose.total_d }}{% endif %}</h3>
-  {% if undiruv.lose and undiruv.lose["items"] %}
+  <h3>🚪 Yo'qotilgan loyihalar (ketgan){% if undiruv.lose.count %} — {{ undiruv.lose.count }} ta · {{ undiruv.lose.total_d }}{% endif %}</h3>
+  {% if undiruv.lose["items"] %}
   <table>
     <tr><th>Nomi</th><th>Ma'sul</th><th class="sum">Summa</th></tr>
     {% for i in undiruv.lose["items"] %}
@@ -199,8 +200,9 @@
   {% else %}
   <div class="none">✓ Bu oyda ketgan loyiha yo'q</div>
   {% endif %}
-  {% if undiruv.lose %}{% for w in undiruv.lose.warnings %}<div class="warn">⚠️ {{ w }}</div>{% endfor %}{% endif %}
+  {% for w in undiruv.lose.warnings %}<div class="warn">⚠️ {{ w }}</div>{% endfor %}
 </div>
+{% endif %}
 {% endif %}
 
 <div class="bottom">

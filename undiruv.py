@@ -211,8 +211,12 @@ def parse_rows(vals, today):
             "aktiv": aktiv,
             # «Lose summa» — ketgan (status «Ketdi») loyiha zarari. D/E qoldiq
             # mantiqidan MUSTAQIL alohida ustun; lose_summary() shundan o'qiydi.
+            # lose_col_present: tabda umuman «Lose summa» ustuni bormi (eski oy
+            # tablarida yo'q — lose_summary blokni butunlay yashiradi, pm_missing
+            # naqshi kabi). Aks holda ustunsiz tabda «summa yozilmagan» yolg'oni.
             "lose": money(get(c_lose)),
             "lose_raw": get(c_lose),
+            "lose_col_present": c_lose is not None,
             # Kelishilgan = Summa(qoldiq) + Undirildi. Aktiv unga KIRMAYDI —
             # u oldindan to'langan obuna (alohida ma'lumot ustuni).
             "kelishilgan": qoldiq + undirildi,
@@ -470,6 +474,15 @@ def reconcile_warn(t):
 
 
 LOSE_FLAG_EMPTY = "summa yozilmagan"  # Ketdi, lekin «Lose summa» bo'sh (jamiga 0)
+LOSE_FLAG_BAD = "summa noto'g'ri"     # Ketdi, lekin «Lose summa» manfiy (jamiga 0)
+_LOSE_NAMES_CAP = 8                   # warn satrida ko'rsatiladigan maks nom
+
+
+def _lose_names(names):
+    """Nomlar ro'yxati → warn satri uchun qisqa CSV (8 tadan keyin «+N ta»)."""
+    head = ", ".join(names[:_LOSE_NAMES_CAP])
+    extra = len(names) - _LOSE_NAMES_CAP
+    return head + (f" +{extra} ta" if extra > 0 else "")
 
 
 def lose_summary(rows):
@@ -482,41 +495,56 @@ def lose_summary(rows):
     Status aniqlash mavjud _status() orqali («🚪 Ketdi» kabi emoji-prefiks
     NFKC-norm + substring bilan «ketdi»ga tushadi — r["holat"] shuni saqlaydi).
 
+    USTUN YO'Q (eski oy tablari): tabda «Lose summa» ustuni bo'lmasa
+    (lose_col_present=False) — {..., "col_missing": True} qaytadi va chaqiruvchilar
+    blokni BUTUNLAY chiqarmaydi (aks holda ustunsiz tab «summa yozilmagan» deb
+    yolg'on gapiradi).
+
     Qaytadi:
-      items    — [{nomi, masul, summa, flag}] status «Ketdi» qatorlar (bo'sh
-                 summali ham kiradi, flag bilan);
-      total    — Σ summa (faqat summasi bor Ketdi qatorlar);
+      items    — [{nomi, masul, summa, flag}] status «Ketdi» qatorlar (bo'sh/manfiy
+                 summali ham kiradi, flag bilan; summa 0);
+      total    — Σ summa (faqat summasi to'g'ri (>0) Ketdi qatorlar);
       count    — len(items) = ketgan loyihalar soni;
-      warnings — (a) Ketdi, lekin «Lose summa» bo'sh (har qator uchun satr +
-                 item flag'i «summa yozilmagan», jamiga 0);
-                 (b) «Lose summa» > 0, lekin status «Ketdi» EMAS — bitta jamlangan
-                 satr (ro'yxat va jamiga KIRMAYDI, faqat ogohlantirish)."""
-    items, total, warnings = [], 0, []
-    empty_names, mismatch = [], []
+      warnings — jamlangan satrlar (har biri 8 nomdan keyin «+N ta»):
+                 (a) Ketdi, lekin «Lose summa» bo'sh — item flag «summa yozilmagan»;
+                 (b) Ketdi, lekin «Lose summa» manfiy — item flag «summa noto'g'ri»;
+                 (c) «Lose summa» > 0, lekin status «Ketdi» EMAS (ro'yxat/jamiga
+                 KIRMAYDI, faqat ogohlantirish);
+      col_missing — True bo'lsa ustun yo'q (blok yashiriladi)."""
+    if rows and not rows[0].get("lose_col_present", True):
+        return {"items": [], "total": 0, "count": 0, "warnings": [], "col_missing": True}
+    items, total = [], 0
+    empty_names, invalid_names, mismatch = [], [], []
     for r in rows:
         lose = round(r.get("lose", 0) or 0)
         if r.get("holat") == "ketdi":
             if lose > 0:
-                flag = ""
+                flag, summa = "", lose
                 total += lose
+            elif lose < 0:                       # manfiy — sabab «bo'sh» emas
+                flag, summa = LOSE_FLAG_BAD, 0
+                invalid_names.append(r.get("loyiha", "?"))
             else:
-                flag = LOSE_FLAG_EMPTY
+                flag, summa = LOSE_FLAG_EMPTY, 0
                 empty_names.append(r.get("loyiha", "?"))
             items.append({
                 "nomi": r.get("loyiha", "?"),
                 "masul": r.get("pm", "—"),
-                "summa": lose,
+                "summa": summa,
                 "flag": flag,
             })
         elif lose > 0:
             mismatch.append(r.get("loyiha", "?"))
-    for nm in empty_names:
-        warnings.append(f"«{nm}» — status «Ketdi», lekin «Lose summa» yozilmagan "
-                        "(jamiga 0 qo'shildi).")
+    warnings = []
+    if empty_names:
+        warnings.append(f"{len(empty_names)} qatorda status «Ketdi», lekin «Lose "
+                        f"summa» yozilmagan: {_lose_names(empty_names)}.")
+    if invalid_names:
+        warnings.append(f"{len(invalid_names)} qatorda «Lose summa» manfiy "
+                        f"(noto'g'ri): {_lose_names(invalid_names)}.")
     if mismatch:
-        warnings.append(
-            f"{len(mismatch)} qatorda «Lose summa» bor, status «Ketdi» emas: "
-            f"{', '.join(mismatch)}.")
+        warnings.append(f"{len(mismatch)} qatorda «Lose summa» bor, status «Ketdi» "
+                        f"emas: {_lose_names(mismatch)}.")
     return {"items": items, "total": total, "count": len(items), "warnings": warnings}
 
 
@@ -727,16 +755,17 @@ def full_report(rows, tab, today, source=""):
         L.append(f"\n⚠️ Status bo'sh (tasdiqlanmagan qarz): {t['status_blank_n']} ta qator — "
                  "D>0 bo'lgani uchun qarz sanaldi; sheet'da holatni belgilash tavsiya etiladi.")
     lose = d.get("lose") or {}
-    if lose.get("count"):
-        L.append(f"\n🚪 **Yo'qotilgan loyihalar (ketgan): {lose['count']} ta, "
-                 f"{_fmt_usd(lose['total'])}**")
-        for it in lose["items"]:
-            summa = it["flag"] or _fmt_usd(it["summa"])
-            L.append(f"  • {it['nomi']} ({it['masul']}) — {summa}")
-    else:
-        L.append("\n🚪 **Yo'qotilgan loyihalar:** bu oyda ketgan loyiha yo'q ✅")
-    for w in lose.get("warnings", []):
-        L.append(f"  ⚠️ {w}")
+    if not lose.get("col_missing"):        # ustun yo'q → blokni butunlay chiqarmaymiz
+        if lose.get("count"):
+            L.append(f"\n🚪 **Yo'qotilgan loyihalar (ketgan): {lose['count']} ta, "
+                     f"{_fmt_usd(lose['total'])}**")
+            for it in lose["items"]:
+                summa = it["flag"] or _fmt_usd(it["summa"])
+                L.append(f"  • {it['nomi']} ({it['masul']}) — {summa}")
+        else:
+            L.append("\n🚪 **Yo'qotilgan loyihalar:** bu oyda ketgan loyiha yo'q ✅")
+        for w in lose.get("warnings", []):
+            L.append(f"  ⚠️ {w}")
     ao = d.get("aktiv_obuna") or {}
     if ao.get("n"):
         L.append(f"\n💳 **Aktiv obuna (oldindan to'langan — so'ralmaydi):** "
@@ -764,7 +793,7 @@ def pdf_caption(d, title=None):
         L.append(f"{pm['name']}: {pm['n']} ta undirilmagan, {_fmt_usd(pm['sum'])}"
                  + (f" · 🔴 {od} muddat o'tgan" if od else ""))
     lose = d.get("lose") or {}
-    if lose.get("count"):
+    if lose.get("count") and not lose.get("col_missing"):
         L.append(f"🚪 Ketgan: {lose['count']} loyiha, {_fmt_usd(lose['total'])} yo'qotildi")
     ao = d.get("aktiv_obuna") or {}
     if ao.get("n"):

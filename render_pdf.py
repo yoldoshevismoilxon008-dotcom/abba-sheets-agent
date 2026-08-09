@@ -256,14 +256,18 @@ def build_html(data, theme=None, logo_uri=None):
         for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv"):
             undiruv[k + "_disp"] = f"${undiruv.get(k, 0):,.0f}".replace(",", " ")
         undiruv["otgan_sum"] = "$" + f"{sum(i.get('summa', 0) for i in undiruv.get('muddat_otgan', [])):,.0f}".replace(",", " ")
-        # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display
+        # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display.
+        # col_missing yoki lose yo'q → undiruv["lose"] O'CHIRILADI (shablon yashiradi;
+        # nusxadagi asl col_missing dict qolib ketmasin).
         lose = dict(undiruv.get("lose") or {})
-        if lose:
+        if lose and not lose.get("col_missing"):
             _usd = lambda v: f"${v:,.0f}".replace(",", " ")
             lose["total_d"] = _usd(lose.get("total", 0))
             lose["items"] = [dict(it, summa_d=_usd(it.get("summa", 0)))
                              for it in lose.get("items", [])]
             undiruv["lose"] = lose
+        else:
+            undiruv.pop("lose", None)
     return tpl.render(
         pms=pms,
         theme=theme,
@@ -334,9 +338,12 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
     if ao.get("n"):
         ao = dict(ao, sum_d=usd(ao.get("sum", 0)),
                   pms=[dict(p, sum_d=usd(p.get("sum", 0))) for p in ao.get("pms", [])])
-    # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display-formatlash
+    # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display-formatlash.
+    # col_missing (tabda «Lose summa» ustuni yo'q) → blokni butunlay yashiramiz.
     lose = dict(data.get("lose") or {})
-    if lose:
+    if lose.get("col_missing"):
+        lose = {}
+    elif lose:
         lose["total_d"] = usd(lose.get("total", 0))
         lose["items"] = [dict(it, summa_d=usd(it.get("summa", 0)))
                          for it in lose.get("items", [])]

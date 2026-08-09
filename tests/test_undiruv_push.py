@@ -75,12 +75,13 @@ def test_parse_due_invalid():
 
 def _row(loyiha, qoldiq=1000, muddat=None, pm="Zubair", pm_missing=False,
          pm_col_present=True, holat="pending", undirildi=0, aktiv=0, status_raw="pending",
-         lose=0):
+         lose=0, lose_col_present=True):
     return {
         "loyiha": loyiha, "pm": pm, "pm_missing": pm_missing,
         "pm_col_present": pm_col_present, "qoldiq": qoldiq, "qoldiq_raw": str(qoldiq),
         "undirildi": undirildi, "aktiv": aktiv, "kelishilgan": qoldiq + undirildi,
         "lose": lose, "lose_raw": str(lose) if lose else "",
+        "lose_col_present": lose_col_present,
         "status_blank": not status_raw, "muddat": muddat, "muddat_raw": "", "holat": holat,
     }
 
@@ -168,13 +169,15 @@ def test_lose_summary_august_scenario():
 
 def test_lose_ketdi_empty_summa_flag():
     # Status Ketdi, lekin «Lose summa» bo'sh → ro'yxatga «summa yozilmagan» flag
-    # bilan (jamiga 0), warnings'ga qo'shiladi
+    # bilan (jamiga 0), BITTA jamlangan warn (warn devori emas)
     r = u.lose_summary([_row("Xyz", holat="ketdi", lose=0),
                         _row("Welle", holat="ketdi", lose=1800)])
     assert r["count"] == 2 and r["total"] == 1800        # bo'sh qator jamiga 0
     xyz = next(i for i in r["items"] if i["nomi"] == "Xyz")
     assert xyz["flag"] == "summa yozilmagan" and xyz["summa"] == 0
-    assert any("Xyz" in w and "yozilmagan" in w for w in r["warnings"])
+    assert len(r["warnings"]) == 1
+    assert r["warnings"][0] == ("1 qatorda status «Ketdi», lekin «Lose summa» "
+                                "yozilmagan: Xyz.")
 
 
 def test_lose_mismatch_not_ketdi_excluded():
@@ -197,6 +200,60 @@ def test_report_data_delegates_to_lose_summary():
     rows = u.parse_rows(_LOSE_VALS, T)
     d = u.report_data(rows, "Undiruv avgust(2026)", T, source="live")
     assert d["lose"] == u.lose_summary(rows)
+
+
+# «Lose summa» ustuni YO'Q tab (eski oy / 2025 arxivi) — pm_col_present naqshi kabi
+_NOLOSE_VALS = [
+    ["№", "Nomi", "Ma'sul shaxs", "Summa", "Undirildi", "Aktive Summary",
+     "Final data", "To'lov xolati"],                       # «Lose summa» YO'Q
+    ["1", "EskiKetgan", "Zubair", "0", "0", "0", "", "🚪 Ketdi"],
+    ["Jami", "", "", "", "", "", "", ""],
+]
+
+
+def test_lose_col_missing_hides_block():
+    # Fix 1 (BLOKER): ustunsiz tabda ketdi qator bor bo'lsa ham blok yolg'on
+    # gapirmasin — col_missing True, blok BUTUNLAY yashiriladi
+    rows = u.parse_rows(_NOLOSE_VALS, T)
+    assert rows[0]["lose_col_present"] is False
+    r = u.lose_summary(rows)
+    assert r == {"items": [], "total": 0, "count": 0, "warnings": [], "col_missing": True}
+    # full_report — na blok sarlavhasi, na «ketgan loyiha yo'q» (ikkalasi ham yolg'on)
+    txt = u.full_report(rows, "Undiruv iyul(2025)", T, source="live")
+    assert "Yo'qotilgan loyihalar" not in txt and "ketgan loyiha yo" not in txt
+
+
+def test_lose_empty_summa_aggregated():
+    # Fix 2: 12 bo'sh-summali «Ketdi» qator → BITTA warn (12 satr emas), 8+«+4 ta»
+    rows = [_row(f"P{i}", holat="ketdi", lose=0) for i in range(12)]
+    r = u.lose_summary(rows)
+    assert r["count"] == 12 and r["total"] == 0
+    assert len(r["warnings"]) == 1
+    # faqat 8 nom ko'rsatiladi, qolgan 4 tasi «+4 ta»ga yig'iladi
+    assert r["warnings"][0] == ("12 qatorda status «Ketdi», lekin «Lose summa» "
+                                "yozilmagan: P0, P1, P2, P3, P4, P5, P6, P7 +4 ta.")
+
+
+def test_lose_mismatch_truncation():
+    # Fix 2: 25 mismatch → bitta qisqa warn (8 nom + «+17 ta»), 315 belgi emas
+    rows = [_row(f"M{i}", holat="pending", lose=1000) for i in range(25)]
+    r = u.lose_summary(rows)
+    assert r["items"] == [] and r["count"] == 0 and len(r["warnings"]) == 1
+    w = r["warnings"][0]
+    assert w.startswith("25 qatorda «Lose summa» bor") and "+17 ta" in w
+    assert len(w) < 150
+
+
+def test_lose_negative_value():
+    # Fix 3: manfiy «Lose summa» → summa=0, flag «summa noto'g'ri», ALOHIDA warn
+    # (sabab «bo'sh» EMAS); jamiga qo'shilmaydi
+    r = u.lose_summary([_row("Neg", holat="ketdi", lose=-1800),
+                        _row("Welle", holat="ketdi", lose=1800)])
+    assert r["count"] == 2 and r["total"] == 1800
+    neg = next(i for i in r["items"] if i["nomi"] == "Neg")
+    assert neg["flag"] == "summa noto'g'ri" and neg["summa"] == 0
+    assert any("manfiy" in w and "Neg" in w for w in r["warnings"])
+    assert not any("yozilmagan" in w for w in r["warnings"])  # «bo'sh» warn'iga tushmasin
 
 
 # ---------------------------------------------------------------- skript rejimi
