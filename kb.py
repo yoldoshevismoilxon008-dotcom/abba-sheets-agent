@@ -892,6 +892,37 @@ def stats():
     }
 
 
+def origins(source):
+    """Berilgan source uchun arxivlanmagan hujjat origin'lari (vault reconcile —
+    joriy fayllar bilan solishtirib o'chirilganini topish uchun)."""
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT origin FROM docs WHERE source=? AND archived=0", (source,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
+
+
+def source_counts(source):
+    """(docs, chunks) — berilgan source bo'yicha arxivlanmagan hujjat/bo'lak soni."""
+    init_db()
+    conn = _connect()
+    try:
+        d = conn.execute(
+            "SELECT COUNT(*) FROM docs WHERE source=? AND archived=0", (source,)
+        ).fetchone()[0]
+        c = conn.execute(
+            "SELECT COALESCE(SUM(n_chunks),0) FROM docs WHERE source=? AND archived=0",
+            (source,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    return {"docs": d, "chunks": c}
+
+
 def list_docs(limit=30, tag=None):
     init_db()
     conn = _connect()
