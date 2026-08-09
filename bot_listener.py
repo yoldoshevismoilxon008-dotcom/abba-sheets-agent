@@ -147,6 +147,8 @@ HELP = (
     "/bilim — bilim bazasi hujjatlari · /bilim <so'rov> — qidirish · "
     "/bilim_stat — statistika · /unut <id> — arxivlash · /eslab_qol <matn> — matn saqlash "
     "(PDF/DOCX/TXT/CSV/XLSX yuborsangiz — avtomatik bazaga tushadi)\n"
+    "/vault_sync — Obsidian vault sinxronini hozir ishga tushirish · "
+    "/vault_stat — vault sinxron holati\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
     "/help — shu yordam"
 )
@@ -1996,6 +1998,63 @@ def handle_update(upd):
         if not edit_status(mid, m):
             send_retry(m, attempts=2)
         return "kb-remember"
+    if low.startswith("/vault_stat"):
+        try:
+            import vault_sync
+
+            s = vault_sync.stat()
+        except Exception as e:
+            send_retry(f"⚠️ Vault statistikasi olinmadi: {str(e)[:160]}", attempts=2)
+            return "vault-stat-err"
+        c = s.get("counts") or {}
+        skips = ", ".join(s.get("skipped_dirs") or []) or "—"
+        lines = [
+            "🧠 **Vault sinxron holati**",
+            f"• Hujjatlar (vault): {s.get('vault_docs')} ta",
+            f"• Bo'laklar: {s.get('chunks')} ta",
+            f"• Oxirgi muvaffaqiyatli sinxron: {s.get('last_success_ts') or '—'}",
+            f"• O'tkazib yuborilgan (.kbignore): {skips}",
+        ]
+        if c:
+            lines.append(
+                f"• Oxirgi yugurish: +{c.get('ingested', 0)} yangi · "
+                f"{c.get('unchanged', 0)} o'zgarmagan · {c.get('archived', 0)} arxiv · "
+                f"{c.get('errors', 0)} xato"
+            )
+        if s.get("last_error"):
+            lines.append(f"⚠️ Oxirgi xato: {str(s['last_error'])[:160]}")
+        send_retry("\n".join(lines), attempts=2)
+        return "vault-stat"
+    if low.startswith("/vault_sync"):
+        mid = send_status("🔄 Vault sinxron boshlandi...")
+
+        def _vault_job(mid=mid):
+            try:
+                import vault_sync
+
+                res = vault_sync.run()
+            except Exception as e:
+                res = {"status": "error", "error": str(e)[:200]}
+            status = res.get("status")
+            if status == "ok":
+                c = res.get("counts") or {}
+                m = (f"✅ Vault sinxron tugadi: +{c.get('ingested', 0)} yangi · "
+                     f"{c.get('unchanged', 0)} o'zgarmagan · {c.get('archived', 0)} arxiv"
+                     + (f" · {c.get('errors', 0)} xato" if c.get("errors") else ""))
+            elif status == "unconfigured":
+                m = ("⚠️ .kbignore hali sozlanmagan (__UNCONFIGURED__ qatori turibdi) — "
+                     "sinxron o'chiq. Maxfiy papkalarni qo'shib, o'sha qatorni o'chiring.")
+            elif status == "no_kbignore":
+                m = "⚠️ Repo ildizida .kbignore yo'q — sinxron o'tkazildi (himoya)."
+            elif status == "disabled":
+                m = "ℹ️ Vault sinxron o'chiq (VAULT_REPO / GH_TOKEN_VAULT env berilmagan)."
+            else:
+                m = f"⚠️ Vault sinxron xatosi: {str(res.get('error', ''))[:200]}"
+            if not edit_status(mid, m):
+                send_retry(m, attempts=2)
+
+        threading.Thread(target=_vault_job, daemon=True).start()
+        return "vault-sync"
     if text.startswith("/"):
         send_retry("Bunday buyruq yo'q. " + HELP, attempts=2)
         return "unknown-cmd"

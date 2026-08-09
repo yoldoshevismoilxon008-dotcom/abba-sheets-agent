@@ -97,6 +97,8 @@ BILIM BAZASI QOIDASI: yuqoridagi bilim bazasi ma'lumoti sheet raqamlaridan USTUN
 sheet jonli haqiqat, bilim bazasi esa kontekst/qoida/referens/ta'rif. Ikkisi zid bo'lsa:
 RAQAMDA sheet ustun, QOIDA/TA'RIF/kontekstda bilim bazasi ustun; zidlikni javobda ochiq ayt.
 Bilim bazasidan foydalansang, javob oxirida «Manba: <hujjat nomi>» qatorini qo'sh.
+Agar manba `[[...]]` wiki-link ko'rinishida berilgan bo'lsa (Obsidian vault eslatmasi),
+AYNAN o'sha `[[...]]` linkni Manba sifatida yoz (o'zgartirmasdan) — bosib Obsidianda ochilsin.
 Bilim bazasida savolga aloqador narsa bo'lmasa — undan foydalanma, sheet DATA'siga tayan.
 
 DATA (joriy; har sheet: [tab] header, keyin qator raqami bilan ma'lumotlar):

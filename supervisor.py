@@ -120,6 +120,53 @@ def run_pm_push():
             pass
 
 
+def _notify_owner_once_daily(msg):
+    """Egaga kuniga ATIGI BIR MARTA Telegram xabar (10 daqiqalik xato spam bo'lmasin)."""
+    from datetime import date
+
+    marker = DATA / "vault_sync_notify.txt"
+    today = date.today().isoformat()
+    try:
+        if marker.exists() and marker.read_text(encoding="utf-8").strip() == today:
+            return
+    except Exception:
+        pass
+    try:
+        import send as sendmod
+
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        if token and chat:
+            sendmod.tg_send(token, chat, msg)
+            marker.write_text(today, encoding="utf-8")
+    except Exception as e:
+        log(f"vault xato-notify yuborilmadi: {e}")
+
+
+def run_vault_sync():
+    """Har 10 daqiqada vault → KB sinxron. Xato bo'lsa bot ISHLASHDA DAVOM ETADI
+    (KB yiqilsa Q&A davom etadi qoidasi) — xato faqat logga + egaga kuniga bir marta."""
+    try:
+        import vault_sync
+
+        res = vault_sync.run()
+        status = res.get("status")
+        if status == "ok":
+            c = res.get("counts") or {}
+            if c.get("ingested") or c.get("archived") or c.get("errors"):
+                log(f"vault sinxron: {c}")     # o'zgarish bo'lmasa jim (log shishmasin)
+        elif status in ("git_error", "error"):
+            log(f"vault sinxron XATO: {res.get('error')}")
+            _notify_owner_once_daily(
+                "⚠️ Vault sinxron xatosi (bot ishlashda davom etmoqda):\n"
+                f"{str(res.get('error', ''))[:300]}"
+            )
+        else:
+            log(f"vault sinxron: {status}")     # disabled/no_kbignore/unconfigured — kutilgan
+    except Exception as e:
+        log(f"XATO: vault sinxron yiqildi — {type(e).__name__}: {e}")
+
+
 def main():
     log(f"boshlandi (DATA_DIR={DATA})")
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
@@ -160,8 +207,12 @@ def main():
         run_pm_push, "cron", hour=9, minute=30,
         misfire_grace_time=3 * 3600, coalesce=True,
     )
+    sched.add_job(
+        run_vault_sync, "interval", minutes=10,
+        max_instances=1, coalesce=True,
+    )
     sched.start()
-    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv push (Asia/Tashkent)")
+    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + har 10daq vault sinxron (Asia/Tashkent)")
 
     import bot_listener
 
