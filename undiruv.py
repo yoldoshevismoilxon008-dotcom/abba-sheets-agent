@@ -176,6 +176,10 @@ def parse_rows(vals, today):
     c_active = _col(header, "aktive")
     c_due = _col(header, "final")
     c_status = _col(header, "xolati")
+    # «Lose summa» — ketgan loyiha zarari. AYNAN shu nomni oldin qidiramiz, aks
+    # holda «summa» substring'i «Lose summa»/«Aktive Summary»ga tushib ketardi
+    # (c_left «Summa»ni aniq-tenglik bilan oladi — bu ustunga tegmaymiz).
+    c_lose = _col(header, "lose summa", "lose")
     if c_name is None or c_paid is None:
         return []
     rows = []
@@ -205,6 +209,10 @@ def parse_rows(vals, today):
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
             "undirildi": undirildi,
             "aktiv": aktiv,
+            # «Lose summa» — ketgan (status «Ketdi») loyiha zarari. D/E qoldiq
+            # mantiqidan MUSTAQIL alohida ustun; lose_summary() shundan o'qiydi.
+            "lose": money(get(c_lose)),
+            "lose_raw": get(c_lose),
             # Kelishilgan = Summa(qoldiq) + Undirildi. Aktiv unga KIRMAYDI —
             # u oldindan to'langan obuna (alohida ma'lumot ustuni).
             "kelishilgan": qoldiq + undirildi,
@@ -461,6 +469,57 @@ def reconcile_warn(t):
             "yopilgan qatorda qoldiq qolgan bo'lishi mumkin, tekshiring.")
 
 
+LOSE_FLAG_EMPTY = "summa yozilmagan"  # Ketdi, lekin «Lose summa» bo'sh (jamiga 0)
+
+
+def lose_summary(rows):
+    """Ketgan loyihalar («To'lov xolati» normalizatsiyadan keyin «ketdi») YAGONA
+    jamlamasi. Kunlik PDF (summary) va ega jamlamasi (report_data) IKKALASI shu
+    funksiyani chaqiradi — ikki joyda mustaqil hisob-kitob YO'Q. Summa manbai —
+    «Lose summa» ustuni (money() bilan parse; "$1 600" kabi probelli qiymatlar).
+    D/E qoldiq mantiqi va PM push hisob-kitoblariga TEGMAYDI — alohida qatlam.
+
+    Status aniqlash mavjud _status() orqali («🚪 Ketdi» kabi emoji-prefiks
+    NFKC-norm + substring bilan «ketdi»ga tushadi — r["holat"] shuni saqlaydi).
+
+    Qaytadi:
+      items    — [{nomi, masul, summa, flag}] status «Ketdi» qatorlar (bo'sh
+                 summali ham kiradi, flag bilan);
+      total    — Σ summa (faqat summasi bor Ketdi qatorlar);
+      count    — len(items) = ketgan loyihalar soni;
+      warnings — (a) Ketdi, lekin «Lose summa» bo'sh (har qator uchun satr +
+                 item flag'i «summa yozilmagan», jamiga 0);
+                 (b) «Lose summa» > 0, lekin status «Ketdi» EMAS — bitta jamlangan
+                 satr (ro'yxat va jamiga KIRMAYDI, faqat ogohlantirish)."""
+    items, total, warnings = [], 0, []
+    empty_names, mismatch = [], []
+    for r in rows:
+        lose = round(r.get("lose", 0) or 0)
+        if r.get("holat") == "ketdi":
+            if lose > 0:
+                flag = ""
+                total += lose
+            else:
+                flag = LOSE_FLAG_EMPTY
+                empty_names.append(r.get("loyiha", "?"))
+            items.append({
+                "nomi": r.get("loyiha", "?"),
+                "masul": r.get("pm", "—"),
+                "summa": lose,
+                "flag": flag,
+            })
+        elif lose > 0:
+            mismatch.append(r.get("loyiha", "?"))
+    for nm in empty_names:
+        warnings.append(f"«{nm}» — status «Ketdi», lekin «Lose summa» yozilmagan "
+                        "(jamiga 0 qo'shildi).")
+    if mismatch:
+        warnings.append(
+            f"{len(mismatch)} qatorda «Lose summa» bor, status «Ketdi» emas: "
+            f"{', '.join(mismatch)}.")
+    return {"items": items, "total": total, "count": len(items), "warnings": warnings}
+
+
 def summary(day, today=None, prefer_live=True):
     """report.json uchun 'undiruv' bloki. Ma'lumot bo'lmasa None.
     prefer_live: production'da JONLI o'qiladi (snapshot faqat fallback)."""
@@ -502,6 +561,8 @@ def summary(day, today=None, prefer_live=True):
         "day": day,
         "muddat_otgan": overdue,
         "muddat_yaqin": soon,
+        # Ketgan loyihalar — YAGONA manba (report_data ham aynan shuni chaqiradi)
+        "lose": lose_summary(rows),
     }
 
 
@@ -566,6 +627,8 @@ def report_data(rows, tab, today, source=""):
             "jami": len(rows),
             **{k: sum(1 for r in rows if r["holat"] == k) for k in ("paid", "ketdi", "pauza")},
         },
+        # Ketgan loyihalar — YAGONA manba (summary() ham aynan shuni chaqiradi)
+        "lose": lose_summary(rows),
         "pms": [],
     }
     by_pm = {}
@@ -663,6 +726,17 @@ def full_report(rows, tab, today, source=""):
     if t.get("status_blank_n"):
         L.append(f"\n⚠️ Status bo'sh (tasdiqlanmagan qarz): {t['status_blank_n']} ta qator — "
                  "D>0 bo'lgani uchun qarz sanaldi; sheet'da holatni belgilash tavsiya etiladi.")
+    lose = d.get("lose") or {}
+    if lose.get("count"):
+        L.append(f"\n🚪 **Yo'qotilgan loyihalar (ketgan): {lose['count']} ta, "
+                 f"{_fmt_usd(lose['total'])}**")
+        for it in lose["items"]:
+            summa = it["flag"] or _fmt_usd(it["summa"])
+            L.append(f"  • {it['nomi']} ({it['masul']}) — {summa}")
+    else:
+        L.append("\n🚪 **Yo'qotilgan loyihalar:** bu oyda ketgan loyiha yo'q ✅")
+    for w in lose.get("warnings", []):
+        L.append(f"  ⚠️ {w}")
     ao = d.get("aktiv_obuna") or {}
     if ao.get("n"):
         L.append(f"\n💳 **Aktiv obuna (oldindan to'langan — so'ralmaydi):** "
@@ -689,6 +763,9 @@ def pdf_caption(d, title=None):
         od = sum(1 for i in pm["items"] if i["status"] == "overdue")
         L.append(f"{pm['name']}: {pm['n']} ta undirilmagan, {_fmt_usd(pm['sum'])}"
                  + (f" · 🔴 {od} muddat o'tgan" if od else ""))
+    lose = d.get("lose") or {}
+    if lose.get("count"):
+        L.append(f"🚪 Ketgan: {lose['count']} loyiha, {_fmt_usd(lose['total'])} yo'qotildi")
     ao = d.get("aktiv_obuna") or {}
     if ao.get("n"):
         L.append(f"💳 Aktiv obuna: {ao['n']} loyiha, {_fmt_usd(ao['sum'])} (so'ralmaydi)")

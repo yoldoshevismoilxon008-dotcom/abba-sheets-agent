@@ -256,6 +256,14 @@ def build_html(data, theme=None, logo_uri=None):
         for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv"):
             undiruv[k + "_disp"] = f"${undiruv.get(k, 0):,.0f}".replace(",", " ")
         undiruv["otgan_sum"] = "$" + f"{sum(i.get('summa', 0) for i in undiruv.get('muddat_otgan', [])):,.0f}".replace(",", " ")
+        # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display
+        lose = dict(undiruv.get("lose") or {})
+        if lose:
+            _usd = lambda v: f"${v:,.0f}".replace(",", " ")
+            lose["total_d"] = _usd(lose.get("total", 0))
+            lose["items"] = [dict(it, summa_d=_usd(it.get("summa", 0)))
+                             for it in lose.get("items", [])]
+            undiruv["lose"] = lose
     return tpl.render(
         pms=pms,
         theme=theme,
@@ -326,6 +334,12 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
     if ao.get("n"):
         ao = dict(ao, sum_d=usd(ao.get("sum", 0)),
                   pms=[dict(p, sum_d=usd(p.get("sum", 0))) for p in ao.get("pms", [])])
+    # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display-formatlash
+    lose = dict(data.get("lose") or {})
+    if lose:
+        lose["total_d"] = usd(lose.get("total", 0))
+        lose["items"] = [dict(it, summa_d=usd(it.get("summa", 0)))
+                         for it in lose.get("items", [])]
     if logo_uri is None:
         # Prime'da header navy — to'q fon uchun oq logo varianti (bo'lsa)
         logo_uri = logo_data_uri("light" if design.get("header_bg", "").lower() not in
@@ -351,6 +365,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         soon_sum=usd(soon_sum),
         pct_class=pct_class,
         aktiv_obuna=ao if ao.get("n") else None,
+        lose=lose or None,
         push_info=data.get("push_info") or [],
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )

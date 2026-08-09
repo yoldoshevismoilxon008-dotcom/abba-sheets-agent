@@ -87,6 +87,21 @@
               margin-bottom: 1.2mm; }
   .aktiv td:first-child { font-weight: 700; width: 22mm; }
 
+  /* Yo'qotilgan loyihalar — qizil border-left karta (tokens.css qizil aksenti) */
+  .lose { background: var(--c-surface); border-radius: var(--radius);
+          box-shadow: var(--shadow); border-left: 1.2mm solid var(--c-red);
+          padding: 2.4mm 3.2mm; margin-top: 3mm; }
+  .lose h3 { font-size: 9.5px; font-weight: 800; color: var(--c-red);
+             margin-bottom: 1.2mm; }
+  .lose td:first-child { font-weight: 700; }
+  .lose tr.lose-head td { font-size: 7.4px; color: var(--c-muted); font-weight: 600;
+             text-transform: uppercase; letter-spacing: .05em; }
+  .lose tr.lose-total td { font-weight: 800; background: transparent;
+             border-top: 0.35mm solid var(--c-border); border-bottom: none; }
+  .lose .flag { color: var(--c-amber); font-weight: 700; font-size: 8px; }
+  .lose .none { font-size: 9px; color: var(--c-green); font-weight: 700; padding: 1mm 0; }
+  .lose .warn { font-size: 8.2px; color: var(--c-red); font-weight: 600; margin-top: 1.2mm; }
+
   .push-info { background: var(--c-surface); border-radius: var(--radius);
                box-shadow: var(--shadow); padding: 2.4mm 3.2mm; margin-top: 3mm; }
   .push-info h3 { font-size: 9.5px; font-weight: 800; color: var(--c-accent);
@@ -172,6 +187,28 @@
     </div>
     {% endfor %}
   </div>
+
+  {% if lose %}
+  <div class="lose">
+    <h3>🚪 Yo'qotilgan loyihalar (ketgan){% if lose.count %} — {{ lose.count }} ta · {{ lose.total_d }}{% endif %}</h3>
+    {% if lose["items"] %}
+    <table>
+      <tr class="lose-head"><td>Nomi</td><td>Ma'sul</td><td class="sum">Summa</td></tr>
+      {% for i in lose["items"] %}
+      <tr>
+        <td>{{ i.nomi }}</td>
+        <td class="muted">{{ i.masul }}</td>
+        <td class="sum">{% if i.flag %}<span class="flag">{{ i.flag }}</span>{% else %}{{ i.summa_d }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr class="lose-total"><td colspan="2">JAMI · {{ lose.count }} ta</td><td class="sum">{{ lose.total_d }}</td></tr>
+    </table>
+    {% else %}
+    <div class="none">✓ Bu oyda ketgan loyiha yo'q</div>
+    {% endif %}
+    {% for w in lose.warnings %}<div class="warn">⚠️ {{ w }}</div>{% endfor %}
+  </div>
+  {% endif %}
 
   {% if aktiv_obuna and aktiv_obuna.n %}
   <div class="aktiv">

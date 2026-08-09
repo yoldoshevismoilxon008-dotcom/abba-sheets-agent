@@ -62,6 +62,19 @@
   .u-due .overdue { color: {{ theme.kpi_red }}; font-weight: 600; }
   .u-due .soon { color: {{ theme.kpi_orange }}; }
   .u-ok { font-size: 10px; color: {{ theme.kpi_green }}; font-weight: 600; }
+  .lose { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
+          box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }};
+          border-left: 1.5mm solid {{ theme.kpi_red }}; margin-bottom: 4mm; }
+  .lose h3 { font-size: 11px; font-weight: 700; color: {{ theme.kpi_red }}; margin-bottom: 2mm; }
+  .lose table { width: 100%; border-collapse: collapse; }
+  .lose th { font-size: 8.5px; color: {{ theme.muted }}; text-transform: uppercase;
+             text-align: left; padding: 0 1.5mm 1mm; letter-spacing: .04em; font-weight: 600; }
+  .lose td { font-size: 10px; padding: 1mm 1.5mm; border-bottom: 0.3mm solid {{ theme.bar_track }}; }
+  .lose td.sum, .lose th.sum { text-align: right; font-weight: 700; white-space: nowrap; }
+  .lose .flag { color: {{ theme.kpi_orange }}; font-weight: 700; font-size: 9px; }
+  .lose tr.total td { font-weight: 800; border-top: 0.4mm solid {{ theme.muted }}; border-bottom: none; }
+  .lose .none { font-size: 10px; color: {{ theme.kpi_green }}; font-weight: 600; padding: 0.5mm 0; }
+  .lose .warn { font-size: 9.5px; color: {{ theme.kpi_red }}; margin-top: 1.5mm; line-height: 1.5; font-weight: 600; }
   .bottom { background: {{ theme.card_bg }}; border-radius: {{ theme.radius }}; padding: 3.5mm 4.5mm;
             box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
   .bottom h3 { font-size: 11px; font-weight: 700; margin-bottom: 2mm; color: {{ theme.badge_bad }}; }
@@ -168,6 +181,25 @@
   {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin %}
   <div class="u-ok">✅ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q</div>
   {% endif %}
+</div>
+<div class="lose">
+  <h3>🚪 Yo'qotilgan loyihalar (ketgan){% if undiruv.lose and undiruv.lose.count %} — {{ undiruv.lose.count }} ta · {{ undiruv.lose.total_d }}{% endif %}</h3>
+  {% if undiruv.lose and undiruv.lose["items"] %}
+  <table>
+    <tr><th>Nomi</th><th>Ma'sul</th><th class="sum">Summa</th></tr>
+    {% for i in undiruv.lose["items"] %}
+    <tr>
+      <td>{{ i.nomi }}</td>
+      <td class="muted">{{ i.masul }}</td>
+      <td class="sum">{% if i.flag %}<span class="flag">{{ i.flag }}</span>{% else %}{{ i.summa_d }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total"><td colspan="2">JAMI · {{ undiruv.lose.count }} ta</td><td class="sum">{{ undiruv.lose.total_d }}</td></tr>
+  </table>
+  {% else %}
+  <div class="none">✓ Bu oyda ketgan loyiha yo'q</div>
+  {% endif %}
+  {% if undiruv.lose %}{% for w in undiruv.lose.warnings %}<div class="warn">⚠️ {{ w }}</div>{% endfor %}{% endif %}
 </div>
 {% endif %}
 

@@ -74,11 +74,13 @@ def test_parse_due_invalid():
 # ---------------------------------------------------------------- build_push no-date
 
 def _row(loyiha, qoldiq=1000, muddat=None, pm="Zubair", pm_missing=False,
-         pm_col_present=True, holat="pending", undirildi=0, aktiv=0, status_raw="pending"):
+         pm_col_present=True, holat="pending", undirildi=0, aktiv=0, status_raw="pending",
+         lose=0):
     return {
         "loyiha": loyiha, "pm": pm, "pm_missing": pm_missing,
         "pm_col_present": pm_col_present, "qoldiq": qoldiq, "qoldiq_raw": str(qoldiq),
         "undirildi": undirildi, "aktiv": aktiv, "kelishilgan": qoldiq + undirildi,
+        "lose": lose, "lose_raw": str(lose) if lose else "",
         "status_blank": not status_raw, "muddat": muddat, "muddat_raw": "", "holat": holat,
     }
 
@@ -110,6 +112,91 @@ def test_qoldiq_is_D_no_subtraction():
     per_pm, _ = pp.build_push(T, rows, [], "iyul")
     line = per_pm["Zubair"][0]
     assert "1 266" in line and "766" not in line
+
+
+# ---------------------------------------------------- Lose summa (ketgan loyihalar)
+
+def test_status_emoji_normalization():
+    # «🚪 Ketdi» kabi emoji-prefiks, registr, chetki bo'shliq → «ketdi»
+    for s in ("🚪 Ketdi", "Ketdi", "⛔ Ketdi", " KETDI ", "🚪  ketdi"):
+        assert u._status(s) == "ketdi", s
+    # «ketdi» bo'lmagan statuslar noto'g'ri tushib qolmasin
+    assert u._status("Kutilmoqda") == "pending"
+    assert u._status("To'lov qilindi ✅") == "paid"
+
+
+def test_money_spaced_parsing():
+    # «$1 600» — probel bilan yoziladi (oddiy probel + NBSP + ingichka probel)
+    assert u.money("$1 600") == 1600.0
+    assert u.money("$1\xa0600") == 1600.0          # NBSP
+    assert u.money("1 800,50") == 1800.50          # vergul o'nlik
+    assert u.money("") == 0.0 and u.money("—") == 0.0
+
+
+# «Lose summa» sarlavhasini NOM bo'yicha o'qish (mavjud header-parsing) + «Summa»
+# (qoldiq) bilan ADASHMASLIK + emoji-status + probelli pul — end-to-end parse_rows.
+_LOSE_VALS = [
+    ["№", "Nomi", "Ma'sul shaxs", "Summa", "Undirildi", "Aktive Summary",
+     "Final data", "To'lov xolati", "Lose summa"],
+    ["1", "Welle", "Zubair", "0", "0", "0", "", "🚪 Ketdi", "$1 800"],
+    ["2", "Oqsaroy", "Islom", "1 600", "0", "0", "05.08", "Kutilmoqda", "$1 600"],
+    ["3", "Savy", "Islom", "1 800", "0", "0", "06.08", "", "$1 800"],
+    ["4", "Baaz", "Zubair", "1 266", "500", "0", "04.08", "", ""],
+    ["Jami", "", "", "", "", "", "", "", ""],
+]
+
+
+def test_parse_rows_lose_column_by_name():
+    rows = u.parse_rows(_LOSE_VALS, T)
+    by = {r["loyiha"]: r for r in rows}
+    # «Summa» (qoldiq) va «Lose summa» ALOHIDA o'qilsin — substring adashuvi yo'q
+    assert by["Welle"]["qoldiq"] == 0 and by["Welle"]["lose"] == 1800
+    assert by["Oqsaroy"]["qoldiq"] == 1600 and by["Oqsaroy"]["lose"] == 1600
+    assert by["Baaz"]["lose"] == 0            # bo'sh «Lose summa» → 0
+    assert by["Welle"]["holat"] == "ketdi"    # «🚪 Ketdi» → ketdi
+
+
+def test_lose_summary_august_scenario():
+    # Kutilyapti: ro'yxatda faqat Welle $1 800; Oqsaroy+Savy ogohlantirishda
+    r = u.lose_summary(u.parse_rows(_LOSE_VALS, T))
+    assert r["count"] == 1 and r["total"] == 1800
+    assert r["items"] == [{"nomi": "Welle", "masul": "Zubair",
+                           "summa": 1800, "flag": ""}]
+    assert len(r["warnings"]) == 1
+    assert "Oqsaroy, Savy" in r["warnings"][0] and "«Ketdi» emas" in r["warnings"][0]
+
+
+def test_lose_ketdi_empty_summa_flag():
+    # Status Ketdi, lekin «Lose summa» bo'sh → ro'yxatga «summa yozilmagan» flag
+    # bilan (jamiga 0), warnings'ga qo'shiladi
+    r = u.lose_summary([_row("Xyz", holat="ketdi", lose=0),
+                        _row("Welle", holat="ketdi", lose=1800)])
+    assert r["count"] == 2 and r["total"] == 1800        # bo'sh qator jamiga 0
+    xyz = next(i for i in r["items"] if i["nomi"] == "Xyz")
+    assert xyz["flag"] == "summa yozilmagan" and xyz["summa"] == 0
+    assert any("Xyz" in w and "yozilmagan" in w for w in r["warnings"])
+
+
+def test_lose_mismatch_not_ketdi_excluded():
+    # «Lose summa» > 0, status Ketdi EMAS → ro'yxat va jamiga KIRMAYDI, faqat warn
+    r = u.lose_summary([_row("Oqsaroy", holat="pending", lose=1600),
+                        _row("Savy", holat="paid", lose=1800)])
+    assert r["items"] == [] and r["total"] == 0 and r["count"] == 0
+    assert len(r["warnings"]) == 1
+    assert r["warnings"][0].startswith("2 qatorda") and "Oqsaroy, Savy" in r["warnings"][0]
+
+
+def test_lose_empty_state():
+    # Ketdi qator umuman yo'q va mismatch ham yo'q → bo'sh, ogohlantirishsiz
+    r = u.lose_summary([_row("A", holat="pending"), _row("B", holat="paid")])
+    assert r == {"items": [], "total": 0, "count": 0, "warnings": []}
+
+
+def test_report_data_delegates_to_lose_summary():
+    # YAGONA manba: report_data["lose"] == lose_summary(rows) (mustaqil hisob yo'q)
+    rows = u.parse_rows(_LOSE_VALS, T)
+    d = u.report_data(rows, "Undiruv avgust(2026)", T, source="live")
+    assert d["lose"] == u.lose_summary(rows)
 
 
 # ---------------------------------------------------------------- skript rejimi
