@@ -96,9 +96,11 @@ ICHKI BILIM BAZASI (kontekst/qoida/referens — JONLI SHEET RAQAMI EMAS):
 BILIM BAZASI QOIDASI: yuqoridagi bilim bazasi ma'lumoti sheet raqamlaridan USTUN EMAS —
 sheet jonli haqiqat, bilim bazasi esa kontekst/qoida/referens/ta'rif. Ikkisi zid bo'lsa:
 RAQAMDA sheet ustun, QOIDA/TA'RIF/kontekstda bilim bazasi ustun; zidlikni javobda ochiq ayt.
-Bilim bazasidan foydalansang, javob oxirida «Manba: <hujjat nomi>» qatorini qo'sh.
-Agar manba `[[...]]` wiki-link ko'rinishida berilgan bo'lsa (Obsidian vault eslatmasi),
-AYNAN o'sha `[[...]]` linkni Manba sifatida yoz (o'zgartirmasdan) — bosib Obsidianda ochilsin.
+Bilim bazasidan foydalansang, javob OXIRIDA alohida qatorda manba(lar)ni ko'rsat:
+«Manba: <nisbiy yo'l>» — kontekstdagi «(manba: ...)» qiymatini AYNAN ko'chir (masalan
+`Manba: bilim/PM-KPI-qoidalari.md`). Yo'lni javob matni ichida yozma, faqat shu oxirgi
+qatorda; bir nechta bo'lsa vergul bilan ajrat. Qavs/havola QO'YMA — tizim uni avtomatik
+bosiladigan (nusxalanadigan) formatga o'tkazadi.
 Bilim bazasida savolga aloqador narsa bo'lmasa — undan foydalanma, sheet DATA'siga tayan.
 
 DATA (joriy; har sheet: [tab] header, keyin qator raqami bilan ma'lumotlar):

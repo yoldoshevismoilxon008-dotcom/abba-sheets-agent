@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 
 BASE = Path(__file__).resolve().parent
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
@@ -68,6 +69,56 @@ def md_to_html(text):
 def html_to_plain(s):
     s = re.sub(r"</?[a-zA-Z][^>]*>", "", s)
     return s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+
+def _esc(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_MANBA_RE = re.compile(r"^\s*[-*>]*\s*manba(?:lar)?\s*[:：]\s*(.+)$", re.IGNORECASE)
+
+
+def format_kb_source_block(ans, vault="claude-brain"):
+    """Model javobidagi «Manba: <nisbiy yo'l>» qatori(lar)ini XAVFSIZ manba blokiga
+    aylantiradi. Qaytadi: (ans_manbasiz, html_blok).
+
+    Nega: Telegram <code> TASHQARISIDA «X.md» ni domen deb avtolink qiladi
+    (.md — Moldova TLD) → buzuq havola. Shuning uchun yo'l <code> ichida (havola EMAS)
+    beriladi; ochish uchun ostига nusxalanadigan obsidian:// qatori (u ham <code> —
+    <a href> QILINMAYDI, chunki Telegram obsidian:// ni rad etadi va butun xabar ketmaydi).
+    Path-siz «Manba: <title>» (yuklangan hujjat) qatori o'zgarmasdan qoladi.
+    Xatoda (ans, "") — manba bloki javobni yiqitmasin."""
+    try:
+        vault = (vault or "claude-brain").strip() or "claude-brain"
+        paths, kept = [], []
+        for line in ans.splitlines():
+            m = _MANBA_RE.match(line)
+            found = []
+            if m:
+                for tok in re.split(r"[,\n]|\s{2,}", m.group(1)):
+                    tok = tok.strip(" \t`*[](){}<>").strip()
+                    if tok and ("/" in tok or tok.lower().endswith(".md")):
+                        if tok not in paths and tok not in found:
+                            found.append(tok)
+            if found:
+                paths.extend(found)          # path-li «Manba» qatori olib tashlanadi
+            else:
+                kept.append(line)            # oddiy «Manba: title» yoki matn — qoladi
+        if not paths:
+            return ans, ""
+        shown, out = paths[:3], []
+        for p in shown:
+            disp = p if p.lower().endswith(".md") else p + ".md"
+            url = (f"obsidian://open?vault={quote(vault, safe='')}"
+                   f"&file={quote(disp[:-3], safe='')}")     # .md kengaytmasisiz
+            out.append(f"Manba: <code>{_esc(disp)}</code>")
+            out.append(f"<code>{_esc(url)}</code>")
+        extra = len(paths) - len(shown)
+        if extra > 0:
+            out.append(f"+{extra} ta manba")
+        return "\n".join(kept).rstrip(), "\n".join(out)
+    except Exception:
+        return ans, ""
 
 
 def split_chunks(text, limit=CHUNK_LIMIT):

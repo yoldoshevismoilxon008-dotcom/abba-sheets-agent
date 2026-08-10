@@ -183,8 +183,8 @@ def api(method, payload=None, timeout=30):
     )
 
 
-def send_long(md_text):
-    html = sendmod.md_to_html(md_text)
+def send_long(text, is_html=False):
+    html = text if is_html else sendmod.md_to_html(text)
     chunks = sendmod.split_chunks(html)
     for i, c in enumerate(chunks, 1):
         sendmod.tg_send(TOKEN, CHAT_ID, c)
@@ -192,12 +192,13 @@ def send_long(md_text):
             time.sleep(0.4)
 
 
-def send_retry(md_text, attempts=4):
+def send_retry(md_text, attempts=4, is_html=False):
     """Javobni retry bilan yuboradi (uyqudan keyin tarmoq kech tiklanadi).
+    is_html=True → matn allaqachon Telegram HTML (md_to_html o'tkazilmaydi).
     Umuman yuborilmasa — outbox'ga saqlaydi. True = yetkazildi."""
     for i in range(attempts):
         try:
-            send_long(md_text)
+            send_long(md_text, is_html=is_html)
             return True
         except Exception as e:
             log(f"yuborish xatosi ({i + 1}/{attempts}): {type(e).__name__}: {str(e)[:120]}")
@@ -1252,6 +1253,11 @@ def do_question(q):
         remember(q, "(tahlil xatosi — javob berilmadi)", sel)
         return
     t_claude = time.monotonic()
+    # Bilim bazasi manbasini XAVFSIZ blokka ajrat: model «Manba: <yo'l>» qatorini
+    # <code> HTML + obsidian:// nusxa qatoriga (Telegram .md ni domen deb avtolink
+    # qilmasin). Ichida try/except — xato bo'lsa (ans, "") qaytadi, javob yiqilmaydi.
+    ans, kb_src_html = sendmod.format_kb_source_block(
+        ans, _os.environ.get("OBSIDIAN_VAULT", "claude-brain"))
     # PDF yo'li: deep/max javobda QA-JSON blok bo'lsa — infografik hujjat
     pdf_sent = False
     qa = parse_qa_answer(ans) if mode != "fast" else None
@@ -1269,14 +1275,18 @@ def do_question(q):
     if pdf_sent:
         ok = True
     else:
-        # Bitta bo'lakli javob — progress xabarining o'zini javobga aylantiramiz
-        chunks = sendmod.split_chunks(sendmod.md_to_html(ans))
+        # Bitta bo'lakli javob — progress xabarining o'zini javobga aylantiramiz.
+        # Manba bloki (agar bor) — HTML, md_to_html'dan KEYIN qo'shiladi (avtolink yo'q).
+        html = sendmod.md_to_html(ans)
+        if kb_src_html:
+            html += "\n\n" + kb_src_html
+        chunks = sendmod.split_chunks(html)
         if mid and len(chunks) == 1 and edit_status(mid, chunks[0], html=True):
             ok = True
         else:
             if mid:
                 edit_status(mid, "📄 Javob:")
-            ok = send_retry(ans)
+            ok = send_retry(html, is_html=True)
     remember(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
     log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({'PDF' if pdf_sent else 'matn'}, {len(ans)} belgi)")
     log(

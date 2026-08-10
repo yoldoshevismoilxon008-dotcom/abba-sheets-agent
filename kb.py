@@ -837,11 +837,8 @@ def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansio
         head = r.get("heading") or ""
         origin = r.get("origin") or r.get("source") or ""
         vpath = r.get("vault_path") or ""
-        if r.get("source") == "vault" and vpath:
-            link = vpath[:-3] if vpath.endswith(".md") else vpath
-            manba = f"[[{link}]]"          # Obsidian wiki-link — bosib ochilsin
-        else:
-            manba = origin
+        # vault manbasi — to'liq nisbiy yo'l (bot javobda xavfsiz <code> blokka aylantiradi)
+        manba = vpath if (r.get("source") == "vault" and vpath) else origin
         loc = f"### {title}" + (f" › {head}" if head else "") + f"   (manba: {manba})\n"
         body = (r.get("text") or "").strip()
         block = loc + body + "\n---\n"
