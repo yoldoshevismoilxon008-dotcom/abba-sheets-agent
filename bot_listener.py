@@ -1947,7 +1947,11 @@ def handle_update(upd):
                 tg = ", ".join(d["tags"][:4]) if d["tags"] else "—"
                 L.append(f"• #{d['id']} · {sendmod.code(d['title'])} · "
                          f"[{sendmod.esc(tg)}] · {d['created_at'][:10]}")
-            L.append("\nQidirish: /bilim <so'rov> · O'chirish: /unut <id> · Statistika: /bilim_stat")
+            # is_html blok — literal < > ESCAPE shart (Telegram «/buyruq <param>» yordam
+            # matnini noma'lum teg deb rad etadi → butun xabar ketmaydi). Qoida:
+            # bilim/Telegram-HTML-avtolink.md
+            L.append("\nQidirish: /bilim &lt;so'rov&gt; · O'chirish: /unut &lt;id&gt; · "
+                     "Statistika: /bilim_stat")
             send_retry("\n".join(L), attempts=2, is_html=True)
             return "kb-list"
         except Exception as e:

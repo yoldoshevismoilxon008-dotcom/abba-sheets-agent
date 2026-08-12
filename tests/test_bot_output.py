@@ -18,9 +18,28 @@ import send as sendmod       # noqa: E402
 
 # Monkeypatch qilinadigan funksiyalarning ASLI — har testdan keyin tiklanadi
 # (aks holda global override boshqa test fayllariga oqadi — izolatsiya buziladi).
-_KB_ORIG = {n: getattr(kb, n) for n in ("stats", "list_docs", "search", "archive", "ingest_text")}
+_KB_ORIG = {n: getattr(kb, n)
+            for n in ("stats", "list_docs", "search", "archive", "ingest_text", "ingest_file")}
 _VS_ORIG = {n: getattr(vs, n) for n in ("run", "stat")}
 _SEND_TG = sendmod.tg_send
+
+# Telegram HTML parse_mode ruxsat etadigan teglar (boshqa <...> → «Unsupported start tag»)
+_ALLOWED_TAGS = {"b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
+                 "code", "pre", "a", "blockquote", "span", "tg-spoiler", "tg-emoji"}
+
+
+def _bad_tags(html):
+    """is_html matndagi RUXSATSIZ `<...>` ro'yxati (Telegram teg deb rad etadi).
+    Satr MAZMUNINI emas — parser qoidasini tekshiradi: «/bilim <so'rov>» → tag nomi
+    'so' → ruxsatsiz. Escape qilingan &lt; &gt; (haqiqiy < > emas) hisobga olinmaydi."""
+    bad = []
+    for m in re.finditer(r"<([^>]*)>", html):
+        inner = m.group(1).strip()
+        raw = inner[1:].strip() if inner.startswith("/") else inner
+        nm = re.match(r"[a-zA-Z][a-zA-Z0-9-]*", raw)
+        if (nm.group(0).lower() if nm else "") not in _ALLOWED_TAGS:
+            bad.append(m.group(0))
+    return bad
 
 
 def _restore():
@@ -59,10 +78,12 @@ def _run(text):
 
 
 def _assert_safe(entry):
-    """is_html=True; qo'sh-escape yo'q; HAR «...md» yo'li <code> ichida."""
+    """is_html=True; qo'sh-escape yo'q; RUXSATSIZ teg yo'q; HAR «...md» yo'li <code> ichida."""
     t = entry["text"]
     assert entry["is_html"] is True, f"is_html emas: {t[:100]!r}"
     assert "&amp;amp;" not in t, f"qo'sh-escape: {t[:150]!r}"
+    bad = _bad_tags(t)
+    assert not bad, f"ruxsatsiz HTML teg (Telegram rad etadi): {bad} — {t!r}"
     for m in re.finditer(r"[^\s<>]+\.md\b", t):
         i = t.rfind("<code>", 0, m.start())
         j = t.find("</code>", m.start())
@@ -155,6 +176,33 @@ def test_supervisor_notify_path_in_code():
     msg = captured[0]
     assert "<code>" in msg and "&amp;amp;" not in msg
     assert ".md" not in msg.split("<code>")[0]    # .md faqat <code> ichida
+
+
+def test_bilim_list_help_line_no_bad_tags():
+    """BLOCKER regressiya: /bilim ro'yxati yordam qatori «<so'rov>/<id>» — is_html'da
+    escape bo'lishi SHART (aks holda Telegram butun xabarni rad etadi)."""
+    kb.list_docs = lambda limit=20, tag=None: [
+        {"id": 1, "title": "a", "tags": [], "created_at": "2026-08-10"}]
+    e = _run("/bilim")[-1]
+    assert e["is_html"] is True
+    assert _bad_tags(e["text"]) == [], f"ruxsatsiz teg: {_bad_tags(e['text'])}"
+    assert "&lt;so'rov&gt;" in e["text"] and "<so'rov>" not in e["text"]
+
+
+def test_kb_document_upload_title_in_code():
+    """Hujjat yuklash tasdiqi (handle_kb_document) — title <code>, ruxsatsiz teg yo'q."""
+    kb.ingest_file = lambda *a, **k: {"status": "new", "title": "hisobot.md",
+                                      "n_chunks": 3, "tags": ["a"], "warn": "", "summary": "xul"}
+    cap = Cap()
+    bl.send_status = lambda t: 1
+    bl.edit_status = cap.edit_status
+    try:
+        bl.handle_kb_document("/tmp/x.pdf", "x.pdf", "")
+    finally:
+        _restore()
+    e = cap.sent[-1]
+    assert "<code>hisobot.md</code>" in e["text"]
+    _assert_safe(e)
 
 
 # ---------------------------------------------------------------- skript rejimi
