@@ -1522,23 +1522,24 @@ def handle_kb_document(path, name, caption):
         r = kbmod.ingest_file(path, source="telegram", origin=name, caption=caption)
     except Exception as e:
         log(f"kb ingest xato ({name}): {type(e).__name__}: {e}")
-        m = f"⚠️ Hujjatni o'qib bo'lmadi: {str(e)[:160]}"
-        if not edit_status(mid, m):
-            send_retry(m, attempts=2)
+        m = f"⚠️ Hujjatni o'qib bo'lmadi: {sendmod.esc(str(e)[:160])}"
+        if not edit_status(mid, m, html=True):
+            send_retry(m, attempts=2, is_html=True)
         return "kb-error"
     if r["status"] == "unchanged":
-        m = f"ℹ️ «{r['title']}» allaqachon bazada, o'zgarish yo'q."
+        m = f"ℹ️ «{sendmod.code(r['title'])}» allaqachon bazada, o'zgarish yo'q."
     else:
         verb = "yangilandi" if r["status"] == "updated" else "qo'shildi"
         tags = ", ".join(r.get("tags") or []) or "—"
-        lines = [f"✅ «{r['title']}» bazaga {verb} — {r['n_chunks']} bo'lak · teglar: {tags}"]
+        lines = [f"✅ «{sendmod.code(r['title'])}» bazaga {verb} — "
+                 f"{r['n_chunks']} bo'lak · teglar: {sendmod.esc(tags)}"]
         if r.get("warn"):
-            lines.append(f"⚠️ {r['warn']}")
+            lines.append(f"⚠️ {sendmod.esc(r['warn'])}")
         if r.get("summary"):
-            lines += ["", r["summary"][:400]]
+            lines += ["", sendmod.esc(r["summary"][:400])]
         m = "\n".join(lines)
-    if not edit_status(mid, m):
-        send_retry(m, attempts=2)
+    if not edit_status(mid, m, html=True):
+        send_retry(m, attempts=2, is_html=True)
     return "kb-ok"
 
 
@@ -1902,19 +1903,21 @@ def handle_update(upd):
 
             s = kbmod.stats()
         except Exception as e:
-            send_retry(f"⚠️ Bilim bazasi statistikasi olinmadi: {str(e)[:160]}", attempts=2)
+            send_retry(f"⚠️ Bilim bazasi statistikasi olinmadi: {sendmod.esc(str(e)[:160])}",
+                       attempts=2, is_html=True)
             return "kb-stat-err"
-        by = ", ".join(f"{k}: {v}" for k, v in (s["by_source"] or {}).items()) or "—"
+        by = ", ".join(f"{sendmod.esc(k)}: {v}" for k, v in (s["by_source"] or {}).items()) or "—"
         li = s.get("last_ingest")
-        li_txt = f"{li['origin']} ({li['status']}, {li['ts']})" if li else "—"
+        li_txt = (f"{sendmod.code(li['origin'])} ({sendmod.esc(li['status'])}, "
+                  f"{sendmod.esc(li['ts'])})" if li else "—")
         send_retry(
-            "📚 **Bilim bazasi**\n"
+            "📚 <b>Bilim bazasi</b>\n"
             f"• Hujjatlar: {s['docs']} ta (arxivda {s['docs_archived']})\n"
             f"• Bo'laklar: {s['chunks']} ta\n"
             f"• Hajm: {s['bytes_db'] / (1024 * 1024):.1f} MB\n"
             f"• Manba kesimi: {by}\n"
             f"• Oxirgi ingest: {li_txt}",
-            attempts=2,
+            attempts=2, is_html=True,
         )
         return "kb-stat"
     if low.startswith("/bilim"):
@@ -1925,29 +1928,32 @@ def handle_update(upd):
             if arg:
                 res = kbmod.search(arg, k=5, use_rerank=True)
                 if not res:
-                    send_retry(f"«{arg}» bo'yicha bazada mos ma'lumot topilmadi.", attempts=2)
+                    send_retry(f"«{sendmod.esc(arg)}» bo'yicha bazada mos ma'lumot topilmadi.",
+                               attempts=2, is_html=True)
                     return "kb-search-empty"
-                L = [f"🔎 **«{arg}»** — {len(res)} natija:"]
+                L = [f"🔎 <b>«{sendmod.esc(arg)}»</b> — {len(res)} natija:"]
                 for r in res:
                     snip = " ".join((r["text"] or "").split())[:180]
-                    head = f" › {r['heading']}" if r.get("heading") else ""
-                    L.append(f"\n**{r['title']}**{head}\n{snip}…")
-                send_retry("\n".join(L)[:3800], attempts=2)
+                    head = f" › {sendmod.esc(r['heading'])}" if r.get("heading") else ""
+                    L.append(f"\n{sendmod.code(r['title'])}{head}\n{sendmod.esc(snip)}…")
+                send_retry("\n".join(L), attempts=2, is_html=True)
                 return "kb-search"
             docs = kbmod.list_docs(limit=20)
             if not docs:
                 send_retry("📚 Bilim bazasi bo'sh. Hujjat yuboring yoki /eslab_qol <matn>.", attempts=2)
                 return "kb-empty"
-            L = ["📚 **Oxirgi hujjatlar:**"]
+            L = ["📚 <b>Oxirgi hujjatlar:</b>"]
             for d in docs:
                 tg = ", ".join(d["tags"][:4]) if d["tags"] else "—"
-                L.append(f"• #{d['id']} · {d['title']} · [{tg}] · {d['created_at'][:10]}")
+                L.append(f"• #{d['id']} · {sendmod.code(d['title'])} · "
+                         f"[{sendmod.esc(tg)}] · {d['created_at'][:10]}")
             L.append("\nQidirish: /bilim <so'rov> · O'chirish: /unut <id> · Statistika: /bilim_stat")
-            send_retry("\n".join(L)[:3800], attempts=2)
+            send_retry("\n".join(L), attempts=2, is_html=True)
             return "kb-list"
         except Exception as e:
             log(f"/bilim xato: {e}")
-            send_retry(f"⚠️ Bilim bazasi bilan ishlashda xato: {str(e)[:160]}", attempts=2)
+            send_retry(f"⚠️ Bilim bazasi bilan ishlashda xato: {sendmod.esc(str(e)[:160])}",
+                       attempts=2, is_html=True)
             return "kb-err"
     if low.startswith("/unut"):
         arg = text[len("/unut"):].strip()
@@ -1959,22 +1965,22 @@ def handle_update(upd):
 
             res = kbmod.archive(arg)
         except Exception as e:
-            send_retry(f"⚠️ O'chirishda xato: {str(e)[:160]}", attempts=2)
+            send_retry(f"⚠️ O'chirishda xato: {sendmod.esc(str(e)[:160])}", attempts=2, is_html=True)
             return "kb-unut-err"
         st = res.get("status")
         if st == "ok":
             send_retry(
-                f"🗑 «{res['title']}» (#{res['id']}) arxivlandi — bazadan yashirildi "
-                "(qaytarish mumkin).", attempts=2,
+                f"🗑 «{sendmod.code(res['title'])}» (#{res['id']}) arxivlandi — bazadan "
+                "yashirildi (qaytarish mumkin).", attempts=2, is_html=True,
             )
         elif st == "ambiguous":
             lines = ["Bir nechta hujjat mos keldi — aniq ID bilan qayta yuboring "
                      "(masalan /unut 7):"]
             for c in res["candidates"]:
-                lines.append(f"• #{c['id']} · {c['title']}")
-            send_retry("\n".join(lines)[:2000], attempts=2)
+                lines.append(f"• #{c['id']} · {sendmod.code(c['title'])}")
+            send_retry("\n".join(lines), attempts=2, is_html=True)
         else:
-            send_retry(f"«{arg}» topilmadi. Ro'yxat: /bilim", attempts=2)
+            send_retry(f"«{sendmod.esc(arg)}» topilmadi. Ro'yxat: /bilim", attempts=2, is_html=True)
         return "kb-unut"
     if low.startswith("/eslab_qol"):
         arg = text[len("/eslab_qol"):].strip()
@@ -1994,19 +2000,20 @@ def handle_update(upd):
                                   content_key=True)
         except Exception as e:
             log(f"/eslab_qol xato: {e}")
-            m = f"⚠️ Saqlanmadi: {str(e)[:160]}"
-            if not edit_status(mid, m):
-                send_retry(m, attempts=2)
+            m = f"⚠️ Saqlanmadi: {sendmod.esc(str(e)[:160])}"
+            if not edit_status(mid, m, html=True):
+                send_retry(m, attempts=2, is_html=True)
             return "kb-remember-err"
         if r["status"] == "unchanged":
             m = "ℹ️ Bu allaqachon bazada bor edi."
         else:
             tags = ", ".join(r.get("tags") or []) or "—"
-            m = f"✅ Eslab qoldim — «{r['title']}» ({r['n_chunks']} bo'lak · teglar: {tags})"
+            m = (f"✅ Eslab qoldim — «{sendmod.code(r['title'])}» "
+                 f"({r['n_chunks']} bo'lak · teglar: {sendmod.esc(tags)})")
             if r.get("warn"):
-                m += f"\n⚠️ {r['warn']}"
-        if not edit_status(mid, m):
-            send_retry(m, attempts=2)
+                m += f"\n⚠️ {sendmod.esc(r['warn'])}"
+        if not edit_status(mid, m, html=True):
+            send_retry(m, attempts=2, is_html=True)
         return "kb-remember"
     if low.startswith("/vault_stat"):
         try:
@@ -2014,15 +2021,16 @@ def handle_update(upd):
 
             s = vault_sync.stat()
         except Exception as e:
-            send_retry(f"⚠️ Vault statistikasi olinmadi: {str(e)[:160]}", attempts=2)
+            send_retry(f"⚠️ Vault statistikasi olinmadi: {sendmod.esc(str(e)[:160])}",
+                       attempts=2, is_html=True)
             return "vault-stat-err"
         c = s.get("counts") or {}
-        skips = ", ".join(s.get("skipped_dirs") or []) or "—"
+        skips = ", ".join(sendmod.code(d) for d in (s.get("skipped_dirs") or [])) or "—"
         lines = [
-            "🧠 **Vault sinxron holati**",
+            "🧠 <b>Vault sinxron holati</b>",
             f"• Hujjatlar (vault): {s.get('vault_docs')} ta",
             f"• Bo'laklar: {s.get('chunks')} ta",
-            f"• Oxirgi muvaffaqiyatli sinxron: {s.get('last_success_ts') or '—'}",
+            f"• Oxirgi muvaffaqiyatli sinxron: {sendmod.esc(s.get('last_success_ts') or '—')}",
             f"• O'tkazib yuborilgan (.kbignore): {skips}",
         ]
         if c:
@@ -2032,8 +2040,8 @@ def handle_update(upd):
                 f"{c.get('errors', 0)} xato"
             )
         if s.get("last_error"):
-            lines.append(f"⚠️ Oxirgi xato: {str(s['last_error'])[:160]}")
-        send_retry("\n".join(lines), attempts=2)
+            lines.append(f"⚠️ Oxirgi xato: {sendmod.code(str(s['last_error'])[:160])}")
+        send_retry("\n".join(lines), attempts=2, is_html=True)
         return "vault-stat"
     if low.startswith("/vault_sync"):
         mid = send_status("🔄 Vault sinxron boshlandi...")
@@ -2061,9 +2069,9 @@ def handle_update(upd):
             elif status == "disabled":
                 m = "ℹ️ Vault sinxron o'chiq (VAULT_REPO / GH_TOKEN_VAULT env berilmagan)."
             else:
-                m = f"⚠️ Vault sinxron xatosi: {str(res.get('error', ''))[:200]}"
-            if not edit_status(mid, m):
-                send_retry(m, attempts=2)
+                m = f"⚠️ Vault sinxron xatosi: {sendmod.code(str(res.get('error', ''))[:200])}"
+            if not edit_status(mid, m, html=True):
+                send_retry(m, attempts=2, is_html=True)
 
         threading.Thread(target=_vault_job, daemon=True).start()
         return "vault-sync"

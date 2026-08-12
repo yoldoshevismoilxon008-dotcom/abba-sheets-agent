@@ -71,8 +71,22 @@ def html_to_plain(s):
     return s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 
 
-def _esc(s):
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def esc(s):
+    """Telegram HTML uchun & < > ni escape qiladi (matn tugunlari uchun)."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def code(s):
+    """Qiymatni Telegram <code> ichiga o'raydi (escape bilan). YAGONA yo'l — hamma joyda shu.
+
+    QOIDA: Telegram <code> TASHQARISIDA «X.md/.uz/.co/.io» kabi qiymatni domen deb
+    AVTOLINK qiladi (buzuq havola, masalan http://natija.md/). Shuning uchun Telegram'ga
+    chiqadigan HAR QANDAY fayl yo'li / origin / vault_path / title SHU bilan o'ralsin.
+
+    Natija — TAYYOR HTML: FAQAT is_html=True yo'li bilan yuboriladigan xabarlarda ishlat
+    (tg_send / send_retry(is_html=True) / edit_status(html=True)). md_to_html'dan
+    O'TKAZMA — aks holda ikki marta escape bo'ladi (&amp;amp;)."""
+    return f"<code>{esc(s)}</code>"
 
 
 _MANBA_RE = re.compile(r"^\s*[-*>]*\s*manba(?:lar)?\s*[:：]\s*(.+)$", re.IGNORECASE)
@@ -111,8 +125,8 @@ def format_kb_source_block(ans, vault="claude-brain"):
             disp = p if p.lower().endswith(".md") else p + ".md"
             url = (f"obsidian://open?vault={quote(vault, safe='')}"
                    f"&file={quote(disp[:-3], safe='')}")     # .md kengaytmasisiz
-            out.append(f"Manba: <code>{_esc(disp)}</code>")
-            out.append(f"<code>{_esc(url)}</code>")
+            out.append(f"Manba: {code(disp)}")
+            out.append(code(url))
         extra = len(paths) - len(shown)
         if extra > 0:
             out.append(f"+{extra} ta manba")

@@ -156,10 +156,14 @@ def run_vault_sync():
             if c.get("ingested") or c.get("archived") or c.get("errors"):
                 log(f"vault sinxron: {c}")     # o'zgarish bo'lmasa jim (log shishmasin)
         elif status in ("git_error", "error"):
+            import send as sendmod
+
             err = vault_sync._sanitize(str(res.get("error", "")))
             log(f"vault sinxron XATO: {err}")
+            # notify tg_send (HTML) orqali ketadi — yo'l/URL <code> ichida (avtolink yo'q)
             _notify_owner_once_daily(
-                "⚠️ Vault sinxron xatosi (bot ishlashda davom etmoqda):\n" + err[:300]
+                "⚠️ Vault sinxron xatosi (bot ishlashda davom etmoqda):\n"
+                + sendmod.code(err[:300])
             )
         else:
             # disabled / no_kbignore / unconfigured / busy — kutilgan holat, notify yo'q
