@@ -100,3 +100,40 @@ keyingi 10 daqiqada yoki Telegram'da `/vault_sync` bilan darhol ishga tushadi.
 - **Maxfiylik**: `.kbignore` yo'q bo'lsa Mac push va Railway ingest **to'xtaydi**;
   `__UNCONFIGURED__` turgan ekan sinxron o'chiq.
 - **Log shishmasin**: o'zgarish bo'lmagan run'lar faqat status faylni yangilaydi.
+
+---
+
+## B2.2 — Chat arxivi (suhbatni vault + KB'ga past vazn bilan)
+
+Bot har javobdan keyin suhbatni `DATA/chat/YYYY-MM-DD.md` ga yozadi. Oqim:
+
+```
+bot javob → DATA/chat/*.md ──(push_chat, 10daq)──▶ REPORTS_REPO/chat/
+                                                          │
+   ~/claude-brain/chat/ ◀──(reports-pull, 10daq)─────────┘   (vault ILDIZI)
+        │
+        └─(brain-push)─▶ bilim repo ─(vault_sync)─▶ KB (source="chat", past vazn)
+```
+
+- **Faqat vault_sync ingest qiladi** — bot HECH QACHON `kb.ingest` chaqirmaydi (ikki marta tushmasin).
+- **Past vazn:** chat qidiruvda ×0.6 jarima (`KB_CHAT_PENALTY`), kontekstga ko'pi 2 chat bo'lagi,
+  faqat vault/doc'dan keyin; «O'tgan suhbat (tasdiqlanmagan)» sarlavhasi ostida.
+- **90 kun:** faqat oxirgi 90 kunlik chat KB'da; eskisi vault'da o'qish uchun qoladi, KB'dan
+  **arxivlanadi** (ataylab). Chat metadata uchun Claude **chaqirilmaydi** (barqaror sarlavha).
+
+### ⚠️ Maxfiylik — REPORTS_REPO endi chat'ni ham tashiydi
+Chat arxivida botga yozgan **hamma narsa** bo'ladi. `abba-hisobotlar` **PRIVATE** turishi SHART
+(2026-08-12 da public'dan private'ga o'zgartirilgan). `.kbignore` ga `chat/` QO'SHILMASIN.
+
+### Reports-pull intervalini yangilash (3600 → 600, chat tez tortilishi uchun)
+```bash
+cp ~/abba-sheets-agent/launchd/com.abba.reports-pull.plist ~/Library/LaunchAgents/
+launchctl unload ~/Library/LaunchAgents/com.abba.reports-pull.plist
+launchctl load  ~/Library/LaunchAgents/com.abba.reports-pull.plist
+```
+`vault_pull.sh` allaqachon `chat/` → `~/claude-brain/chat/` tortadi (hisobotlar ichida emas).
+Railway'da qo'shimcha env shart emas — `push_chat` mavjud `REPORTS_REPO`+`GH_TOKEN_REPORTS`dan foydalanadi.
+
+### Kechikish
+Uchidan-uchiga ~30–40 daqiqa (bot→push_chat→reports-pull→brain-push→vault_sync). Chat *kelgusi*
+savollarga kontekst — darhol emas.
