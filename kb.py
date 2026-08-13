@@ -39,6 +39,9 @@ CTX_BUDGET = 12_000       # context_for standart budjet
 MAX_EXTRACT_CHARS = 4_000_000   # bitta hujjatdan olinadigan maks matn (xavfsizlik)
 MAX_CHUNKS = 2000         # bitta hujjat maks bo'lak soni (oshsa kesiladi)
 CLAUDE_TIMEOUT = 30       # KB Claude chaqiruvlari uchun qattiq timeout (sekund)
+# Chat arxivi (B2.2) — botning avvalgi javoblari, PAST vaznli kontekst
+CHAT_SCORE_PENALTY = float(os.environ.get("KB_CHAT_PENALTY", "0.6"))  # search: chat ballini demote
+CHAT_CTX_MAX = int(os.environ.get("KB_CHAT_CTX_MAX", "2"))            # context_for: ko'pi 2 chat bo'lagi
 
 # O'zbek/tipografik apostrof variantlari → bitta ASCII ' (index va query BIR XIL)
 _APOS = {
@@ -466,6 +469,17 @@ def _light_meta(text, origin, title_hint=None):
     return {"title": title[:200], "lang": "uz", "tags": [], "summary": text.strip()[:300]}
 
 
+def _chat_meta(text, origin):
+    """Chat arxivi metadata — Claude UMUMAN chaqirilmaydi (B2.2 fix#1). Sabab: joriy kun
+    fayli kun davomida O'SADI → har 10 daqiqada content_hash o'zgaradi → 1500 belgi
+    chegarasidan oshgani uchun Claude metadata kuniga ~144 marta BEKORGA chaqirilardi.
+    Doim barqaror fallback sarlavha «Suhbat arxivi — YYYY-MM-DD»."""
+    m = re.search(r"\d{4}-\d{2}-\d{2}", Path(origin).name if origin else "")
+    day = m.group(0) if m else (Path(origin).stem if origin else "")
+    return {"title": f"Suhbat arxivi — {day}".strip()[:200], "lang": "uz",
+            "tags": ["suhbat"], "summary": text.strip()[:300]}
+
+
 def _extract_metadata(text, origin, title_hint=None):
     """Claude bilan {title, lang, tags, summary}. Yiqilsa — fallback."""
     try:
@@ -548,7 +562,9 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
                 "summary": row["summary"] or "", "warn": "",
             }
 
-        if meta_min_chars and len(norm) < meta_min_chars:
+        if source == "chat":
+            meta = _chat_meta(norm, origin)          # chat — Claude YO'Q (fix#1)
+        elif meta_min_chars and len(norm) < meta_min_chars:
             meta = _light_meta(norm, origin, title_hint=title)
         else:
             meta = _extract_metadata(norm, origin, title_hint=title)
@@ -794,14 +810,15 @@ def search(query, k=8, *, use_rerank=True, use_expansion=True):
         rows = conn.execute(
             """SELECT c.id AS chunk_id, c.doc_id, c.ord, c.heading, c.text,
                       d.uid, d.title, d.origin, d.source, d.vault_path,
-                      bm25(chunks_fts, 1.0, 0.5) AS score
+                      bm25(chunks_fts, 1.0, 0.5)
+                        * (CASE WHEN d.source='chat' THEN ? ELSE 1.0 END) AS score
                FROM chunks_fts
                JOIN chunks c ON c.id = chunks_fts.rowid
                JOIN docs d ON d.id = c.doc_id
                WHERE chunks_fts MATCH ? AND d.archived = 0
                ORDER BY score
                LIMIT 30""",
-            (match,),
+            (CHAT_SCORE_PENALTY, match),
         ).fetchall()
     except sqlite3.OperationalError as e:
         log(f"FTS MATCH xato ({match!r}): {e}")
@@ -831,8 +848,12 @@ def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansio
     if not results:
         return ""
     header = "[BILIM BAZASI — kontekst/qoida, jonli sheet raqami EMAS]\n"
+    # B2.2: chat (bot avvalgi javoblari) — vault/doc bo'laklaridan KEYIN, ko'pi CHAT_CTX_MAX,
+    # va faqat joy qolsa. Alohida «tasdiqlanmagan» sarlavha ostida (fakt deb keltirilmasin).
+    nonchat = [r for r in results if r.get("source") != "chat"]
+    chat = [r for r in results if r.get("source") == "chat"][:CHAT_CTX_MAX]
     out, used, added = [header], len(header), 0
-    for r in results:
+    for i, r in enumerate(nonchat):
         title = r.get("title") or "Hujjat"
         head = r.get("heading") or ""
         origin = r.get("origin") or r.get("source") or ""
@@ -843,7 +864,7 @@ def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansio
         body = (r.get("text") or "").strip()
         block = loc + body + "\n---\n"
         if used + len(block) > budget_chars:
-            if added == 0:      # birinchi bo'lak sig'masa — kesib bo'lsa ham qo'shamiz
+            if i == 0 and added == 0:   # birinchi bo'lak sig'masa — kesib bo'lsa ham qo'shamiz
                 avail = max(0, budget_chars - used - len(loc) - 6)
                 body = body[:avail].rstrip()
                 if body:
@@ -853,6 +874,23 @@ def context_for(query, budget_chars=CTX_BUDGET, *, use_rerank=True, use_expansio
         out.append(block)
         used += len(block)
         added += 1
+    # Chat bo'laklari — faqat vault/doc'dan keyin joy qolsa
+    if chat and used < budget_chars:
+        chat_hdr = ("\n[O'TGAN SUHBAT — tasdiqlanmagan, fakt sifatida keltirma, "
+                    "faqat kontekst uchun]\n")
+        started = False
+        for r in chat:
+            title = r.get("title") or "Suhbat"
+            head = r.get("heading") or ""
+            loc = f"### {title}" + (f" › {head}" if head else "") + "\n"
+            body = (r.get("text") or "").strip()
+            extra = (chat_hdr if not started else "") + loc + body + "\n---\n"
+            if used + len(extra) > budget_chars:
+                break
+            out.append(extra)
+            used += len(extra)
+            added += 1
+            started = True
     return "".join(out) if added else ""
 
 

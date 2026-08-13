@@ -1288,6 +1288,12 @@ def do_question(q):
                 edit_status(mid, "📄 Javob:")
             ok = send_retry(html, is_html=True)
     remember(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
+    try:                                    # B2.2: suhbatni Obsidian chat arxiviga (best-effort)
+        import chat_log
+
+        chat_log.append_qa(q, ans)          # KB'ga tushmaydi — faqat vault_sync ingest qiladi
+    except Exception as e:
+        log(f"chat_log o'tkazildi: {e}")
     log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({'PDF' if pdf_sent else 'matn'}, {len(ans)} belgi)")
     log(
         f"META: mode={mode} ref={int(ref)} src={src} pdf={int(pdf_sent)} "
@@ -1750,6 +1756,13 @@ def handle_update(upd):
         design.save_pending(p)  # boshqa matn — pending qolsin
     log(f"SAVOL ({chat}): {text[:200]!r}")
     low = text.lower()
+    if text.startswith("/"):                # B2.2: buyruqni chat arxiviga bir qator (best-effort)
+        try:
+            import chat_log
+
+            chat_log.append_cmd(text.split()[0])
+        except Exception:
+            pass
     if low.startswith("/help") or low.startswith("/start"):
         send_retry(HELP, attempts=2)
         return "help"

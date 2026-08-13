@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import threading
+from datetime import date
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -39,6 +40,7 @@ GIT_TIMEOUT = 300
 ALWAYS_IGNORE = (".git", ".obsidian", ".trash")
 # .kbignore hali sozlanmaganini bildiruvchi sentinel — mavjud bo'lsa sinxron o'chiq
 UNCONFIGURED = "__UNCONFIGURED__"
+CHAT_INDEX_DAYS = 90        # faqat oxirgi 90 kunlik chat bazaga tushadi (eskisi vault'da qoladi)
 
 
 def log(msg):
@@ -164,9 +166,27 @@ def _save_state(st):
 
 # ---------------------------------------------------------------- reconcile
 
+def _source_for(rel):
+    """chat/ bilan boshlansa → 'chat', aks holda → 'vault' (B2.2)."""
+    return "chat" if rel.replace("\\", "/").startswith("chat/") else "vault"
+
+
+def _chat_indexable(rel, today):
+    """Chat fayli oxirgi CHAT_INDEX_DAYS ichidami (nom: chat/YYYY-MM-DD.md).
+    Sana o'qilmasa → True (yo'qotmaymiz)."""
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", Path(rel).name)
+    if not m:
+        return True
+    try:
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return True
+    return (today - d).days <= CHAT_INDEX_DAYS
+
+
 def _reconcile(clone):
     """clone ichidagi barcha .md ni kb bilan solishtiradi (idempotent, resumable).
-    Qaytadi status dict."""
+    chat/ yo'llari source='chat', qolgani source='vault'. Qaytadi status dict."""
     import kb
 
     clone = Path(clone)
@@ -180,18 +200,25 @@ def _reconcile(clone):
 
     md_files = sorted(p for p in clone.rglob("*.md") if p.is_file())
     total = len(md_files)
-    ingested = unchanged = errors = 0
+    today = date.today()
+    ingested = unchanged = errors = aged = 0
     skipped_dirs = set()
-    present = set()          # joriy vault fayllari (origin) — o'chirilganini aniqlash uchun
+    present = set()          # bazaga tushgan fayllar (origin) — o'chirilganini aniqlash uchun
 
     for i, p in enumerate(md_files, 1):
         rel = p.relative_to(clone).as_posix()
         if _always_ignore(rel) or _kbignore_match(rel, patterns):
             skipped_dirs.add(rel.split("/", 1)[0])
             continue
+        src = _source_for(rel)
+        if src == "chat" and not _chat_indexable(rel, today):
+            # 90 kundan eski chat — bazaga tushmaydi (ATAYLAB): present'ga KIRMAYDI →
+            # quyida arxivlanadi; vault'da Obsidian o'qishi uchun QOLADI (fix#4).
+            aged += 1
+            continue
         present.add(rel)
         try:
-            r = kb.ingest_file(p, source="vault", origin=rel, vault_path=rel,
+            r = kb.ingest_file(p, source=src, origin=rel, vault_path=rel,
                                meta_min_chars=META_MIN)
             if r.get("status") == "unchanged":
                 unchanged += 1
@@ -203,18 +230,21 @@ def _reconcile(clone):
         if i % 50 == 0:
             log(f"progress {i}/{total} (yangi={ingested}, o'zgarmagan={unchanged})")
 
-    # kb'da bor, vault'da endi yo'q → arxivlash
+    # kb'da bor, lekin joriy present'da yo'q → arxivlash. Ikkala source bo'yicha:
+    #  - vault: o'chirilgan yoki .kbignore'ga qo'shilgan fayl
+    #  - chat: o'chirilgan YOKI 90 kundan eskirgan (aged — ATAYLAB, fix#4)
     archived = 0
-    for origin in kb.origins("vault"):
-        if origin not in present:
-            archived += kb.forget_origin("vault", origin)
+    for src in ("vault", "chat"):
+        for origin in kb.origins(src):
+            if origin not in present:
+                archived += kb.forget_origin(src, origin)
 
     st = {
         "status": "ok",
         "last_success_ts": kb._now(),
         "last_error": None,
         "counts": {"files": total, "ingested": ingested, "unchanged": unchanged,
-                   "archived": archived, "errors": errors},
+                   "archived": archived, "aged_chat": aged, "errors": errors},
         "skipped_dirs": sorted(skipped_dirs),
     }
     _save_state(st)

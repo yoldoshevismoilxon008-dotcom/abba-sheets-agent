@@ -102,6 +102,9 @@ Bilim bazasidan foydalansang, javob OXIRIDA alohida qatorda manba(lar)ni ko'rsat
 qatorda; bir nechta bo'lsa vergul bilan ajrat. Qavs/havola QO'YMA — tizim uni avtomatik
 bosiladigan (nusxalanadigan) formatga o'tkazadi.
 Bilim bazasida savolga aloqador narsa bo'lmasa — undan foydalanma, sheet DATA'siga tayan.
+«O'TGAN SUHBAT» bloki (agar bo'lsa) — botning AVVALGI JAVOBLARI, TASDIQLANMAGAN. Uni fakt
+sifatida keltirma va raqam/qarorni undan OLMA — faqat foydalanuvchi nimaga murojaat
+qilayotganini tushunish uchun (suhbat oqimi). Har raqam/xulosa sheet DATA yoki bilim bazasidan.
 
 DATA (joriy; har sheet: [tab] header, keyin qator raqami bilan ma'lumotlar):
 {{DATA}}
