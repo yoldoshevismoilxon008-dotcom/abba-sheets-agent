@@ -2058,6 +2058,19 @@ def handle_update(upd):
             )
         if s.get("last_error"):
             lines.append(f"⚠️ Oxirgi xato: {sendmod.code(str(s['last_error'])[:160])}")
+        try:                                    # B2.2: chat push holati (jim yiqilishni ko'rsatadi)
+            import push_chat
+
+            cs = push_chat.stat()
+            lines.append(
+                "• Chat push (oxirgi muvaffaqiyat): "
+                f"{sendmod.esc(cs.get('last_success_ts') or '—')}"
+                + (f" · {cs['fail_streak']} ketma-ket xato" if cs.get("fail_streak") else "")
+            )
+            if cs.get("last_error"):
+                lines.append(f"⚠️ Chat push xatosi: {sendmod.code(str(cs['last_error'])[:160])}")
+        except Exception:
+            pass
         send_retry("\n".join(lines), attempts=2, is_html=True)
         return "vault-stat"
     if low.startswith("/vault_sync"):

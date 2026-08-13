@@ -12,10 +12,16 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
 CHAT_DIR = DATA / "chat"
+CHAT_MAX = 8000            # bitta yozuv (savol/javob) shu belgidan kesiladi — kunlik fayl shishmasin
 
 
 def log(msg):
     print(f"[chat_log] {msg}", flush=True)
+
+
+def _clip(s):
+    s = (s or "").strip()
+    return s if len(s) <= CHAT_MAX else s[:CHAT_MAX].rstrip() + " …(qisqartirildi)"
 
 
 def _file_for(now):
@@ -37,8 +43,8 @@ def append_qa(question, answer, now=None):
     try:
         now = now or datetime.now()
         t = now.strftime("%H:%M")
-        q = (question or "").strip()
-        a = (answer or "").strip()
+        q = _clip(question)                     # uzun yozuv faylni shishirtirmasin (~8000)
+        a = _clip(answer)
         _append(f"## {t} · Savol\n{q}\n\n## {t} · Javob\n{a}\n\n---\n\n", now)
     except Exception as e:
         log(f"append_qa o'tkazildi: {type(e).__name__}: {str(e)[:120]}")

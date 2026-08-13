@@ -807,6 +807,11 @@ def search(query, k=8, *, use_rerank=True, use_expansion=True):
         return []
     conn = _connect()
     try:
+        # DIQQAT (mo'rtlik): chat jarimasi (×CHAT_SCORE_PENALTY, <1) FAQAT quyidagi sabab
+        # ishlaydi — sqlite bm25() MANFIY (mos = manfiyroq) va ORDER BY O'SISH tartibida
+        # (manfiyroq = yuqori). ×0.6 manfiy ballni nolga yaqinlashtiradi → chat PASTGA tushadi.
+        # Agar kimdir ORDER BY DESC qilsa yoki abs() o'rasa — bu JIM RAVISHDA chat'ni
+        # KO'TARISHGA aylanadi. (test_chat_penalty_ranking shu invariantni ushlaydi.)
         rows = conn.execute(
             """SELECT c.id AS chunk_id, c.doc_id, c.ord, c.heading, c.text,
                       d.uid, d.title, d.origin, d.source, d.vault_path,

@@ -225,10 +225,120 @@ def test_push_chat_sync_and_nonff_retry():
     _gitc(seed, "rep")
     subprocess.run(["git", "-C", str(seed), "push", "-q", "origin", "HEAD"], check=True)
 
-    assert pc._push_with_retry() is True                # push rad → pull --rebase → qayta → OK
+    assert pc._push_with_retry(str(bare)) is True        # push rad → pull --rebase → qayta → OK
     subprocess.run(["git", "-C", str(seed), "pull", "-q", "--rebase"], check=True)
     assert (seed / "chat" / "2026-08-12.md").exists()   # chat remote'ga yetdi
     assert (seed / "hisobotlar.md").exists()            # hisobotlar ham saqlandi (rebase)
+
+
+# ---------------------------------------------------------------- fix#1: jim yiqilish → notify
+
+def test_push_chat_failstreak_and_sanitize():
+    """Ketma-ket yiqilishlar sanaladi; last_error token'siz (sanitize)."""
+    import push_chat as pc
+    pc.STATE = Path(tempfile.mkdtemp(prefix="pcst_")) / "st.json"
+    os.environ["GH_TOKEN_REPORTS"] = "SECRETTOK"
+    for i in range(1, 7):
+        assert pc._mark_fail(
+            "fatal: https://x-access-token:SECRETTOK@github.com/x/y.git 403") == i
+    s = pc.stat()
+    assert s["fail_streak"] == 6
+    assert "SECRETTOK" not in s["last_error"] and "***" in s["last_error"]
+    pc._mark_ok()
+    s2 = pc.stat()
+    assert s2["fail_streak"] == 0 and s2["last_error"] is None and s2["last_success_ts"]
+    os.environ.pop("GH_TOKEN_REPORTS", None)
+
+
+def test_supervisor_notifies_on_chat_failstreak():
+    """6 ketma-ket yiqilishdan keyin egaga xabar; yo'l <code> ichida (token/avtolink yo'q)."""
+    import send as sendmod
+    import supervisor
+    import push_chat as pc
+    supervisor.DATA = Path(tempfile.mkdtemp(prefix="supchat_"))
+    os.environ["TELEGRAM_BOT_TOKEN"] = "x"
+    os.environ["TELEGRAM_CHAT_ID"] = "1"
+    captured = []
+    o_tg, o_main, o_stat = sendmod.tg_send, pc.main, pc.stat
+    sendmod.tg_send = lambda token, chat, msg: captured.append(msg)
+    pc.main = lambda: 1
+    pc.stat = lambda: {"last_success_ts": None, "last_error": "fetch bilim/x.md yiqildi",
+                       "fail_streak": 6}
+    try:
+        supervisor.run_push_chat()
+    finally:
+        sendmod.tg_send, pc.main, pc.stat = o_tg, o_main, o_stat
+    assert captured, "notify yuborilmadi"
+    msg = captured[0]
+    assert "6 marta" in msg and "<code>" in msg
+    assert ".md" not in msg.split("<code>")[0]           # .md faqat <code> ichida
+
+
+# ---------------------------------------------------------------- fix#2: token diskda emas
+
+def _rec_git(calls):
+    from types import SimpleNamespace
+
+    def rec(*cmd, check=True, cwd=None):
+        calls.append(" ".join(str(c) for c in cmd))
+        if "clone" in cmd:
+            (Path(cmd[-1]) / ".git").mkdir(parents=True, exist_ok=True)
+        rc = 1 if "diff" in cmd else 0                   # diff --cached --quiet → o'zgarish bor
+        return SimpleNamespace(returncode=rc, stdout="", stderr="")
+    return rec
+
+
+def _assert_token_not_in_config(calls, token):
+    seturl = [c for c in calls if "set-url" in c]
+    assert seturl, "set-url chaqirilmadi"
+    assert "https://github.com/owner/repo.git" in seturl[0]      # TOKENSIZ URL config'ga
+    assert not any("set-url" in c and token in c for c in calls)  # set-url'da HECH token yo'q
+    pushes = [c for c in calls if " push " in c]
+    assert any(token in c and c.strip().endswith("HEAD") for c in pushes)  # push token argument bilan
+
+
+def test_push_chat_token_not_in_config():
+    import push_chat as pc
+    base = Path(tempfile.mkdtemp(prefix="pctok_"))
+    pc.CLONE, pc.STATE = base / "clone", base / "st.json"
+    pc.CHAT_SRC = base / "src"
+    pc.CHAT_SRC.mkdir()
+    (pc.CHAT_SRC / "2026-08-12.md").write_text("x", encoding="utf-8")
+    os.environ["REPORTS_REPO"], os.environ["GH_TOKEN_REPORTS"] = "owner/repo", "SECRETTOK"
+    calls, o_sh = [], pc.sh
+    pc.sh = _rec_git(calls)
+    try:
+        pc.main()
+    finally:
+        pc.sh = o_sh
+    _assert_token_not_in_config(calls, "SECRETTOK")
+
+
+def test_push_reports_token_not_in_config():
+    import push_reports as pr
+    base = Path(tempfile.mkdtemp(prefix="prtok_"))
+    pr.CLONE, pr.SNAPSHOTS = base / "clone", base / "snaps"
+    snap = pr.SNAPSHOTS / "2026-08-12"
+    snap.mkdir(parents=True)
+    (snap / "report.md").write_text("hisobot matni", encoding="utf-8")
+    os.environ["REPORTS_REPO"], os.environ["GH_TOKEN_REPORTS"] = "owner/repo", "SECRETTOK"
+    calls, o_sh = [], pr.sh
+    pr.sh = _rec_git(calls)
+    try:
+        pr.main()
+    finally:
+        pr.sh = o_sh
+    _assert_token_not_in_config(calls, "SECRETTOK")
+
+
+# ---------------------------------------------------------------- fix#4: chat_log clip
+
+def test_chat_log_clip_long_answer():
+    _chatsetup()
+    chat_log.append_qa("q", "A" * 20000, now=datetime(2026, 8, 12, 1, 1))
+    f = (chat_log.CHAT_DIR / "2026-08-12.md").read_text(encoding="utf-8")
+    assert "…(qisqartirildi)" in f
+    assert len(f) < 20000                                # to'liq 20000 tushmadi — kesildi
 
 
 # ---------------------------------------------------------------- skript rejimi

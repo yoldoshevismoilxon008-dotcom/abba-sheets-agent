@@ -10,6 +10,7 @@ o'zgarmagan fayllar push qilinmaydi. Format export_obsidian.py bilan bir xil —
 Mac'dagi vault_pull to'g'ridan-to'g'ri vault'ga ko'chiradi.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,10 +27,20 @@ def log(msg):
     print(f"[push_reports] {msg}", flush=True)
 
 
+_TOKEN_RE = re.compile(r"x-access-token:[^@]*@")
+
+
+def _san(msg):
+    """git stderr'da token'li URL bo'lishi mumkin — log'ga chiqishdan oldin tozalanadi."""
+    s = _TOKEN_RE.sub("x-access-token:***@", str(msg))
+    tok = os.environ.get("GH_TOKEN_REPORTS", "").strip()
+    return s.replace(tok, "***") if tok else s
+
+
 def sh(*cmd, cwd=None):
     r = subprocess.run(list(cmd), cwd=cwd, capture_output=True, text=True, timeout=180)
     if r.returncode != 0:
-        raise RuntimeError(f"{' '.join(cmd[:4])} → {r.stderr.strip()[:250]}")
+        raise RuntimeError(_san(f"{' '.join(cmd[:4])} → {r.stderr.strip()[:250]}"))
     return r.stdout
 
 
@@ -39,18 +50,22 @@ def main():
     if not repo or not token:
         log("REPORTS_REPO / GH_TOKEN_REPORTS yo'q — o'tkazildi")
         return 0
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    # Token DISKDA saqlanmasin: origin TOKENSIZ URL, tarmoq amallariga token argument bilan
+    auth = f"https://x-access-token:{token}@github.com/{repo}.git"
+    clean = f"https://github.com/{repo}.git"
 
     if not (CLONE / ".git").is_dir():
-        sh("git", "clone", "--depth", "1", url, str(CLONE))
+        sh("git", "clone", "--depth", "1", auth, str(CLONE))
+        sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)   # token diskda qolmasin
     else:
-        sh("git", "-C", str(CLONE), "remote", "set-url", "origin", url)
+        sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)   # eski tokenli bo'lsa tozala
         try:
-            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q")
+            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", auth)
         except RuntimeError as e:
-            log(f"pull yiqildi ({e}) — klon yangidan olinadi")
+            log(f"pull yiqildi ({_san(str(e))}) — klon yangidan olinadi")
             shutil.rmtree(CLONE, ignore_errors=True)
-            sh("git", "clone", "--depth", "1", url, str(CLONE))
+            sh("git", "clone", "--depth", "1", auth, str(CLONE))
+            sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)
 
     out = CLONE / "hisobotlar"
     out.mkdir(exist_ok=True)
@@ -74,7 +89,7 @@ def main():
         "-c", "user.name=abba-sheets-agent", "-c", "user.email=agent@abba.local",
         "commit", "-q", "-m", f"hisobot {date.today().isoformat()}",
     )
-    sh("git", "-C", str(CLONE), "push", "-q")
+    sh("git", "-C", str(CLONE), "push", "-q", auth, "HEAD")   # tokenli URL argument (config'da emas)
     log(f"{changed} hisobot push qilindi → {repo}")
     return 0
 
@@ -83,5 +98,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        log(f"XATO: {type(e).__name__}: {e}")
+        log(f"XATO: {type(e).__name__}: {_san(str(e))}")
         sys.exit(1)

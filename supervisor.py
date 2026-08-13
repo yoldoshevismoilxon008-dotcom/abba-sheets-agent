@@ -120,11 +120,12 @@ def run_pm_push():
             pass
 
 
-def _notify_owner_once_daily(msg):
-    """Egaga kuniga ATIGI BIR MARTA Telegram xabar (10 daqiqalik xato spam bo'lmasin)."""
+def _notify_owner_once_daily(msg, key="vault_sync"):
+    """Egaga kuniga ATIGI BIR MARTA Telegram xabar (10 daqiqalik xato spam bo'lmasin).
+    key — alohida mavzu markeri (vault_sync va push_chat mustaqil xabar bersin)."""
     from datetime import date
 
-    marker = DATA / "vault_sync_notify.txt"
+    marker = DATA / f"{key}_notify.txt"
     today = date.today().isoformat()
     try:
         if marker.exists() and marker.read_text(encoding="utf-8").strip() == today:
@@ -173,12 +174,23 @@ def run_vault_sync():
 
 
 def run_push_chat():
-    """Har 10 daqiqada chat arxivini REPORTS_REPO'ga push (B2.2). Best-effort —
-    xato bot/scheduler'ni yiqitmaydi (chat push_chat.main ichida ham himoyalangan)."""
+    """Har 10 daqiqada chat arxivini REPORTS_REPO'ga push (B2.2). Best-effort.
+    Jim doimiy yiqilish ko'rinmas qolmasin: NOTIFY_AFTER ketma-ket xatodan keyin egaga
+    (kuniga bir marta) xabar — chat arxivi Obsidian/bazaga bormayotganini bildiradi."""
     try:
         import push_chat
 
         push_chat.main()
+        s = push_chat.stat()
+        if s.get("fail_streak", 0) >= push_chat.NOTIFY_AFTER:
+            import send as sendmod
+
+            _notify_owner_once_daily(
+                f"⚠️ Chat push {s['fail_streak']} marta ketma-ket yiqildi (~1 soat) — "
+                "arxiv Obsidian/bazaga bormayapti:\n"
+                + sendmod.code(str(s.get("last_error") or "")[:300]),
+                key="push_chat",
+            )
     except Exception as e:
         log(f"XATO: chat push yiqildi — {type(e).__name__}: {e}")
 
