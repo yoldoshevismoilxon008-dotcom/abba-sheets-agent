@@ -172,6 +172,17 @@ def run_vault_sync():
         log(f"XATO: vault sinxron yiqildi — {type(e).__name__}: {e}")
 
 
+def run_push_chat():
+    """Har 10 daqiqada chat arxivini REPORTS_REPO'ga push (B2.2). Best-effort —
+    xato bot/scheduler'ni yiqitmaydi (chat push_chat.main ichida ham himoyalangan)."""
+    try:
+        import push_chat
+
+        push_chat.main()
+    except Exception as e:
+        log(f"XATO: chat push yiqildi — {type(e).__name__}: {e}")
+
+
 def main():
     log(f"boshlandi (DATA_DIR={DATA})")
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
@@ -216,8 +227,12 @@ def main():
         run_vault_sync, "interval", minutes=10,
         max_instances=1, coalesce=True,
     )
+    sched.add_job(
+        run_push_chat, "interval", minutes=10,
+        max_instances=1, coalesce=True,
+    )
     sched.start()
-    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + har 10daq vault sinxron (Asia/Tashkent)")
+    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + har 10daq vault sinxron + chat push (Asia/Tashkent)")
 
     import bot_listener
 

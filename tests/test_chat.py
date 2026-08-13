@@ -3,6 +3,7 @@
 pytest tests/test_chat.py  yoki  python3 tests/test_chat.py
 """
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -188,6 +189,46 @@ def test_chat_log_append_error_swallowed():
     chat_log.CHAT_DIR = Path("/proc/nope-xyz-b22/chat")        # yozib bo'lmaydi
     chat_log.append_qa("q", "a", now=datetime(2026, 8, 12, 1, 1))   # raise QILMAYDI
     chat_log.append_cmd("/x", now=datetime(2026, 8, 12, 1, 1))      # raise QILMAYDI
+
+
+# ---------------------------------------------------------------- push_chat (haqiqiy git)
+
+def _gitc(repo, msg):
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", msg], check=True)
+
+
+def test_push_chat_sync_and_nonff_retry():
+    """fix#2: DATA/chat → clone/chat sync; push non-ff bo'lsa pull --rebase + qayta urinish."""
+    import push_chat as pc
+    base = Path(tempfile.mkdtemp(prefix="pctest_"))
+    bare, seed = base / "reports.git", base / "seed"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True)
+    (seed / "README.md").write_text("init", encoding="utf-8")
+    _gitc(seed, "init")
+    subprocess.run(["git", "-C", str(seed), "push", "-q", "origin", "HEAD"], check=True)
+
+    pc.CLONE = base / "chat-repo"
+    subprocess.run(["git", "clone", "-q", str(bare), str(pc.CLONE)], check=True)
+    pc.CHAT_SRC = base / "chatsrc"
+    pc.CHAT_SRC.mkdir()
+    (pc.CHAT_SRC / "2026-08-12.md").write_text("# chat\nsavol", encoding="utf-8")
+
+    assert pc._sync_files() == 1                        # DATA/chat → clone/chat/
+    assert (pc.CLONE / "chat" / "2026-08-12.md").exists()
+    _gitc(pc.CLONE, "chat")
+
+    # non-ff: remote seed orqali oldinga ketadi (boshqa fayl — hisobotlar/)
+    (seed / "hisobotlar.md").write_text("rep", encoding="utf-8")
+    _gitc(seed, "rep")
+    subprocess.run(["git", "-C", str(seed), "push", "-q", "origin", "HEAD"], check=True)
+
+    assert pc._push_with_retry() is True                # push rad → pull --rebase → qayta → OK
+    subprocess.run(["git", "-C", str(seed), "pull", "-q", "--rebase"], check=True)
+    assert (seed / "chat" / "2026-08-12.md").exists()   # chat remote'ga yetdi
+    assert (seed / "hisobotlar.md").exists()            # hisobotlar ham saqlandi (rebase)
 
 
 # ---------------------------------------------------------------- skript rejimi
