@@ -349,7 +349,8 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
     stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
-             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "status_blank": [],
+             "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "moved_carry": [],
+             "unpaid_n": 0, "status_blank": [],
              "pm_missing": [], "pm_col_missing": False, "pm_col_tab": "",
              "nodate_pm": {}, "nodate_n": 0}   # muddatsiz undirilmaganlar (PM kesimida)
     # PM ustuni tabda UMUMAN yo'qmi (avgust holati) — joriy oy qatorlaridan
@@ -363,14 +364,21 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     # Carryover: joriy oy tabida allaqachon to'langan/yuritilayotgan loyihalar
     # o'tgan oy qoldig'i sifatida SO'RALMAYDI — faqat ega jamlamasida
     # "sheet'ni tuzatish kerak" bloki
-    prev_real, closed = undiruv.carryover_filter(prev_rows, cur_rows)
+    prev_real, closed, moved = undiruv.carryover_filter(prev_rows, cur_rows)
     stats["closed_carry"] = [
         {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
         for r in closed
     ]
+    # Joriy oy tabiga KO'CHIRILGAN qoldiqlar — PM'ga ikkinchi marta so'ralmaydi,
+    # lekin egaga ko'rinadi (jim yutilmasin).
+    stats["moved_carry"] = [
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
+        for r in moved
+    ]
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
             continue
+        stats["unpaid_n"] += 1
         summa = r["qoldiq"]  # so'raladigan qarz = D (ayirmasiz)
         # PM'ga ketadigan xabar TOZA qoladi (⚠️ chalg'itmasin) — status-bo'sh
         # belgisi faqat ega jamlamasi/PDF'da ko'rinadi
@@ -547,10 +555,16 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                  "(tayyor matnlar alohida keladi)")
     L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
     if stats["status_blank"]:
-        sb = stats["status_blank"]
-        det = ", ".join(sb[:6]) + (f" +{len(sb) - 6}" if len(sb) > 6 else "")
-        L.append(f"⚠️ Status bo'sh: {len(sb)} ta qator — D>0 bo'lgani uchun qarz "
-                 f"sanaldi; sheet'da holatni belgilang: {det}")
+        sb, tot = stats["status_blank"], stats.get("unpaid_n") or len(stats["status_blank"])
+        # Oy boshida BARCHA qatorda status bo'sh bo'ladi — bu anomaliya emas.
+        # Nomlar ro'yxati faqat qisman bo'sh bo'lgandagina ma'noli.
+        if len(sb) >= 0.8 * tot:
+            L.append(f"ℹ️ Status bo'sh: {len(sb)}/{tot} qator (deyarli hammasi) — "
+                     f"oy boshida normal, D>0 bo'lgani uchun qarz sanaldi")
+        else:
+            det = ", ".join(sb[:6]) + (f" +{len(sb) - 6}" if len(sb) > 6 else "")
+            L.append(f"⚠️ Status bo'sh: {len(sb)}/{tot} qator — D>0 bo'lgani uchun qarz "
+                     f"sanaldi; sheet'da holatni belgilang: {det}")
     if stats["closed_carry"]:
         cc = stats["closed_carry"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
@@ -558,6 +572,14 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan): "
                  f"{len(cc)} ta, {_fmt(sum(i['summa'] for i in cc))} — sheet'ni tuzatish "
                  f"kerak: {det}{more}")
+    if stats["moved_carry"]:
+        mc = stats["moved_carry"]
+        det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in mc[:8])
+        more = f" +{len(mc) - 8}" if len(mc) > 8 else ""
+        L.append(f"🔁 {prev_month.capitalize()}dan {cur_month} tabiga ko'chirilgan "
+                 f"(aynan bir xil summa): {len(mc)} ta, "
+                 f"{_fmt(sum(i['summa'] for i in mc))} — PM'ga IKKI marta "
+                 f"so'ralmadi: {det}{more}")
     # PM ustuni BOR, lekin ayrim kataklar bo'sh (ustun umuman yo'q bo'lsa
     # yuqorida qora banner chiqqan — bu yerda takrorlanmaydi)
     if stats["pm_missing"] and not stats["pm_col_missing"]:

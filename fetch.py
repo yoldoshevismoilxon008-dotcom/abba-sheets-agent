@@ -14,6 +14,7 @@ Auth/quota xatosida sheet skip qilinadi (log bilan), qolganlari davom etadi.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import unicodedata
@@ -94,6 +95,53 @@ def expand_month(s, today=None):
     return str(s).replace("<oy>", current_month_name(today))
 
 
+_YEAR_RE = re.compile(r"20\d{2}")
+
+
+def month_spellings(month):
+    """Oy nomining barcha imlo variantlari (sentyabr↔sentabr, oktyabr↔oktabr)."""
+    m = norm(month)
+    sp = {m}
+    for k, v in MONTH_ALIASES.items():
+        nk, nv = norm(k), norm(v)
+        if m in (nk, nv):
+            sp.update({nk, nv})
+    return sp
+
+
+def resolve_month_template(tpl, tab_titles, today=None):
+    """Config'dagi tab shabloni ("Undiruv <oy>") → REAL tab nomlari, eng mos
+    birinchi. "<oy>" bo'lmasa — aniq tenglik (eski xatti-harakat).
+
+    "<oy>" bo'lsa undiruv.rank_month_tabs bilan BIR XIL qoida:
+      • imlo aliasi: "sentyabr" shabloni "Undiruv sentabr(2026)" ni ham topadi,
+      • chegara: aynan teng / keyin " " / keyin "(" (startswith emas),
+      • YIL QOIDASI: joriy yil suffiksi ustun; boshqa yil arxivi (2025/2024)
+        hech qachon tanlanmaydi.
+
+    Sabab (01.09.2026): current_month_name → "sentyabr", real tab esa
+    "Undiruv sentabr(2026)" — aniq tenglik hech nimaga mos kelmagan va kunlik
+    diff Undiruv tabini BUTUNLAY yo'qotgan. Avgustda esa aynan tenglik 2025
+    arxivi "Undiruv avgust" ga tushib qolgan (jim xato)."""
+    tpl = str(tpl)
+    if "<oy>" not in tpl:
+        n = norm(tpl)
+        return [t for t in tab_titles if norm(t) == n]
+    yr = str((today or date.today()).year)
+    cands = [norm(tpl.replace("<oy>", sp)) for sp in month_spellings(current_month_name(today))]
+    scored = []
+    for t in tab_titles:
+        nt = norm(t)
+        if not any(nt == c or nt.startswith(c + " ") or nt.startswith(c + "(") for c in cands):
+            continue
+        years = _YEAR_RE.findall(nt)
+        if years and yr not in years:
+            continue                       # boshqa yil arxivi — hech qachon
+        scored.append((0 if yr in years else 1, nt, t))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [t for _, _, t in scored]
+
+
 def detect_watch_tabs(tab_titles, today=None):
     """Main + joriy oy tabini topadi. Bir xil nomli (bo'shliq bilan farqlanuvchi)
     oy tab'laridan tartibda OXIRGISI olinadi — u joriy yilniki.
@@ -128,6 +176,13 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
         else next((t for t in tab_titles if "ishlash muddati" in norm(t)), None)
     )
     by_name = {norm(expand_month(k, today)): v for k, v in key_cfg.items()}
+    # "<oy>" shabloni imlo/yil qoidasi bilan REAL tab nomiga bog'lanadi
+    # (aks holda "Undiruv sentyabr" kaliti "Undiruv sentabr(2026)" ga tushmaydi
+    #  va key_column 1-ustunga qaytib, diff soxta "yangi qator" beradi).
+    for k, v in key_cfg.items():
+        if "<oy>" in str(k):
+            for t in resolve_month_template(k, tab_titles, today)[:1]:
+                by_name[norm(t)] = v
     out = {}
     for t in tab_titles:
         n = norm(t)
@@ -226,8 +281,15 @@ def fetch_sheet(gc, s, today=None):
         if watch_titles in (None, "auto"):
             watch_titles = detect_watch_tabs(fetch_tabs, today)
         else:
-            wanted = [norm(expand_month(w, today)) for w in watch_titles]
-            watch_titles = [t for t in fetch_tabs if norm(t) in wanted]
+            resolved = []
+            for w in watch_titles:
+                hits = resolve_month_template(w, fetch_tabs, today)
+                if "<oy>" in str(w):
+                    hits = hits[:1]        # oy shabloni — faqat ENG MOS tab
+                for t in hits:
+                    if t not in resolved:
+                        resolved.append(t)
+            watch_titles = resolved
         meta = {
             "tabs": tabs,
             "excluded_tabs": excluded,

@@ -146,22 +146,34 @@ def _name_key(name):
 
 
 def carryover_filter(prev_rows, cur_rows):
-    """O'tgan oy unpaid qatorlaridan JORIY OY tabida allaqachon yopilganlarini
-    ajratadi (pul undirilgan, faqat o'tgan oy tabi tuzatilmagan — PM'ga talab
-    KETMAYDI). Yopilgan deb hisoblanadi: joriy oyda shu nomli loyiha bor VA
-    (holati To'lov qilindi/Ketdi YOKI Undirildi > 0).
-    Qaytadi: (haqiqiy_carryover, joriy_oyda_yopilganlar)."""
+    """O'tgan oy unpaid qatorlarini uchga ajratadi.
+    Qaytadi: (haqiqiy_carryover, yopilganlar, ko'chirilganlar).
+
+      • yopilgan  — joriy oyda shu loyiha bor VA holati To'lov qilindi/Ketdi
+        YOKI Undirildi > 0 (pul olingan, faqat o'tgan oy tabi tuzatilmagan);
+      • ko'chirilgan — joriy oyda shu loyiha bor, HALI TO'LANMAGAN va qoldiq
+        AYNAN bir xil (01.09.2026 tasdiqlangan konvensiya: ega yangi oy tabini
+        ochganda to'lanmagan qoldiqni ko'chirib qo'yadi). Bunda o'tgan oy qatori
+        SO'RALMAYDI — aks holda PM bitta qarz uchun ikki eslatma oladi va
+        jamlama ikki karra sanaladi. Ega jamlamasida alohida blok bo'lib
+        ko'rinadi (jim yutilmaydi);
+      • haqiqiy — qolgani (masalan Stirka: avgustda $361 qoldiq, sentabrda
+        $1 350 yangi oylik hisob — summa boshqa, ikkalasi ham real qarz).
+
+    Summa taqqoslash round() bilan (sent farqi ahamiyatsiz)."""
     cur_by_name = {_name_key(r["loyiha"]): r for r in cur_rows}
-    real, closed = [], []
+    real, closed, moved = [], [], []
     for r in prev_rows:
         if not is_unpaid(r):
             continue
         c = cur_by_name.get(_name_key(r["loyiha"]))
         if c and (c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0):
             closed.append(r)
+        elif c and is_unpaid(c) and round(c["qoldiq"]) == round(r["qoldiq"]):
+            moved.append(r)
         else:
             real.append(r)
-    return real, closed
+    return real, closed, moved
 
 
 def parse_rows(vals, today):

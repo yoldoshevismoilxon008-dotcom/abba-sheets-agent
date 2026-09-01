@@ -256,6 +256,95 @@ def test_lose_negative_value():
     assert not any("yozilmagan" in w for w in r["warnings"])  # «bo'sh» warn'iga tushmasin
 
 
+# ------------------------------------------ 01.09.2026: sentabr o'tishi
+
+import fetch as fmod  # noqa: E402
+
+SEP = date(2026, 9, 2)
+SEP_TABS = ["Undiruv avgust", "Undiruv sentabr", "Undiruv sentabr(2026)",
+            "Undiruv avgust(2026)", "Smm main", "Pm proektlar After"]
+
+
+def test_tpl_alias_and_year():
+    # current_month_name → "sentyabr", real tab "Undiruv sentabr(2026)"
+    assert fmod.resolve_month_template("Undiruv <oy>", SEP_TABS, SEP)[0] == "Undiruv sentabr(2026)"
+
+
+def test_tpl_august_no_longer_picks_2025_archive():
+    # REGRESSIYA: avval aniq tenglik 2025 arxivi "Undiruv avgust" ni olardi
+    aug = date(2026, 8, 15)
+    assert fmod.resolve_month_template("Undiruv <oy>", SEP_TABS, aug)[0] == "Undiruv avgust(2026)"
+
+
+def test_tpl_other_year_never():
+    assert fmod.resolve_month_template("Undiruv <oy>", ["Undiruv sentabr(2025)"], SEP) == []
+
+
+def test_tpl_suffixless_fallback():
+    assert fmod.resolve_month_template("Undiruv <oy>", ["Undiruv sentabr"], SEP) == ["Undiruv sentabr"]
+
+
+def test_tpl_no_placeholder_exact():
+    assert fmod.resolve_month_template("Smm main", SEP_TABS, SEP) == ["Smm main"]
+    assert fmod.resolve_month_template("Yo'q tab", SEP_TABS, SEP) == []
+
+
+def test_key_columns_bind_to_real_month_tab():
+    out = fmod.resolve_key_columns(SEP_TABS, {"Undiruv <oy>": "Nomi"}, SEP)
+    assert out == {fmod.tab_range("Undiruv sentabr(2026)"): "Nomi"}
+
+
+# ------------------------------------------ carryover: ko'chirilgan qoldiq
+
+def test_carryover_moved_same_amount():
+    prev = [_row("Baaztruck", qoldiq=433)]
+    cur = [_row("Baaztruck", qoldiq=433)]
+    real, closed, moved = u.carryover_filter(prev, cur)
+    assert [r["loyiha"] for r in moved] == ["Baaztruck"]
+    assert real == [] and closed == []
+
+
+def test_carryover_real_when_amount_differs():
+    # Stirka: avgust $361 qoldiq, sentabr $1350 yangi hisob — IKKALASI ham qarz
+    prev = [_row("Stirka", qoldiq=361)]
+    cur = [_row("Stirka", qoldiq=1350)]
+    real, closed, moved = u.carryover_filter(prev, cur)
+    assert [r["loyiha"] for r in real] == ["Stirka"]
+    assert moved == []
+
+
+def test_carryover_closed_still_wins():
+    prev = [_row("X", qoldiq=500)]
+    cur = [_row("X", qoldiq=500, holat="paid")]
+    real, closed, moved = u.carryover_filter(prev, cur)
+    assert [r["loyiha"] for r in closed] == ["X"] and moved == [] and real == []
+
+
+def test_carryover_absent_in_current_is_real():
+    real, closed, moved = u.carryover_filter([_row("Y", qoldiq=100)], [])
+    assert [r["loyiha"] for r in real] == ["Y"] and moved == []
+
+
+def test_build_push_skips_moved_row():
+    d = date(2026, 9, 2)
+    cur = [_row("Baaztruck", qoldiq=433, muddat=date(2026, 9, 5))]
+    prev = [_row("Baaztruck", qoldiq=433, muddat=date(2026, 8, 5))]
+    per_pm, stats = pp.build_push(d, cur, prev, "avgust")
+    lines = per_pm.get("Zubair", [])
+    assert len(lines) == 1 and "qoldig'i" not in lines[0]
+    assert [i["loyiha"] for i in stats["moved_carry"]] == ["Baaztruck"]
+    assert stats["overdue_n"] == 0
+
+
+def test_build_push_keeps_real_carryover():
+    d = date(2026, 9, 2)
+    cur = [_row("Stirka", qoldiq=1350, muddat=date(2026, 9, 21))]
+    prev = [_row("Stirka", qoldiq=361, muddat=date(2026, 8, 21))]
+    per_pm, stats = pp.build_push(d, cur, prev, "avgust")
+    assert any("avgust qoldig'i" in l for l in per_pm["Zubair"])
+    assert stats["moved_carry"] == []
+
+
 # ---------------------------------------------------------------- skript rejimi
 
 def _run_all():
