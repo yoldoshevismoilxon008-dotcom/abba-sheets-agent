@@ -5,7 +5,69 @@
 > `DATA_DIR=/data` (Railway volume). Kod: private GitHub repo, **push = deploy**.
 > Hisobotlar: server har kunlik pipeline'dan keyin ikkinchi private repo'ga
 > `hisobotlar/*.md` push qiladi; Mac'dagi soatlik launchd job uni vault'ga tortadi.
-> Mac launchd plist'lar joyida qoladi (o'chirilgan holda) — 5 daqiqalik rollback.
+> Mac'da faqat yordamchi joblar qoladi — pastdagi «Joriy holat» jadvaliga qarang.
+> Plist fayllari o'chirilmaydi, shuning uchun rollback bir buyruq.
+
+## Joriy holat — 07.09.2026 (cutover BAJARILGAN)
+
+Bot va 09:00 kunlik pipeline **Railway'da**; Mac'da faqat vault sinxronizatsiyasi qoldi.
+
+| Job / bosqich | Qayerda | Jadval | Izoh |
+|---|---|---|---|
+| Kunlik pipeline (`run.sh`) | **Railway** | 09:00 (Asia/Tashkent) | supervisor APScheduler |
+| Telegram bot (listener) | **Railway** | doimiy | supervisor asosiy thread |
+| PM undiruv push (`pm_push`) | **Railway** | 09:30 | faqat supervisor'da — `run.sh` uni chaqirmaydi, Mac'da bu bosqich umuman mavjud emas |
+| Hisobotlar repo'ga push | **Railway** | pipeline'dan keyin | `push_reports.py`; `run.sh` da chaqiruv yo'q, shuning uchun `abba-hisobotlar` dagi har commit — Railway tirikligining isboti |
+| `com.abba.reports-pull` | Mac | har 10 daq | hisobotlar repo → vault rsync |
+| `com.abba.brain-push` | Mac | har 10 daq | vault → GitHub (`claude-brain`) |
+| `com.abba.tg-kunlik` | Mac | 08:30 | **boshqa loyiha** (`~/.abba-tg-audit`), bu repoga aloqasi yo'q |
+| `com.abba.sheets-agent` | ❌ disabled | — | 07.09.2026 da o'chirildi |
+| `com.abba.sheets-bot` | ❌ disabled | — | 07.09.2026 da o'chirildi |
+
+### Nega o'chirildi (07.09.2026)
+
+Cutover'dan keyin Mac joblari **yoqilgan qolib ketgan** edi — ikki nusxa parallel ishladi:
+
+- **Bot:** bitta Telegram tokenida ikkita poller. `getUpdates` **409 conflict**
+  bugungi logda **771 marta**, bot Mac'da shu holatda **7 kun 18 soat** ishlagan —
+  buyruqlar ikki instansiya orasida tasodifiy taqsimlangan.
+- **Pipeline:** ikkala tomon ham o'z `claude -p` analizini qilib, egaga **ikkita
+  har xil hisobot** yuborgan. (07.09 da Mac nusxasi matn rejimida ketdi — o'sha
+  kuni PDF render yiqilgan.)
+
+### Tekshiruv — farq darhol ko'rinsin
+
+```bash
+launchctl list | grep abba
+```
+Kutilgan chiqish — aynan **uchta** qator:
+```
+-	0	com.abba.reports-pull
+-	0	com.abba.tg-kunlik
+-	0	com.abba.brain-push
+```
+Agar ro'yxatda `com.abba.sheets-agent` yoki `com.abba.sheets-bot` **paydo bo'lsa**,
+ikki nusxa yana ishlayapti — pastdagi buyruq bilan o'chiring.
+`disable` holatini alohida tekshirish: `launchctl print-disabled gui/$(id -u) | grep abba`
+
+### O'chirish va rollback
+
+```bash
+# O'chirish (07.09.2026 da aynan shunday qilindi):
+launchctl bootout gui/$(id -u)/com.abba.sheets-bot
+launchctl disable gui/$(id -u)/com.abba.sheets-bot
+launchctl bootout gui/$(id -u)/com.abba.sheets-agent
+launchctl disable gui/$(id -u)/com.abba.sheets-agent
+
+# Rollback (Railway to'xtasa) — `enable` MAJBURIY:
+# disabled holatdagi jobni `bootstrap` yuklamaydi, jimgina e'tiborsiz qoldiradi.
+launchctl enable    gui/$(id -u)/com.abba.sheets-bot
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.abba.sheets-bot.plist
+launchctl enable    gui/$(id -u)/com.abba.sheets-agent
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.abba.sheets-agent.plist
+```
+Rollback'dan oldin Railway tomonni to'xtating (bot tokenini olib tashlab redeploy
+yoki deploy'ni o'chirish) — aks holda yana 409 boshlanadi.
 
 ## Nima tayyor (kod tomonida)
 
@@ -83,7 +145,9 @@ Ikkita listener bitta botda ishlay olmaydi (getUpdates 409). Tartib:
 ```bash
 # 1. Mac listener + kunlik jobni o'chirish (plist fayllar joyida qoladi):
 launchctl bootout gui/$(id -u)/com.abba.sheets-bot
+launchctl disable gui/$(id -u)/com.abba.sheets-bot
 launchctl bootout gui/$(id -u)/com.abba.sheets-agent
+launchctl disable gui/$(id -u)/com.abba.sheets-agent
 
 # 2. Railway'da deploy yashil bo'lishini kutish (Deployments → Active).
 #    Log'da ko'rinishi kerak: "[supervisor] scheduler tayyor" va "listener boshlandi".
@@ -98,9 +162,13 @@ cd ~/abba-sheets-agent && ./deploy/railway/install.sh git@github.com:SIZNING_USE
 ```bash
 # Railway'da: service → Settings → Remove deploy (yoki Variables'da bot tokenni
 # vaqtincha o'chirib redeploy — listener to'xtaydi). Keyin Mac'da:
+launchctl enable    gui/$(id -u)/com.abba.sheets-bot
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.abba.sheets-bot.plist
+launchctl enable    gui/$(id -u)/com.abba.sheets-agent
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.abba.sheets-agent.plist
 ```
+> `enable` siz `bootstrap` disabled job'ni yuklamaydi (07.09.2026 dan beri
+> ikkalasi ham `disable` holatida) — shuning uchun ikkala qator ham kerak.
 Server volume'dagi yangi snapshotlar Mac'da bo'lmaydi (hisobotlar repo orqali
 matni bor) — qaytgach birinchi kun diff bo'sh tarixdan boshlanishi mumkin, kritik emas.
 

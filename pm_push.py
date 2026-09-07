@@ -498,6 +498,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
 
     sent, failed = {}, {}
     fallback_reason = ""
+    userbot_note = ""      # kontakt yo'q bo'lsa ham userbot holati tekshiriladi
     if msgs and not dry_run:
         try:
             import userbot_sender
@@ -516,6 +517,21 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         for slot, _c, _t in msgs:
             log(f"[dry-run] {by_slot[slot][0]} → {_c}:\n{_t}\n")
             sent[slot] = slot_n[slot]
+    elif no_contact:
+        # Yuboriladigan xabar yo'q, chunki BIRORTA kontakt sozlanmagan.
+        # Ilgari bu holatda userbot umuman chaqirilmasdi va uning nosozligi
+        # "kontakt yo'q" ostida ko'rinmay qolardi — endi holat baribir
+        # tekshiriladi (available() tarmoqqa chiqmaydi, arzon).
+        try:
+            import userbot_sender
+
+            ok_u, why_u = userbot_sender.available()
+            if not ok_u:
+                userbot_note = why_u
+        except Exception as e:
+            userbot_note = f"{type(e).__name__}: {str(e)[:120]}"
+        if userbot_note:
+            log(f"userbot ham tayyor emas: {userbot_note}")
 
     # Egaga jamlama — boshida bannerlar: 🧊 SNAPSHOT + PM-ustun guard + reconcile
     L = []
@@ -550,6 +566,15 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                      f"{no_contact[slot]} eslatma kutmoqda")
         else:
             L.append(f"• {name}: bugun eslatma yo'q")
+    if no_contact:
+        # Kontaktsizlik ALOHIDA va ko'rinadigan holat: PM qatorlari orasida
+        # yo'qolib ketmasin — push haqiqatda ketmaganini bir qatorda aytadi.
+        L.append(f"⚠️ {len(no_contact)} ta PM uchun kontakt sozlanmagan — "
+                 f"push YUBORILMADI ({sum(no_contact.values())} eslatma kutmoqda). "
+                 f"Sozlash: /pm_set <slot> @username")
+    if userbot_note:
+        L.append(f"⚠️ Userbot ham tayyor emas: {userbot_note} — kontakt "
+                 "sozlangach ham yubora olmaydi")
     if fallback_reason:
         L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
                  "(tayyor matnlar alohida keladi)")
