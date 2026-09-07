@@ -11,8 +11,11 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 
@@ -604,48 +607,149 @@ def render_qa(data, out_pdf, keep_html=False, theme_name=None):
         return _render_with(data, out_pdf, theme, keep_html, builder=build_qa_html)
 
 
-def html_to_pdf(html_path, pdf_path, wait_s=60):
+MIN_PDF_BYTES = 5000          # bundan kichik chiqish = yaroqsiz PDF
+CHROME_WAIT_S = 120           # CHROME_PDF_TIMEOUT env bilan o'zgartiriladi
+
+# Chrome headless'da har doim chiqadigan, yiqilishga aloqasi yo'q shovqin —
+# xato matnida ko'rinmasin, aks holda asl sabab ko'milib ketadi.
+_CHROME_NOISE = (
+    "CVDisplayLinkCreateWithCGDisplay",
+    "Fontconfig",
+    "DEPRECATED_ENDPOINT",
+    "Trying to load the allocator",
+    "GetVSyncParametersIfAvailable",
+)
+
+
+def _chrome_stderr_tail(err_path, limit=3):
+    """Chrome stderr'dan ma'noli oxirgi qatorlar (shovqinsiz) — xato matniga qo'shish uchun."""
+    try:
+        raw = Path(err_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    useful = [ln for ln in lines if not any(n in ln for n in _CHROME_NOISE)]
+    tail = (useful or lines)[-limit:]
+    return "".join(f"\n  chrome: {ln[:300]}" for ln in tail)
+
+
+def html_to_pdf(html_path, pdf_path, wait_s=None):
     """Chrome ba'zan PDF yozib bo'lgach ham chiqmaydi (macOS'da kuzatildi) —
     shuning uchun jarayon emas, FAYL kuzatiladi: hajm barqarorlashgach Chrome
-    o'ldiriladi."""
+    o'ldiriladi.
+
+    Diagnostika: Chrome stderr DEVNULL ga EMAS, faylga yoziladi va yiqilganda
+    xato matniga qo'shiladi (to'liq nusxa PDF yonida .chrome-stderr.log bo'lib
+    qoladi). Aks holda yiqilish o'zi haqidagi yagona dalilni o'chirib yuboradi.
+
+    Profil har chaqiruvda alohida (mktemp): pipeline va bot bir vaqtda render
+    qilsa bir-birining profilini egallamaydi, yetim Singleton* qolmaydi.
+    """
     import time as _time
 
     chrome = find_chrome()
+    if wait_s is None:
+        try:
+            wait_s = float(os.environ.get("CHROME_PDF_TIMEOUT") or CHROME_WAIT_S)
+        except ValueError:
+            wait_s = CHROME_WAIT_S
     Path(pdf_path).unlink(missing_ok=True)
+
+    profile = tempfile.mkdtemp(prefix="chrome-pdf-")
+    err_fd, err_path = tempfile.mkstemp(prefix="chrome-stderr-", suffix=".log")
     cmd = [
         chrome, "--headless=new", "--disable-gpu", "--no-first-run",
-        "--user-data-dir=/tmp/chrome-pdf", "--no-pdf-header-footer",
+        f"--user-data-dir={profile}", "--no-pdf-header-footer",
     ]
     # Server (Linux) muhitida kerak bo'lishi mumkin: CHROME_FLAGS="--no-sandbox"
     cmd += os.environ.get("CHROME_FLAGS", "").split()
     cmd += [f"--print-to-pdf={pdf_path}", f"file://{html_path}"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline, last = _time.time() + wait_s, -1
+
+    timed_out = False
     try:
-        while _time.time() < deadline:
-            if proc.poll() is not None:
-                break
-            p = Path(pdf_path)
-            if p.exists():
-                size = p.stat().st_size
-                if size > 5000 and size == last:
-                    break  # hajm barqarorlashdi — PDF tayyor
-                last = size
-            _time.sleep(0.5)
-    finally:
-        if proc.poll() is None:
-            proc.terminate()
+        with os.fdopen(err_fd, "wb") as err_f:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err_f)
+            deadline, last = _time.time() + wait_s, -1
             try:
-                proc.wait(5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-    if not (Path(pdf_path).exists() and Path(pdf_path).stat().st_size > 5000):
-        raise RuntimeError("Chrome PDF yaratmadi (fayl chiqmadi yoki juda kichik)")
+                while True:
+                    if proc.poll() is not None:
+                        break
+                    if _time.time() >= deadline:
+                        timed_out = True
+                        break
+                    p = Path(pdf_path)
+                    if p.exists():
+                        size = p.stat().st_size
+                        if size > MIN_PDF_BYTES and size == last:
+                            break  # hajm barqarorlashdi — PDF tayyor
+                        last = size
+                    _time.sleep(0.5)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+
+        out = Path(pdf_path)
+        size = out.stat().st_size if out.exists() else 0
+        if size > MIN_PDF_BYTES:
+            return
+
+        # --- yiqildi: sababni ANIQ ayt (timeout / fayl yo'q / kichik fayl) ---
+        rc = proc.returncode
+        if timed_out:
+            why = f"{wait_s:.0f}s ichida PDF yozilmadi (timeout, chrome hali ishlayotgan edi)"
+        elif not out.exists():
+            why = f"Chrome fayl yaratmadi (exit={rc})"
+        else:
+            why = f"PDF juda kichik: {size} bayt < {MIN_PDF_BYTES} (exit={rc})"
+        kept = Path(str(pdf_path).rsplit(".", 1)[0] + ".chrome-stderr.log")
+        try:
+            shutil.copyfile(err_path, kept)
+            why += f"; to'liq chrome logi: {kept}"
+        except OSError:
+            pass
+        raise RuntimeError(f"Chrome PDF yaratmadi — {why}{_chrome_stderr_tail(err_path)}")
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+        try:
+            os.unlink(err_path)
+        except OSError:
+            pass
+
+
+def validate_report_data(data):
+    """report.json strukturasini render'dan OLDIN tekshiradi.
+
+    Busiz nomos input ichkarida `AttributeError: 'NoneType' has no attribute
+    'get'` bo'lib chiqadi (sabab logdan ko'rinmaydi), bo'sh dict esa jimgina
+    bo'sh PDF yasaydi — bu ikkalasi ham hisobotni bildirmasdan buzadi.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"report ma'lumoti dict bo'lishi kerak, keldi: {type(data).__name__}"
+        )
+    if not data:
+        raise ValueError(
+            "report ma'lumoti bo'sh — analyze.py report.json yozmagan bo'lishi mumkin"
+        )
+    for key, typ in (("pms", list), ("trend", list), ("insights", list),
+                     ("new_criticals", list), ("totals", dict), ("undiruv", dict)):
+        if key in data and data[key] is not None and not isinstance(data[key], typ):
+            raise ValueError(
+                f"report['{key}'] {typ.__name__} bo'lishi kerak, "
+                f"keldi: {type(data[key]).__name__}"
+            )
+    return data
 
 
 def render(data, out_pdf, keep_html=False, theme_name=None, logo_uri=None):
     """theme_name berilmasa config'dagi active_theme. Yiqilsa DEFAULT bilan
     qayta uriniladi (hisobot hech qachon theme sabab yo'qolmasin)."""
+    validate_report_data(data)
     theme, resolved = load_theme(theme_name)
     try:
         return _render_with(data, out_pdf, theme, keep_html, logo_uri)
@@ -692,6 +796,9 @@ def main():
         render(data, out, keep_html=args.keep_html, theme_name=args.theme)
     except Exception as e:
         log(f"XATO: {type(e).__name__}: {e}")
+        # To'liq traceback logga — busiz yiqilish sababi keyin tiklanmaydi
+        # (run.sh chiqishni data/logs/$TODAY.log ga yozadi).
+        log("traceback:\n" + traceback.format_exc().rstrip())
         return 1
     return 0
 
