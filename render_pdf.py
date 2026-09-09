@@ -336,6 +336,13 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
             items.append(i)
         pm["items"] = items
         pms.append(pm)
+    # Chaqiruvchi (pm_push.build_push) o'z hisobini bergan bo'lsa — SHU ishlatiladi.
+    # Busiz bitta PDF ichida ikki mustaqil hisob bo'lardi: badge bu yerdagi
+    # kartochkalardan, "Push jamlamasi" bloki esa build_push'dan — va o'tgan oy
+    # carryover'i sabab ular zid raqam ko'rsatardi.
+    if data.get("overdue_n") is not None:
+        overdue_n = data["overdue_n"]
+        overdue_sum = data.get("overdue_sum", overdue_sum)
     d = dict(data, pms=pms)
     ao = data.get("aktiv_obuna") or {}
     if ao.get("n"):
@@ -367,6 +374,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         reconcile_warn=reconcile_warn,
         snapshot_banner=snapshot_banner,
         pm_col_warn=data.get("pm_col_warn", ""),
+        # (badge raqami pastda: chaqiruvchi bergan hisob ustun)
         oy_title=str(data.get("oy", "?")).capitalize(),
         date_human=human_date(datetime.now().strftime("%Y-%m-%d")) + datetime.now().strftime(" %H:%M"),
         overdue_n=overdue_n,

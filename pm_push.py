@@ -84,14 +84,19 @@ def _send_doc_owner(path, caption, filename):
     return True
 
 
-def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source=None):
+def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source=None,
+              overdue=None):
     """Egaga dizaynli undiruv PDF (render_pdf pipeline, abba logo, theme).
     data_source ∈ {'live','snapshot'} — 'snapshot' bo'lsa PDF boshiga 🧊 banner.
+    overdue=(n, sum) — build_push hisobi; berilsa PDF badge SHU raqamni oladi va
+    o'zi qayta hisoblamaydi (bitta hujjatda bitta manba bo'lsin).
     Muvaffaqiyatda True; yiqilsa False — chaqiruvchi matn fallback yuboradi."""
     try:
         import render_pdf
 
         d = undiruv.report_data(rows, tab, today, source=source)
+        if overdue is not None:
+            d["overdue_n"], d["overdue_sum"] = overdue
         # data_source berilmasa — display source satridan chiqaramiz
         d["data_source"] = data_source or ("snapshot" if str(source).startswith("snapshot") else "live")
         # PM ustuni tabda umuman yo'q bo'lsa — PDF boshiga qora banner
@@ -348,7 +353,11 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     muddat o'tgan yoki ≤PUSH_DUE_DAYS kun. Sanasizlar PM'ga ketmaydi (stats'da).
     Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
     per_pm = {}
-    stats = {"overdue_sum": 0, "overdue_n": 0, "pauza": [], "bad_sum": 0, "no_date": 0,
+    # overdue_* = JORIY oy tabi (PDF badge/kartochkalari bilan bir xil to'plam).
+    # O'tgan oydan ko'chgan qarzlar ALOHIDA sanaladi (overdue_carry_*) — ilgari
+    # ikkalasi bitta hisobga qo'shilib, PDF ichida zid raqam chiqarardi.
+    stats = {"overdue_sum": 0, "overdue_n": 0, "overdue_carry_n": 0, "overdue_carry_sum": 0,
+             "pauza": [], "bad_sum": 0, "no_date": 0,
              "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "moved_carry": [],
              "unpaid_n": 0, "status_blank": [],
              "pm_missing": [], "pm_col_missing": False, "pm_col_tab": "",
@@ -403,8 +412,12 @@ def build_push(today, cur_rows, prev_rows, prev_month):
             continue
         if days_left < 0:
             line = f"🔴 MUDDAT O'TDI ({-days_left} kun): {name} — qoldiq {_fmt(summa)}"
-            stats["overdue_sum"] += summa
-            stats["overdue_n"] += 1
+            if carry:                      # o'tgan oy qoldig'i — alohida hisob
+                stats["overdue_carry_sum"] += summa
+                stats["overdue_carry_n"] += 1
+            else:
+                stats["overdue_sum"] += summa
+                stats["overdue_n"] += 1
         else:
             qoldi = "bugun oxirgi kun" if days_left == 0 else f"{days_left} kun qoldi"
             line = (f"⏳ Undiruv: {name} — qoldiq {_fmt(summa)}, "
@@ -578,7 +591,13 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     if fallback_reason:
         L.append(f"⚠️ Userbot: {fallback_reason} — bugun QO'LDA yuboring "
                  "(tayyor matnlar alohida keladi)")
-    L.append(f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}")
+    # Joriy oy raqami PDF badge/kartochkalari bilan AYNAN bir xil to'plamdan;
+    # o'tgan oy qoldig'i alohida qo'shimcha bo'lib ko'rinadi (yig'ib yuborilmaydi).
+    _od = f"⏰ Muddat o'tganlar: {stats['overdue_n']} ta, jami {_fmt(stats['overdue_sum'])}"
+    if stats.get("overdue_carry_n"):
+        _od += (f" · + {prev_month} qoldig'i: {stats['overdue_carry_n']} ta, "
+                f"{_fmt(stats['overdue_carry_sum'])}")
+    L.append(_od)
     if stats["status_blank"]:
         sb, tot = stats["status_blank"], stats.get("unpaid_n") or len(stats["status_blank"])
         # Oy boshida BARCHA qatorda status bo'sh bo'ladi — bu anomaliya emas.
@@ -634,7 +653,8 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     push_lines = [x for x in L if not x.startswith("📤 Undiruv push jamlamasi")]
     pdf_src = "jonli holat" if data_source == "live" else f"snapshot {snap_day}"
     if not owner_pdf(cur_rows, tab, today, pdf_src, push_lines=push_lines,
-                     title=dd_title, data_source=data_source):
+                     title=dd_title, data_source=data_source,
+                     overdue=(stats["overdue_n"], stats["overdue_sum"])):
         send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
     # Userbot butunlay ishlamagan kun: egaga 4 TAYYOR matn — qo'lda yuborish uchun
     if fallback_reason and not dry_run:
