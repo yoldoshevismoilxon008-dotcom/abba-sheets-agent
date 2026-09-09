@@ -473,6 +473,20 @@ def snapshot_fresh(day):
     return age_h <= SNAP_FRESH_HOURS
 
 
+PROJECT_LOOKUP_RE = re.compile(r"\b(loyiha|proekt|proyekt|obyekt)\w*")
+
+
+def is_project_lookup(q):
+    """Savol LOYIHA nomi bo'yicha qidiruvmi («X loyihasi bormi?», «proekt qayerda?»).
+
+    Bunday savolda bitta sheetga qarab «topilmadi» deyish noto'g'ri: loyiha
+    undiruvda (SMM proektlar) bo'lib, PM KPI tabida bo'lmasligi mumkin — aynan
+    shu holat Livardi bilan yuz bergan (undiruv sentabr(2026) da bor, PM KPI
+    sentabr tabida yo'q). Shuning uchun bunday savolda hamma manba qaraladi.
+    """
+    return bool(PROJECT_LOOKUP_RE.search(_q_norm(q)))
+
+
 def sheets_for_question(cfg, q, extra_names=None):
     qn = _q_norm(q).replace("'", "")
     sel = []
@@ -485,6 +499,13 @@ def sheets_for_question(cfg, q, extra_names=None):
         # (masalan "undiruv qancha?" → SMM proektlar)
         if any(a and _q_norm(str(a)) in qn for a in (s.get("aliases") or [])):
             sel.append(s)
+    # Loyiha qidiruvi: PM nomi aytilgani sheet tanlovini TORAYTIRMASIN — loyiha
+    # boshqa manbada (undiruv/SMM) bo'lishi mumkin. Hammasi qaralmaguncha
+    # "topilmadi" xulosasi chiqmaydi.
+    if is_project_lookup(q):
+        for s in cfg:
+            if s not in sel and not s.get("qa_only"):
+                sel.append(s)
     if extra_names:
         for s in cfg:
             if s.get("name") in extra_names and s not in sel:
@@ -534,6 +555,46 @@ def tab_month_split(t):
 def tab_month(t):
     """Tab nomidagi oy so'zi (kanonik), yo'q bo'lsa None."""
     return tab_month_split(t)[0]
+
+
+def project_lookup_tabs(tabs, q):
+    """Loyiha qidiruvida MAJBURIY qaraladigan undiruv tab'lari: joriy + oldingi oy.
+
+    Carryover loyiha o'tgan oy tabida qolgan bo'lishi mumkin (Livardi avgustdan
+    ko'chgan), joriy oy tabida esa hali paydo bo'lmagan bo'lishi ham mumkin —
+    shuning uchun ikkalasi ham qaraladi.
+
+    Chaqiruvchida watch-tab fallback'idan KEYIN qo'shiladi: aks holda bu ro'yxat
+    tabs_for_question'ni "bo'sh emas" qilib, sheet'ning asosiy tab'larini
+    (Smm main, Pm proektlar After) tanlovdan chiqarib yuborardi.
+    """
+    if not is_project_lookup(q):
+        return []
+    cur_month = fetchmod.current_month_name()
+    prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
+    out = []
+    for prefix, pairs in month_tab_groups(tabs).items():
+        if "undiruv" not in prefix:
+            continue
+        for m in (cur_month, prev_month):
+            t = _month_tab_variant(pairs, m)
+            if t and t not in out:
+                out.append(t)
+    return out
+
+
+def _month_tab_variant(pairs, month):
+    """Bir oyning bir nechta varianti bo'lsa ("Undiruv sentabr" va
+    "Undiruv sentabr(2026)") — joriy yil suffiksli nusxa ustun; u yo'q bo'lsa
+    ro'yxatdagi so'nggisi. undiruv.find_tab bilan bir xil afzallik."""
+    cands = [t for m, t in pairs if m == month]
+    if not cands:
+        return None
+    yr = str(date.today().year)
+    for t in cands:
+        if yr in t:
+            return t
+    return cands[-1]
 
 
 def month_tab_groups(tabs):
@@ -715,6 +776,15 @@ def select_from_snapshot(snap, q, extra_tabs):
             t for t in (fetchmod.tab_of_range(r) for r in snap.get("watch_ranges", []))
             if t in by_tab
         ]
+    # Loyiha qidiruvi: undiruv (joriy + oldingi oy) watch fallback'idan KEYIN
+    # qo'shiladi — asosiy tab'lar tanlovdan chiqib ketmasin.
+    extra_proj = [t for t in project_lookup_tabs(tabs, q) if t not in wanted]
+    if extra_proj:
+        wanted = wanted + extra_proj
+        notes.append(
+            f"Loyiha qidiruvi: undiruv tab(lar)i ham qo'shildi ({', '.join(extra_proj)}) — "
+            "loyiha bir manbada bo'lib boshqasida bo'lmasligi mumkin."
+        )
     excluded = set(snap.get("excluded_tabs") or [])
     sel_tabs = [t for t in wanted if t in by_tab]
     live_needed = [t for t in wanted if t in excluded]
@@ -786,6 +856,14 @@ def build_data(q, extra_sel=None, force_live=False):
                 wanted = {fetchmod.norm(fetchmod.expand_month(w)) for w in wt}
                 sel_tabs = [t for t in tabs if fetchmod.norm(t) in wanted]
             sel_tabs = sel_tabs or fetchmod.detect_watch_tabs(tabs) or tabs[:1]
+        # Loyiha qidiruvi — snapshot yo'lidagi bilan bir xil qoida (fallback'dan keyin)
+        extra_proj = [t for t in project_lookup_tabs(tabs, q) if t not in sel_tabs]
+        if extra_proj:
+            sel_tabs = sel_tabs + extra_proj
+            notes.append(
+                f"Loyiha qidiruvi: undiruv tab(lar)i ham qo'shildi ({', '.join(extra_proj)}) — "
+                "loyiha bir manbada bo'lib boshqasida bo'lmasligi mumkin."
+            )
         ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(t) for t in sel_tabs], name)
         return tabs, sel_tabs, ranges, notes
 

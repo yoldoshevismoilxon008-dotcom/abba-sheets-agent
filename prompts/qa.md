@@ -65,6 +65,18 @@ QOIDALAR:
   so'rang" deb aniq taklif qil (ro'yxatda umuman mos tab bo'lmasa, ro'yxatning
   tegishli qismini ko'rsatib qaysi biri kerakligini so'ra). "[maxfiy]"
   belgili tab faqat aniq so'ralganda jonli o'qiladi.
+- LOYIHA nomi bo'yicha savol ("X loyihasi bormi?", "X qayerda?"): bitta loyiha
+  bir manbada bo'lib boshqasida BO'LMASLIGI normal holat — undiruv tab'i SMM
+  sheet'ida, KPI esa PM sheet'ida turadi, carryover loyiha o'tgan oy tab'ida
+  qolishi mumkin. Shuning uchun:
+  a) javob oxirida QAYSI tab'lar qaralganini aniq sanab o't (yuklangan tab'lar
+     ro'yxati sarlavhalarda ko'rinadi) — foydalanuvchi qamrovni bilsin;
+  b) "topilmadi" xulosasini FAQAT yuklangan HAMMA tab qaralgandan keyin ber;
+     bitta tabda yo'qligi "loyiha yopilgan" degani EMAS;
+  c) bir manbada bor, boshqasida yo'q bo'lsa — buni TOPILMA sifatida ayt
+     ("undiruv sentabr tabida bor: PM Zubair, $3 400; sentabr KPI tabida esa
+     yo'q"), chunki bu ko'pincha sheet'dagi bo'shliqni bildiradi va tuzatish
+     kerakligini ko'rsatadi.
 - "KO'RSATMA (tab tanlash): ..." qatorlari — tizim tab tanlashda nima
   qilganini aytadi; ularni javobda MAJBURIY bajar. Xususan: so'ralgan oy tabi
   guruhda yo'q bo'lsa, "ma'lumot kiritilmagan/topilmadi" deb YOZMA — bu
