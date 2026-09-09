@@ -308,6 +308,24 @@ def fetch_sheet(gc, s, today=None):
     return data, meta
 
 
+# (connect, read) — Sheets chaqiruvi CHEKSIZ kutmasin. Busiz osilgan so'rov
+# bot'ning polling loop'ini butunlay to'xtatib qo'yishi mumkin (2026-09-09:
+# 08:59 → 19:00, ~10 soat jimlik). SHEETS_TIMEOUT env bilan o'zgartiriladi.
+SHEETS_TIMEOUT = (10, 60)
+
+
+def _sheets_timeout():
+    raw = os.environ.get("SHEETS_TIMEOUT", "").strip()
+    if not raw:
+        return SHEETS_TIMEOUT
+    try:
+        parts = [float(x) for x in raw.split(",")]
+        return (parts[0], parts[1]) if len(parts) == 2 else float(parts[0])
+    except (ValueError, IndexError):
+        log(f"SHEETS_TIMEOUT noto'g'ri ({raw!r}) — default {SHEETS_TIMEOUT}")
+        return SHEETS_TIMEOUT
+
+
 def gclient():
     import gspread
     from google.oauth2.service_account import Credentials
@@ -315,7 +333,9 @@ def gclient():
     creds = Credentials.from_service_account_file(
         str(CREDS), scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
     )
-    return gspread.authorize(creds)
+    gc = gspread.authorize(creds)
+    gc.set_timeout(_sheets_timeout())
+    return gc
 
 
 def main():

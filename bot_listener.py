@@ -270,6 +270,30 @@ def save_last(uid):
 
 
 INFLIGHT = DATA / "bot-inflight.json"
+HEARTBEAT = DATA / "bot-heartbeat.json"
+HEARTBEAT_EVERY = 60      # s — har getUpdates'da emas, daqiqada bir marta yoziladi
+_hb_last = [0.0]
+
+
+def touch_heartbeat(force=False):
+    """Listener tirikligi belgisi: oxirgi MUVAFFAQIYATLI getUpdates vaqti.
+
+    Kunlik hisobot shu fayldan "bot listener ✓ (oxirgi getUpdates HH:MM)" qatorini
+    quradi. 2026-09-09 da listener 10 soat o'lik turgani faqat tasodifan sezildi —
+    bu belgi bo'lganda hisobotning o'zi aytardi.
+    """
+    now = time.time()
+    if not force and now - _hb_last[0] < HEARTBEAT_EVERY:
+        return
+    _hb_last[0] = now
+    try:
+        DATA.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT.write_text(
+            json.dumps({"ts": now, "iso": datetime.now().isoformat(timespec="seconds")}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def _write_inflight(upd, attempts=1):
@@ -1793,6 +1817,67 @@ def do_dizayn(arg):
     return "dizayn-edit"
 
 
+HANDLE_TIMEOUT = 900   # bitta xabarni qayta ishlashga chek (s). claude -p 600s +
+                       # fetch + PDF render'dan katta, lekin cheksiz emas.
+
+
+def handle_with_watchdog(upd, timeout=None):
+    """handle_update'ni ALOHIDA thread'da yurgizadi va chek bilan kutadi.
+
+    Nega kerak: handle_update polling loop ichida chaqiriladi — u qaytmasa
+    getUpdates boshqa chaqirilmaydi, bot jim bo'ladi, jarayon esa scheduler
+    tufayli TIRIK ko'rinadi. 2026-09-09 da aynan shu bo'ldi: 08:59 dan 19:00
+    gacha ~10 soat bot javob bermadi, hisobotlar esa kelaverdi.
+
+    Chek tugasa: loop DAVOM etadi, osilgan xabar tashlab yuboriladi, egaga aniq
+    sabab yoziladi. Osilgan thread daemon — jarayon chiqishida o'ladi (Python'da
+    thread'ni majburan to'xtatib bo'lmaydi).
+
+    Qaytadi: "ok" | "error" | "timeout" (test uchun).
+    """
+    timeout = HANDLE_TIMEOUT if timeout is None else timeout
+    uid = (upd or {}).get("update_id", "?")
+    box = {}
+
+    def _run():
+        try:
+            handle_update(upd)
+            box["status"] = "ok"
+        except Exception as e:                       # noqa: BLE001
+            box["status"] = "error"
+            box["err"] = f"{type(e).__name__}: {e}"
+            box["tb"] = traceback.format_exc()
+
+    th = threading.Thread(target=_run, name=f"handle-{uid}", daemon=True)
+    t0 = time.monotonic()
+    th.start()
+    th.join(timeout)
+
+    if th.is_alive():
+        log(f"WATCHDOG: xabar {uid} {timeout}s ichida tugamadi — tashlab ketildi "
+            f"(thread fonda qoldi)")
+        try:
+            send_retry(
+                f"⚠️ Xabar {uid} qayta ishlanmadi: timeout {timeout}s.\n"
+                "Savolni qaytadan yuboring (soddaroq qilib) — bot ishlashda davom etyapti.",
+                attempts=2,
+            )
+        except Exception:
+            pass
+        return "timeout"
+
+    if box.get("status") == "error":
+        log(f"XATO handle_update: {box.get('err')}\n{(box.get('tb') or '')[:800]}")
+        try:
+            send_retry("⚠️ Xatolik yuz berdi — keyinroq urinib ko'ring.", attempts=2)
+        except Exception:
+            pass
+        return "error"
+
+    log(f"xabar {uid} qayta ishlandi ({time.monotonic() - t0:.1f}s)")
+    return "ok"
+
+
 def handle_update(upd):
     msg = upd.get("message") or {}
     chat = (msg.get("chat") or {}).get("id")
@@ -2212,6 +2297,7 @@ def main():
                 log(f"getUpdates HTTP {r.status_code}: {r.text[:200]} — 10s kutaman")
                 time.sleep(10)
                 continue
+            touch_heartbeat()          # listener tirik — kunlik hisobot shuni o'qiydi
             for upd in r.json().get("result", []):
                 # Avval offset saqlanadi — xabar hech qachon ikki marta ishlanmaydi.
                 # Inflight fayli esa restart/kill'da uzilgan xabarni tiklash uchun.
@@ -2219,14 +2305,10 @@ def main():
                 save_last(last)
                 _write_inflight(upd)
                 try:
-                    handle_update(upd)
-                except Exception as e:
-                    log(f"XATO handle_update: {e}\n{traceback.format_exc()[:800]}")
-                    try:
-                        send_retry("⚠️ Xatolik yuz berdi — keyinroq urinib ko'ring.", attempts=2)
-                    except Exception:
-                        pass
+                    handle_with_watchdog(upd)
                 finally:
+                    # Osilgan xabar ham tozalanadi: aks holda recover_inflight
+                    # uni restart'da qayta ishlaydi va yana o'sha yerda osiladi.
                     _clear_inflight()
         except requests.RequestException as e:
             log(f"tarmoq xatosi: {type(e).__name__}: {str(e)[:150]} — 10s kutaman")

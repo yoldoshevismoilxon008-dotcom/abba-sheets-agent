@@ -56,6 +56,11 @@ else
   [ -n "$CRIT_LINE" ] && printf '\n%s\n' "$CRIT_LINE" >> "$REPORT"
 fi
 
+# Komponent holati — hisobot pastiga bitta qator (listener jim qolsa DARHOL ko'rinsin).
+# Yiqilsa pipeline davom etadi: health hech qachon hisobotni to'xtatmasin.
+HEALTH_LINE=$("$PY" health.py --line 2>/dev/null) || HEALTH_LINE=""
+[ -n "$HEALTH_LINE" ] && printf '\n%s\n' "$HEALTH_LINE" >> "$REPORT"
+
 # Infografik PDF (yiqilsa — send.py avtomatik matn rejimida yuboradi)
 PDF_ERR=0
 "$PY" render_pdf.py --date "$TODAY" || PDF_ERR=1
