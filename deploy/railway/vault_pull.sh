@@ -31,4 +31,12 @@ rsync -a --update "$CLONE/hisobotlar/" "$VAULT/" 2>/dev/null || true
 CHATVAULT="$HOME/claude-brain/chat"
 mkdir -p "$CHATVAULT"
 rsync -a --update "$CLONE/chat/" "$CHATVAULT/" 2>/dev/null || true
+
+# K3: TG kunlik monitoring PDF'lari (~/.abba-tg-audit/build_report_pdf.py yozadi
+# va shu repo'ga push qiladi). Alohida loyiha — o'z vault papkasiga tushadi.
+TGVAULT="$HOME/claude-brain/tg-kunlik-monitoring/hisobotlar"
+if [ -d "$CLONE/tg-kunlik" ]; then
+  mkdir -p "$TGVAULT"
+  rsync -a --update "$CLONE/tg-kunlik/" "$TGVAULT/" 2>/dev/null || true
+fi
 echo "pull OK"
