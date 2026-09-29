@@ -387,7 +387,7 @@ def test_repo_qaror_fayli_yaroqli():
     """Deploy bilan ketadigan undiruv_qaror.json — 2 ta yaroqli qaror, xatosiz (S6)."""
     u._QAROR_KESH.update(mtime=None, data=[], xato=[])
     q = u.qarorlar()
-    assert {x["loyiha"] for x in q} == {"Stirka", "Maestro kids"} and not u.qaror_xatolari()
+    assert {x["loyiha"] for x in q} == {"Stirka", "Maestro kids", "Baaztruck"} and not u.qaror_xatolari()
 
 
 def test_oy_oxiri_keyingi_tabda_tolangan_alohida_belgi():
@@ -656,6 +656,52 @@ def test_status_bosh_kochganlarni_sanamaydi():
     """Keyingi oyga ko'chgan qatorlar «status bo'sh qarz» sanog'iga kirmaydi (C2)."""
     v = _view(SEP29)
     assert u.totals(v["rows"])["status_blank_n"] == 1                  # faqat Kechikkan (so'raladigan)
+
+
+# ------------------------------------------------------------ ega qarorlari (29.09 kech)
+
+BAAZ_CHIQ = {"loyiha": "Baaztruck", "tab": "Undiruv avgust(2026)", "qaror": "hisobdan_chiqarilsin",
+             "qoldiq": 433, "sabab": "ega 29.09: kerak emas"}
+
+
+def test_hisobdan_chiqarilgan_qoldiq_soralmaydi():
+    """Ega «Baaztruck kerak emas» — avgust qoldig'i PM'dan so'ralmaydi, «tushadi» ham emas."""
+    v = _view(SEP30, qlar=QAROR + [BAAZ_CHIQ])
+    per_pm, st = pp.build_push(SEP30, v["rows"], v["prev"]["rows"], "avgust", view=v)
+    assert "Baaztruck" not in "\n".join(l for ls in per_pm.values() for l in ls)
+    assert st["overdue_carry_n"] == 0 and not v["keyingi"]["tushadi"]
+    assert [r["loyiha"] for r in v["prev"]["kechildi"]] == ["Baaztruck"]
+    assert any("hisobdan chiqarilgan" in n for n in v["notes"]), v["notes"]
+    d = u.report_data(v["rows"], v["tab"], SEP30, view=v)
+    assert d["otgan"] is None                                          # PDF'da ham so'ralmaydi
+    # qiymat qo'riqchisi: jadvalda boshqa summa — qo'llanmaydi, so'raladi + izoh
+    v = _view(SEP30, qlar=QAROR + [dict(BAAZ_CHIQ, qoldiq=400)])
+    per_pm, st = pp.build_push(SEP30, v["rows"], v["prev"]["rows"], "avgust", view=v)
+    assert st["overdue_carry_n"] == 1 and any("eskirgan" in n for n in v["notes"]), v["notes"]
+
+
+def test_hisobdan_chiqarish_qarori_tekshiriladi():
+    ok, xato = u.qaror_tekshir([BAAZ_CHIQ, dict(BAAZ_CHIQ, tab=""), dict(BAAZ_CHIQ, qoldiq=None)])
+    assert len(ok) == 1 and len(xato) == 2, (ok, xato)
+
+
+def test_stirka_jadvalda_tuzatilgan():
+    """Ega jadvalda «Stirkauz»ni $1 714 qildi (=1350+364-F11): sentabr $364 bog'lanadi, ikki
+    marta so'ralmaydi; «jadvalga kiritilmagan» va «Jami farqi» eslatmalari yo'qoladi."""
+    okt = [r for r in OKT if r["loyiha"] != "Stirkauz"] + _tab(
+        ["9", "Stirkauz", "Zubair", "19", "$1 714", "", "", "", "20.10", "", ""], ref=date(2026, 10, 1))
+    tabs = dict(TABS)
+    tabs[("oktyabr", 2026)] = ("Undiruv oktabr(2026)", okt)
+    for kun in (SEP30, OKT01):
+        v = _view(kun, tabs=tabs)
+        matn = " ".join(v["notes"] + v["prev"]["izoh"] + ((v["keyingi"] or {}).get("izoh") or []))
+        assert "jadvalga kiritilmagan" not in matn and "Jami farqi" not in matn, matn
+        per_pm, st = pp.build_push(kun, v["rows"], v["prev"]["rows"], "avgust", view=v)
+        z = "\n".join(per_pm.get("Zubair", []))
+        assert "Stirka —" not in z and "Stirka (" not in z, z             # sentabr $364 alohida so'ralmaydi
+    st_rows = _by(v["rows"])
+    assert round(st_rows["Stirkauz"]["qoldiq"]) == 1714                    # ikki marta qo'shilmadi
+    assert "Stirka" in {r["loyiha"] for r in v["prev"]["moved"]}
 
 
 def _run_all():

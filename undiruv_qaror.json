@@ -1,17 +1,20 @@
 {
  "_izoh": [
-  "Undiruv: o'tgan oy qoldig'i yangi oy tabiga BOSHQA summa bilan yozilgan holatlar bo'yicha EGA qarorlari.",
+  "Undiruv: o'tgan oy qoldig'i bo'yicha EGA qarorlari (bot jadvalga yozmaydi — faqat shu fayl orqali).",
   "Konvensiya (ega, 01.09 va 29.09): yangi oy tabini ochganda to'lanmagan qoldiq yangi oyga ko'chiriladi. Summa AYNAN teng bo'lsa bot o'zi 'ko'chirilgan' deb taniydi; farqli bo'lsa — qaror kerak, qarorsiz holatda o'tgan qoldiq ham alohida so'raladi (xavfsiz tomon) va egaga «⚖️ summa farqli» deb aytiladi.",
-  "qaror: 'yangi_toliq' — yangi oydagi summa to'liq, o'tgan qoldiq alohida so'ralmaydi; 'qoshilsin' — o'tgan qoldiq yangi oy summasiga qo'shiladi (PM xabarida tafsili bilan).",
-  "Qaror faqat jadval qiymatlari qaror vaqtidagidek bo'lsa ishlaydi (otgan_qoldiq, yangi_summa). 'qoshilsin' uchun jadvalda yangi summa = yangi_summa + otgan_qoldiq bo'lib qolsa — «jadvalga kiritilgan» deb tan olinadi (ikki marta qo'shilmaydi). Boshqa o'zgarish — qaror eskirgan, oddiy qoida + egaga izoh.",
-  "yangi_tab — yangi oy tabining aniq nomi; loyiha — o'tgan oy tabidagi nom (imlo farqiga chidamli moslanadi)."
+  "qaror: 'yangi_toliq' — yangi oydagi summa to'liq, o'tgan qoldiq alohida so'ralmaydi; 'qoshilsin' — o'tgan qoldiq yangi oy summasiga qo'shiladi (PM xabarida tafsili bilan); 'hisobdan_chiqarilsin' — o'tgan oy qoldig'i so'ralmaydi (ega: kerak emas).",
+  "yangi_toliq/qoshilsin: {loyiha, yangi_tab, otgan_qoldiq, yangi_summa} — faqat jadval qiymatlari qaror vaqtidagidek bo'lsa ishlaydi. 'qoshilsin' uchun jadvalda yangi qator kelishilgani = yangi_summa + otgan_qoldiq bo'lsa — «jadvalga kiritilgan» deb jim tan olinadi (ikki marta qo'shilmaydi); qaror baribir kerak: o'tgan oy qatorini yangi qatorga bog'laydi (summalar farqli). Boshqa o'zgarish — qaror eskirgan, oddiy qoida + egaga izoh.",
+  "hisobdan_chiqarilsin: {loyiha, tab (qoldiq turgan o'tgan oy tabi), qoldiq} — qoldiq AYNAN shu bo'lsa o'tgan oy qoldig'i PM'dan so'ralmaydi (egaga bir qatorlik izoh). Faqat o'tgan oy qoldiqlariga; joriy oy jamlamasiga tegmaydi.",
+  "yangi_tab/tab — oy tabining aniq nomi; loyiha — o'tgan oy tabidagi nom (imlo farqiga chidamli moslanadi)."
  ],
  "qarorlar": [
   {"loyiha": "Stirka", "yangi_tab": "Undiruv oktabr(2026)", "qaror": "qoshilsin",
    "otgan_qoldiq": 364, "yangi_summa": 1350,
-   "sabab": "ega 29.09: Stirka'dagi sentabr qoldig'i ($364) oktabrga qo'shilsin — oktabr «Stirkauz» $1 350 + $364 = $1 714"},
+   "sabab": "ega 29.09: Stirka'dagi sentabr qoldig'i ($364) oktabrga qo'shilsin — oktabr «Stirkauz» $1 350 + $364 = $1 714 (ega 29.09 kechqurun jadvalga kiritdi: =1350+364-F11)"},
   {"loyiha": "Maestro kids", "yangi_tab": "Undiruv oktabr(2026)", "qaror": "yangi_toliq",
    "otgan_qoldiq": 2100, "yangi_summa": 2000,
-   "sabab": "ega 29.09: Maestro kids — oktabrdagi $2 000 qolsin (sentabr $2 100 alohida so'ralmaydi)"}
+   "sabab": "ega 29.09: Maestro kids — oktabrdagi $2 000 qolsin (sentabr $2 100 alohida so'ralmaydi)"},
+  {"loyiha": "Baaztruck", "tab": "Undiruv avgust(2026)", "qaror": "hisobdan_chiqarilsin", "qoldiq": 433,
+   "sabab": "ega 29.09: Baaztruck avgust qoldig'i ($433) kerak emas — so'ralmaydi, oktabrga ko'chirilmaydi"}
  ]
 }

@@ -287,7 +287,7 @@ def _juftla(prev_rows, cur_rows, faqat):
 
 # ---- Ega qarorlari (undiruv_qaror.json) --------------------------------------
 
-_QAROR_TURLARI = ("qoshilsin", "yangi_toliq")
+_QAROR_TURLARI = ("qoshilsin", "yangi_toliq", "hisobdan_chiqarilsin")
 _QAROR_KESH = {"mtime": None, "data": [], "xato": []}
 
 
@@ -312,15 +312,51 @@ def qaror_tekshir(items):
     ok, xato = [], []
     for n, q in enumerate(items, 1):
         d = q if isinstance(q, dict) else {}
-        nom, tab = d.get("loyiha"), d.get("yangi_tab")
-        oq, ys = _qaror_son(d.get("otgan_qoldiq")), _qaror_son(d.get("yangi_summa"))
-        if (not isinstance(nom, str) or not nom.strip() or not isinstance(tab, str) or not tab.strip()
-                or d.get("qaror") not in _QAROR_TURLARI or oq is None or ys is None or oq <= 0 or ys < 0):
-            xato.append(f"undiruv_qaror.json: {n}-qaror ({nom if isinstance(nom, str) else str(q)[:30]}) "
-                        f"noto'g'ri — e'tiborsiz qoldirildi")
-            continue
-        ok.append(dict(d, otgan_qoldiq=oq, yangi_summa=ys))
+        nom = d.get("loyiha")
+        nom_ok = isinstance(nom, str) and bool(nom.strip())
+        if d.get("qaror") == "hisobdan_chiqarilsin":
+            # {"loyiha", "tab" (qoldiq turgan o'tgan oy tabi), "qoldiq" (qiymat qo'riqchisi)}
+            tab, qol = d.get("tab"), _qaror_son(d.get("qoldiq"))
+            if nom_ok and isinstance(tab, str) and tab.strip() and qol is not None and qol > 0:
+                ok.append(dict(d, qoldiq=qol))
+                continue
+        else:
+            tab = d.get("yangi_tab")
+            oq, ys = _qaror_son(d.get("otgan_qoldiq")), _qaror_son(d.get("yangi_summa"))
+            if (nom_ok and isinstance(tab, str) and tab.strip() and d.get("qaror") in _QAROR_TURLARI
+                    and oq is not None and ys is not None and oq > 0 and ys >= 0):
+                ok.append(dict(d, otgan_qoldiq=oq, yangi_summa=ys))
+                continue
+        xato.append(f"undiruv_qaror.json: {n}-qaror ({nom if isinstance(nom, str) else str(q)[:30]}) "
+                    f"noto'g'ri — e'tiborsiz qoldirildi")
     return ok, xato
+
+
+def kechish_ajrat(real_rows, tab, qlar, oy=""):
+    """«hisobdan_chiqarilsin» — ega o'tgan oy qoldig'ini so'ramaslikka qaror qilgan
+    (29.09: «Baaztruck kerak emas»). FAQAT o'tgan oy qoldiqlariga (korinish prev.real)
+    qo'llanadi — joriy oy jamlamasiga (Kelishilgan/Qoldiq, reconcile) tegmaydi.
+    Qo'riqchi: tab va qoldiq AYNAN qarordagidek (o'zgargan bo'lsa — qo'llanmaydi, izoh).
+    Qaytadi: (qolgan_real, hisobdan_chiqarilganlar, izohlar)."""
+    qolgan, chiqdi, izoh = list(real_rows), [], []
+    for q in qlar or []:
+        if q.get("qaror") != "hisobdan_chiqarilsin" or not _tab_mos(q.get("tab"), tab):
+            continue
+        nom, qol = str(q.get("loyiha") or ""), _qaror_son(q.get("qoldiq"))
+        mos = [r for r in qolgan if nom_ball(nom, r["loyiha"]) >= FUZZY_MIN]
+        aynan = [r for r in mos if round(r["qoldiq"]) == qol]
+        if not aynan:
+            if mos:
+                izoh.append(f"{nom}: hisobdan chiqarish qarori eskirgan (jadvalda endi "
+                            f"{', '.join(_fmt_usd(r['qoldiq']) for r in mos)}, qarorda {_fmt_usd(qol or 0)}) "
+                            f"— qo'llanmadi, qoldiq so'ralmoqda")
+            continue
+        r = aynan[0]
+        qolgan = [x for x in qolgan if x is not r]
+        chiqdi.append(r)
+        izoh.append(f"Ega qarori: {r['loyiha']} ({r['pm']}, {oy + ' ' if oy else ''}qoldig'i "
+                    f"{_fmt_usd(r['qoldiq'])}) hisobdan chiqarilgan — PM'dan so'ralmaydi")
+    return qolgan, chiqdi, izoh
 
 
 def qarorlar():
@@ -931,6 +967,14 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
             prows, iz = qaror_qoll(prows, ptab, q, prev2_m, otgan_rows=p2rows if p2tab is not None else None)
             notes += iz
     t1 = month_transition(prows, rows, tab, q, prev_oy=prev_m, prev_oqildi=ptab is not None)
+    # Ega hisobdan chiqargan o'tgan oy qoldiqlari — so'ralmaydi, «tushadi» ogohlantirishiga
+    # ham kirmaydi (t3 dan OLDIN: t3 `_i` indekslari t1["real"] ga tayanadi)
+    t1["real"], kechildi, iz = kechish_ajrat(t1["real"], ptab, q, prev_m)
+    notes += iz
+    if kechildi:
+        kk = {(r["loyiha"], round(r["qoldiq"])) for r in kechildi}
+        for key in ("farqli", "noaniq"):
+            t1[key] = [r for r in t1[key] if (r["loyiha"], round(r["qoldiq"])) not in kk]
     joriy = t1["cur_rows"]
     for r in joriy:
         kq = r.get("qoshimcha")
@@ -1004,7 +1048,7 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
     view = {
         "today": today, "day": day, "tab": tab, "rows": joriy, "source": source, "oy": cur_m,
         "yil": cur_y,
-        "prev": {"tab": ptab, "rows": prows, "source": psrc, "oy": prev_m,
+        "prev": {"tab": ptab, "rows": prows, "source": psrc, "oy": prev_m, "kechildi": kechildi,
                  **{k: t1[k] for k in ("real", "closed", "moved", "farqli", "noaniq", "izoh")}},
         "keyingi": keyingi,
         "notes": notes,
