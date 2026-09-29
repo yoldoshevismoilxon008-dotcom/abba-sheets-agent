@@ -376,6 +376,12 @@ def _qaror_satri(m, yangi_oy):
     return None
 
 
+def _yangi_nom(i):
+    """« → Bosimov School» — o'tgan va joriy nom farqli bo'lsa (fuzzy juftni ega tekshira olsin)."""
+    cur = i.get("cur")
+    return f" → {cur}" if cur and undiruv._ixcham(cur) != undiruv._ixcham(i["loyiha"]) else ""
+
+
 def _noaniq_satr(r, oy):
     sabab = r.get("_noaniq") or "ikki o'xshash nom"
     return f"{r['loyiha']} ({r['pm']}, {oy}: {sabab})"
@@ -456,7 +462,8 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
     else:
         prev_real, closed, moved = undiruv.carryover_filter(prev_rows, cur_rows)
     stats["closed_carry"] = [
-        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"]),
+         "cur": (r.get("_kochish") or {}).get("cur_loyiha")}      # nomi farqli bo'lsa «A → B»
         for r in closed
     ]
     # Joriy oy tabiga KO'CHIRILGAN qoldiqlar — PM'ga ikkinchi marta so'ralmaydi,
@@ -602,11 +609,11 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                   "Keyinroq /pm_push force bilan qayta urining."
                   if oqilmadi else
                   "topilmadi (jonli va snapshot) — PM'larga hech narsa yuborilmadi. "
-                  "Yangi oy tabi ochilganda avtomatik davom etadi.")
+                  "Tab ochilgach /pm_push force bilan yuboring (aks holda ertaga 09:30 da).")
                + (f"\n{tab_note}" if tab_note else ""))
         if not dry_run:
             send_owner(msg)
-            _save_state({"date": today.isoformat(), "tab": None, "sent": {}})
+            # holat SAQLANMAYDI: tab ochilgach shu kuni qayta ishga tushirish «skip» bo'lmasin (KN3)
         log("joriy oy tabi yo'q — ogohlantirish yuborildi")
         return "no-tab", msg
 
@@ -740,7 +747,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                      f"sanaldi; sheet'da holatni belgilang: {det}")
     if stats["closed_carry"]:
         cc = stats["closed_carry"]
-        det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
+        det = ", ".join(f"{i['loyiha']}{_yangi_nom(i)} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
         more = f" +{len(cc) - 6}" if len(cc) > 6 else ""
         L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan "
                  f"yoki ketgan deb yozilgan): "
@@ -780,7 +787,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
             L.append(f"⚠️ {k_oy.capitalize()} tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat "
                      f"bilan so'raldi, keyingi oy to'lovlari eslatilmadi")
         else:
-            L.append(f"ℹ️ {k_oy.capitalize()} tabi hali yo'q — keyingi oy to'lovlari oldindan eslatilmadi")
+            L += undiruv.keyingi_tab_holati((view or {}).get("keyingi"))
     if stats.get("farqli"):
         fq = stats["farqli"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {i['yonalish']}: {_fmt(i['otgan'])} → "

@@ -404,6 +404,7 @@ def test_oy_oxiri_keyingi_tabda_tolangan_alohida_belgi():
     assert {i["loyiha"]: i["status"] for i in z["items"]}["Pruddy"] == "yopildi"
     blok = _blok(v, SEP29)
     assert "🧹 Oktyabr tabida" in blok and "Pruddy" in blok.split("🧹 Oktyabr tabida")[1], blok
+    assert "yo'q ✅" not in blok                                          # 🧹 bor — «qarz yo'q» emas (M1)
 
 
 def test_nusxa_qator_eski_muddat_ikki_marta_soralmaydi():
@@ -506,7 +507,9 @@ def test_fuzzy_himoyalari():
                            _tab(["1", "Rivo water", "Azizxo'ja", "", "$1 800", "", "", "", "04.10", "", ""]))
     assert u.kochish_matn(t["moved"][0]).startswith("Rivo → Rivo water"), t
     prev = _tab(["1", "Bosimov shcool", "Zubair", "", "$2 500", "", "", "", "18.09", "", ""])
-    cur = _tab(["1", "Bosimov School", "Zubair", "", "$0", "$2 500", "", "", "18.10", "✅ To'lov qilindi", ""])
+    # fuzzy juft to'langan, lekin kelishilgani o'tgan qoldiqdan FARQLI — boshqa loyiha bo'lishi
+    # mumkin: yopilmaydi, so'raladi + noaniq (teng bo'lsa yopiladi — KN2 testi pastda)
+    cur = _tab(["1", "Bosimov School", "Zubair", "", "$0", "$2 000", "", "", "18.10", "✅ To'lov qilindi", ""])
     t = u.month_transition(prev, cur)
     assert not t["closed"] and [r["loyiha"] for r in t["real"]] == ["Bosimov shcool"] and t["noaniq"], t
     prev = _tab(["1", "Nexus school", "Zubair", "", "$1 600", "", "", "", "10.09", "", ""],
@@ -702,6 +705,94 @@ def test_stirka_jadvalda_tuzatilgan():
     st_rows = _by(v["rows"])
     assert round(st_rows["Stirkauz"]["qoldiq"]) == 1714                    # ikki marta qo'shilmadi
     assert "Stirka" in {r["loyiha"] for r in v["prev"]["moved"]}
+
+
+# ------------------------------------------------------------ yakuniy tanqidchi (critic2) tuzatishlari
+
+def test_oy_oxiri_navbatdagi_tolov_joriy_invoiceni_yashirmaydi():
+    """26.10: noyabr tabi oktabrdan nusxa (bir xil summa, sana +1 oy) — muddati hali kelmagan
+    oktabr hisob-fakturasi «ko'chirilgan» deb yashirilmaydi; summa o'zgargan navbatdagi to'lov
+    «qaror kerak» shovqini emas; muddati o'tgan qarz qisqa ko'chirishda oldingidek (KN1)."""
+    kun = date(2026, 10, 26)
+    okt = _tab(["1", "Mavrid textil", "Abdufattoh", "", "$1 600", "", "", "", "30.10", "", ""],
+               ["2", "Ezgu makon", "Islom", "", "$2 500", "", "", "", "27.10", "", ""],
+               ["3", "Levelmax", "Islom", "", "$900", "", "", "", "20.10", "", ""],
+               ref=date(2026, 10, 1), today=kun)
+    noy = _tab(["1", "Mavrid textil", "Abdufattoh", "", "$1 600", "", "", "", "30.11", "", ""],
+               ["2", "Ezgu makon", "Islom", "", "$2 700", "", "", "", "27.11", "", ""],
+               ["3", "Levelmax", "Islom", "", "$900", "", "", "", "03.11", "", ""],
+               ref=date(2026, 11, 1), today=kun)
+    tabs = {("oktyabr", 2026): ("Undiruv oktabr(2026)", okt), ("noyabr", 2026): ("Undiruv noyabr(2026)", noy)}
+    v = _view(kun, qlar=[], tabs=tabs)
+    rows = _by(v["rows"])
+    assert not rows["Mavrid textil"].get("keyingi_oyga") and not rows["Ezgu makon"].get("keyingi_oyga")
+    assert rows["Levelmax"]["keyingi_oyga"]["turi"] == "aynan"         # muddati o'tgan, 03.11 ga ko'chgan
+    per_pm, st = pp.build_push(kun, v["rows"], v["prev"]["rows"], "sentyabr", view=v)
+    assert any("Ezgu makon —" in l for l in per_pm.get("Islom", [])), per_pm
+    assert any("Mavrid textil —" in l for l in per_pm.get("Abdufattoh", [])), per_pm
+    assert not st["farqli"], st["farqli"]
+
+
+def test_fuzzy_juft_tolovdan_keyin_yopiladi():
+    """«Bosimov shcool» → «Bosimov School»: oktabr qatori to'langanda sentabr qarzi har kuni
+    «muddat o'tdi» deb so'ralmaydi — kelishilgan teng bo'lsa yopiladi (KN2)."""
+    prev = _tab(["1", "Bosimov shcool", "Zubair", "", "$2 500", "", "", "", "18.09", "", ""])
+    for summa, und, holat in (("$0", "$2 500", "✅ To'lov qilindi"), ("$1 500", "$1 000", "")):
+        cur = _tab(["1", "Bosimov School", "Zubair", "", summa, und, "", "", "18.10", holat, ""])
+        t = u.month_transition(prev, cur)
+        assert [r["loyiha"] for r in t["closed"]] == ["Bosimov shcool"] and not t["real"], (summa, t)
+    cur = _tab(["1", "Bosimov School", "Zubair", "", "$0", "", "", "$2 500", "18.10", "Ketdi", ""])
+    t = u.month_transition(prev, cur)                                    # ketdi — so'raladi + noaniq
+    assert not t["closed"] and t["real"] and t["noaniq"], t
+
+
+def test_belgi_sozi_boshqa_qator():
+    """«Turon metal eski» — eski qarz qatori, yangi «Turon metal» to'loviga bog'lanmaydi."""
+    assert u.nom_ball("Turon metal eski", "Turon metal") == 0.0
+    assert u.nom_ball("Rivo", "Rivo water") == 0.9 and u.nom_ball("FTTI univercity", "FTTI") == 0.9
+
+
+def test_yil_xato_tab_nomi_aytiladi():
+    """Dekabr oxirida «Undiruv yanvar(2026)» (kerak: 2027) — bot noto'g'ri yilni aniq aytadi (KN3)."""
+    class _W:
+        def __init__(self, t):
+            self.title = t
+
+    class _SH:
+        def worksheets(self):
+            return [_W("Undiruv yanvar(2026)"), _W("Undiruv dekabr(2026)"), _W("Undiruv yanvar")]
+
+    class _GC:
+        def open_by_key(self, k):
+            return _SH()
+    orig = (u.smm_sheet_id, u.fetchmod.gclient)
+    u.smm_sheet_id, u.fetchmod.gclient = (lambda: "x"), (lambda: _GC())
+    try:
+        notes = []
+        for kun in (date(2026, 12, 28), date(2027, 1, 1)):          # oy oxiri va 1-yanvarning o'zi
+            tab, rows = u.fetch_live_month("yanvar", kun, year=2027, qat_iy=True)
+            notes.append((tab, u.consume_tab_note()))
+    finally:
+        u.smm_sheet_id, u.fetchmod.gclient = orig
+    for tab, note in notes:
+        assert tab is None and "Undiruv yanvar(2026)" in note and "(2027)" in note, note
+
+
+def test_tab_yoq_kuni_holat_saqlanmaydi():
+    """Joriy oy tabi yo'q kuni holat saqlanmaydi — tab ochilgach shu kuni qayta yuborish mumkin (KN3)."""
+    v = _view(date(2026, 11, 2), qlar=[], tabs={("oktyabr", 2026): ("Undiruv oktabr(2026)", OKT)})
+    assert v["tab"] is None
+    saqla = {n: getattr(pp, n) for n in ("_load_state", "_save_state", "send_owner")}
+    orig_k, yozildi, egaga = u.korinish, [], []
+    pp._load_state, pp._save_state, pp.send_owner = (lambda: {}), (lambda d: yozildi.append(d)), egaga.append
+    u.korinish = lambda *a, **k: v
+    try:
+        holat, msg = pp.run_daily(today=date(2026, 11, 2))
+    finally:
+        for n, f in saqla.items():
+            setattr(pp, n, f)
+        u.korinish = orig_k
+    assert holat == "no-tab" and not yozildi and "/pm_push force" in msg, (holat, yozildi, msg)
 
 
 def _run_all():

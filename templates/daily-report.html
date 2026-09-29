@@ -204,9 +204,9 @@
     {% for i in undiruv.keyingi.yaqin[:6] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.keyingi.yaqin|length > 6 %} · +{{ undiruv.keyingi.yaqin|length - 6 }} ta{% endif %}
   </div>
   {% elif undiruv.keyingi and not undiruv.keyingi.tab %}
-  <div class="u-due"><span class="soon">{% if undiruv.keyingi.source == "xato" %}⚠️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat bilan so'ralmoqda{% else %}ℹ️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi hali yo'q — keyingi oy to'lovlari ko'rinmaydi{% endif %}</span></div>
+  <div class="u-due"><span class="soon">{% if undiruv.keyingi.source == "xato" %}⚠️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat bilan so'ralmoqda{% else %}ℹ️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi{% if undiruv.keyingi.kutilgan %} «{{ undiruv.keyingi.kutilgan }}»{% endif %} hali yo'q — keyingi oy to'lovlari ko'rinmaydi; 1-sanagacha ochilmasa, o'sha kuni PM'larga undiruv eslatmasi ketmaydi{% endif %}</span></div>
   {% endif %}
-  {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin and not (undiruv.keyingi and undiruv.keyingi.yaqin) and not (undiruv.otgan_oy and undiruv.otgan_oy["items"]) %}
+  {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin and not (undiruv.keyingi and undiruv.keyingi.yaqin) and not (undiruv.otgan_oy and undiruv.otgan_oy["items"]) and not (undiruv.keyingi and undiruv.keyingi.yopilgan) %}
   <div class="u-ok">✅ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q</div>
   {% endif %}
 </div>

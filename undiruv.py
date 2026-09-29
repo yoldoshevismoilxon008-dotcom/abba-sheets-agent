@@ -183,6 +183,12 @@ def _name_key(name):
 
 FUZZY_MIN = 0.85
 QAROR_FAYL = BASE / "undiruv_qaror.json"
+# Oy oxiri: keyingi oy qatori joriy muddatdan shuncha kun keyin bo'lsa — navbatdagi oylik
+# to'lov (ko'chirilgan qarz emas), agar joriy invoice muddati hali kelmagan bo'lsa (KN1)
+KEYINGI_SIKL_KUN = 20
+# Nomdagi «belgi» so'zlari: «Turon metal eski» ≠ «Turon metal» (eski qarz qatori boshqa
+# qator) — real 16 juftning hech biri bunday so'z bilan farqlanmaydi (review critic2)
+_BELGI_SOZLAR = {"eski", "yangi", "qarz", "qarzi", "qoldiq", "qoldig", "old", "new"}
 
 
 def _ixcham(name):
@@ -212,6 +218,10 @@ def nom_ball(a, b):
         return 1.0
     if _raqamlar(a) != _raqamlar(b):
         return 0.0
+    ta = set(re.findall(r"[^\W_]+", fetchmod.norm(a)))
+    tb = set(re.findall(r"[^\W_]+", fetchmod.norm(b)))
+    if (ta ^ tb) & _BELGI_SOZLAR:
+        return 0.0                               # «X eski» / «X» — boshqa qator (eski qarz)
     short, long_ = (x, y) if len(x) <= len(y) else (y, x)
     if len(short) >= 4 and long_.startswith(short):
         return 0.9
@@ -541,7 +551,11 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
                 out["real"].append(r)
             continue
         if c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0:
-            if i in fuzzy_i:
+            # Fuzzy juft faqat yangi qator KELISHILGANI o'tgan qoldiqqa AYNAN teng bo'lsa yopiladi
+            # (to'lovdan oldin shu tenglik uni «ko'chirilgan» qilgan edi — «Bosimov shcool» →
+            # «Bosimov School»): aks holda to'lovdan keyin to'langan qarz har kuni «muddat o'tdi»
+            # deb so'ralardi (review KN2). Summa farqli yoki ketgan — so'raladi + noaniq (M3).
+            if i in fuzzy_i and (c["holat"] == "ketdi" or kel_c != rq):
                 out["real"].append(r)
                 out["noaniq"].append(dict(r, _noaniq=f"nomi aynan mos emas: «{c['loyiha']}» "
                                                      f"{cur_tab or 'joriy tab'}da to'langan/ketgan"))
@@ -809,6 +823,23 @@ def fetch_live_month(month_name, today, year=None, qat_iy=False, ref=None):
 
     matched = rank_month_tabs(titles, month_name, today, year=year, suffikssiz=not qat_iy)
     if not matched and qat_iy:
+        # Shu oyning BOSHQA (joriy yildan eski bo'lmagan) yil tabi bormi — yil almashuvida
+        # «Undiruv yanvar(2026)» (kerak: 2027) xatosi jim qolmasin (review KN3)
+        yr = int(year or (today or date.today()).year)
+        ehtimol = []
+        for t in titles:
+            nt = fetchmod.norm(t)
+            ys = [int(y) for y in _YEAR_RE.findall(nt)]
+            # ±1 yil — yil almashuvidagi xato (1-yanvarda ham); arxivlar suffikssiz, shovqin yo'q
+            if _tab_matches_month(nt, month_name) and ys and yr not in ys \
+                    and any(abs(y - yr) <= 1 for y in ys):
+                ehtimol.append(t)
+        if ehtimol:
+            note = (f"⚠️ «Undiruv {month_name}({yr})» topilmadi, lekin "
+                    + ", ".join(f"«{t}»" for t in ehtimol)
+                    + f" bor — yili noto'g'ri yozilgan bo'lishi mumkin (kerakli nom: «Undiruv {month_name}({yr})»)")
+            log(note)
+            _set_tab_note(note)
         return None, []
     if qat_iy and len(matched) > 1:
         # Qat'iy rejimda (yil suffiksli tablar) tanlov snapshot yo'li (find_tab) bilan
@@ -985,16 +1016,33 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
     keyingi = None
     if tab is not None and oldinga_qarash_faolmi(today):
         ntab, nrows, nsrc = _oy_oqi(next_m, next_y, next_1, today, day, prefer_live, True, notes)
-        keyingi = {"tab": ntab, "oy": next_m, "source": nsrc, "rows": [], "yaqin": [],
+        keyingi = {"tab": ntab, "oy": next_m, "source": nsrc, "kutilgan": f"Undiruv {next_m}({next_y})",
+                   "rows": [], "yaqin": [],
                    "kochgan": [], "yopilgan": [], "farqli": [], "noaniq": [], "izoh": [],
                    "eski_muddat": [], "carry_kochgan": [], "tushadi": []}
         t3_juft = set()
         if ntab is not None:
             t2 = month_transition(joriy, nrows, ntab, q, prev_oy=cur_m, yangi_min=next_1)
+
+            def _navbatdagi_sikl(m):
+                # Joriy hisob-faktura muddati HALI kelmagan va keyingi oy qatori ≥20 kun
+                # keyin — bu ko'chirilgan qarz emas, keyingi oylik to'lov (noyabr tabi
+                # oktabrdan nusxa: bir xil summa, sana +1 oy). Joriy invoice o'z muddati bilan
+                # so'raladi (review KN1). Qisqa ko'chirish (Pruddy 30.09→05.10) va muddati
+                # o'tgan qarz (Bosimov 18.09→18.10) — oldingidek ko'chirilgan.
+                r0, kk = joriy[m["_i"]], m["_kochish"]
+                if str(kk.get("turi") or "").startswith("qaror"):
+                    return False                 # ega qarori — aniq ko'rsatma
+                return bool(r0["muddat"] and r0["muddat"] >= today and kk.get("muddat")
+                            and (kk["muddat"] - r0["muddat"]).days >= KEYINGI_SIKL_KUN)
             for m in t2["moved"] + t2["closed"]:
+                if _navbatdagi_sikl(m):
+                    continue
                 # closed → turi «yopilgan»: keyingi oy tabida to'langan/ketgan deb yozilgan
                 # (1-sanadagi 🧹 qoidasi bilan bir xil — so'ralmaydi, alohida belgi bilan)
                 joriy[m["_i"]]["keyingi_oyga"] = dict(m["_kochish"], tab=ntab, oy=next_m, manba_oy=cur_m)
+            # summa o'zgargan navbatdagi to'lov — «summa farqli (qaror kerak)» shovqini emas
+            t2["farqli"] = [m for m in t2["farqli"] if not _navbatdagi_sikl(m)]
             # O'tgan oy (2 oy oldingi) qoldiqlari ham keyingi oy tabiga yozilgan bo'lishi
             # mumkin (ega Baaztruck'ni oktabrga ko'chirsa) — ikki marta so'ralmasin (D6)
             band = set(t2["juft"].values())
@@ -1215,7 +1263,9 @@ def keyingi_tab_holati(k):
     if k.get("source") == "xato":
         return [f"⚠️ {oy} (keyingi oy) tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat bilan "
                 f"so'ralmoqda, keyingi oy to'lovlari ko'rinmaydi"]
-    return [f"ℹ️ {oy} (keyingi oy) tabi hali yo'q — keyingi oy to'lovlari ko'rinmaydi"]
+    nom = f" «{k['kutilgan']}»" if k.get("kutilgan") else ""
+    return [f"ℹ️ {oy} (keyingi oy) tabi{nom} hali yo'q — keyingi oy to'lovlari ko'rinmaydi; "
+            f"1-sanagacha ochilmasa, o'sha kuni PM'larga undiruv eslatmasi ketmaydi"]
 
 
 def izoh_satrlari(notes):
@@ -1291,7 +1341,7 @@ def summary(day, today=None, prefer_live=True):
         kochgan = [r for r in flag if r["keyingi_oyga"].get("turi") != "yopilgan"]
         yopilgan = [r for r in flag if r["keyingi_oyga"].get("turi") == "yopilgan"]
         keyingi = {
-            "tab": k["tab"], "oy": k["oy"], "source": k.get("source"),
+            "tab": k["tab"], "oy": k["oy"], "source": k.get("source"), "kutilgan": k.get("kutilgan"),
             "yaqin": [dict(item(r), kun=(r["muddat"] - today).days) for r in k["yaqin"]],
             "yaqin_sum": round(sum(r["qoldiq"] for r in k["yaqin"])),
             "kochgan": [kitem(r) for r in kochgan],
@@ -1415,14 +1465,9 @@ def report_block(day, today=None):
         L.append(f"📅 {k['oy'].capitalize()} (keyingi oy) — muddati ≤{DUE_SOON_DAYS} kun: "
                  f"{len(k['yaqin'])} ta, {_fmt_usd(k['yaqin_sum'])}: {det}{more}")
     elif k is not None and not k.get("tab"):
-        if k.get("source") == "xato":
-            L.append(f"⚠️ {k['oy'].capitalize()} (keyingi oy) tabi O'QILMADI (xato) — ko'chgan qarzlar "
-                     f"eski muddat bilan so'ralmoqda, keyingi oy to'lovlari ko'rinmaydi")
-        else:
-            L.append(f"ℹ️ {k['oy'].capitalize()} (keyingi oy) tabi hali yo'q — oy oxiri, "
-                     f"keyingi oy to'lovlari ko'rinmaydi")
+        L += keyingi_tab_holati(k)
     if (not s["muddat_otgan"] and not s["muddat_yaqin"] and not (k and k.get("yaqin"))
-            and not oo.get("items")):
+            and not oo.get("items") and not (k and k.get("yopilgan"))):
         L.append("⏰ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q ✅")
     if s.get("status_blank_n"):
         L.append(f"⚠️ Status bo'sh (tasdiqlanmagan qarz): {s['status_blank_n']} ta qator")

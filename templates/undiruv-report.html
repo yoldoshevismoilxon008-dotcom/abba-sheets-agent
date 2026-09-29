@@ -127,7 +127,8 @@
     {% if otgan and otgan.n %}<span class="chip red">⏰ {{ otgan.oy }} qoldig'i so'ralmoqda {{ otgan.n }} · {{ otgan.sum_d }}</span>{% endif %}
     {% if soon_n %}<span class="chip amber">⏳ yaqin {{ soon_n }} · {{ soon_sum }}</span>{% endif %}
     {% if keyingi and keyingi.n %}<span class="chip amber">📅 {{ keyingi.oy }} ≤5 kun {{ keyingi.n }} · {{ keyingi.sum_d }}</span>{% endif %}
-    {% if not overdue_n and not soon_n and not (keyingi and keyingi.n) and not (otgan and otgan.n) %}<span class="chip green">✓ dolzarb qarz yo'q</span>{% endif %}
+    {% if keyingi and keyingi.yopildi_n %}<span class="chip amber">🧹 {{ keyingi.oy }} tabida yopilgan {{ keyingi.yopildi_n }}</span>{% endif %}
+    {% if not overdue_n and not soon_n and not (keyingi and keyingi.n) and not (otgan and otgan.n) and not (keyingi and keyingi.yopildi_n) %}<span class="chip green">✓ dolzarb qarz yo'q</span>{% endif %}
   </div>
 </div>
 
