@@ -149,10 +149,18 @@ def build_undiruv(day, now):
     import undiruv as undiruvmod
 
     try:
-        rows, tab, source = undiruvmod.load_rows(day)  # jonli-birinchi
+        view = undiruvmod.korinish(date.fromisoformat(day), day)  # jonli-birinchi, kesh yo'q
+        rows, tab, source = view["rows"], view["tab"], view["source"]
     except Exception as e:
         log(f"undiruv o'qilmadi: {e}")
         return None
+    if tab is None:
+        # Joriy oy tabi topilmadi/o'qilmadi — o'tgan oy jadvali jim qolib ketmasin (review CN8):
+        # KPI bloki va push bilan bir xil ogohlantirish
+        out = [["UNDIRUV — ⚠️ joriy oy tabi yo'q", "", "", "", "", "", ""]]
+        out += [[n, "", "", "", "", "", ""] for n in undiruvmod.izoh_satrlari(view.get("notes") or [])]
+        out.append(["Yangilangan", now, "", "", "", "", ""])
+        return out
     if not rows:
         return None
     today = date.fromisoformat(day)
@@ -162,12 +170,19 @@ def build_undiruv(day, now):
         # hisoblanmaydi
         if undiruvmod.is_active_only(r):
             return "Aktiv obuna 💳"
+        if undiruvmod.is_unpaid(r) and r.get("keyingi_oyga"):
+            # Oy oxirida keyingi oy tabiga ko'chgan/yopilgan — «muddat o'tdi» emas (PM'dan
+            # so'ralmaydi); yopilgani alohida: joriy tabni tuzatish kerak (C2)
+            if r["keyingi_oyga"].get("turi") == "yopilgan":
+                return "Keyingi oy tabida yopilgan 🧹"
+            return "Keyingi oyga ko'chdi 🔁"
         if undiruvmod.is_unpaid(r) and r["muddat"] and r["muddat"] < today:
             return "MUDDAT O'TDI 🔴"
         return undiruvmod.STATUS_LABEL[r["holat"]]
 
-    order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Aktiv obuna 💳": 2,
-             "Pauza ⏸": 3, "Ketdi ⛔": 4, "Undirildi ✅": 5}
+    order = {"MUDDAT O'TDI 🔴": 0, "Kutilmoqda": 1, "Keyingi oyga ko'chdi 🔁": 2,
+             "Keyingi oy tabida yopilgan 🧹": 2, "Aktiv obuna 💳": 3, "Pauza ⏸": 4,
+             "Ketdi ⛔": 5, "Undirildi ✅": 6}
     src_tag = "  🧊 SNAPSHOT (jonli emas)" if source == "snapshot" else ""
     out = [[f"UNDIRUV — {tab}{src_tag}", "", "", "", "", "", ""], list(HEADERS_UNDIRUV)]
     for r in sorted(rows, key=lambda r: (order.get(status_label(r), 9),
@@ -191,6 +206,13 @@ def build_undiruv(day, now):
         out.append(["Aktiv obuna (so'ralmaydi)", "", t["aktiv"], "", "", "", ""])
     if t["status_blank_n"]:
         out.append([f"⚠️ Status bo'sh: {t['status_blank_n']} ta qator", "", "", "", "", "", ""])
+    # Ega qarori bo'yicha qo'shilgan (jadvalda hali yo'q) qoldiq — JAMI sheet «Jami»sidan
+    # shuncha farq qiladi; izohsiz farq chalg'itadi (review M9/C11)
+    for r in rows:
+        q = r.get("qoshimcha")
+        if q and not q.get("jadvalda"):
+            out.append([f"📝 Ega qarori: {r['loyiha']} +{q['summa']} ({q.get('oy', '')} qoldig'i) — "
+                        f"jadvalda hali yo'q, JAMI shunga farq qiladi", "", "", "", "", "", ""])
     out.append(["Yangilangan", now, "", "", "", "", ""])
     return out
 

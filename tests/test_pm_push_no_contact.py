@@ -23,7 +23,8 @@ _ORIG = {n: getattr(pm_push, n) for n in
          ("_load_state", "_save_state", "_month_rows_src", "build_push",
           "load_contacts", "slots_from_config", "send_owner", "owner_pdf")}
 _U_ORIG = {n: getattr(undiruv, n) for n in
-           ("consume_tab_note", "snapshot_banner", "reconcile_warn", "totals", "is_unpaid")}
+           ("consume_tab_note", "snapshot_banner", "reconcile_warn", "totals", "is_unpaid",
+            "korinish")}
 
 _STATS = {
     "overdue_n": 1, "overdue_sum": 100, "aktiv_n": 1, "aktiv_sum": 100,
@@ -46,7 +47,14 @@ def _run(contacts, userbot=(True, "")):
     pm_push._load_state = lambda: {}
     pm_push._save_state = lambda d: None
     pm_push._month_rows_src = lambda m, t, d: ("Undiruv sentabr", [{"r": 1}], "live")
-    pm_push.build_push = lambda today, cur, prev, pm: ({"Ali": ["• Loyiha A — $100"]}, dict(_STATS))
+    # 29.09 dan run_daily yagona yig'uvchi (undiruv.korinish) orqali o'qiydi
+    undiruv.korinish = lambda today=None, day=None, prefer_live=True, qlar=None: {
+        "tab": "Undiruv sentabr", "rows": [{"r": 1}], "source": "live", "oy": "sentyabr",
+        "prev": {"tab": None, "rows": [], "source": "none", "oy": "avgust", "real": [],
+                 "closed": [], "moved": [], "farqli": [], "noaniq": [], "izoh": []},
+        "keyingi": None, "notes": [], "data_source": "live"}
+    pm_push.build_push = lambda today, cur, prev, pm, view=None: (
+        {"Ali": ["• Loyiha A — $100"]}, dict(_STATS))
     pm_push.load_contacts = lambda: contacts
     pm_push.slots_from_config = lambda: {"ali": "Ali"}
     pm_push.send_owner = lambda t: owner_msgs.append(t)

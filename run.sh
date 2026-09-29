@@ -41,7 +41,9 @@ alert() {
 
 "$PY" fetch.py   --date "$TODAY" || alert "fetch bosqichi yiqildi"
 "$PY" diff.py    --date "$TODAY" || alert "diff bosqichi yiqildi"
-"$PY" analyze.py --date "$TODAY" || alert "analyze bosqichi yiqildi"
+# UNDIRUV_KESH=1 — faqat shu subprocess'da: KPI matn bloki va report.json bitta undiruv
+# ko'rinishidan chiqsin (bot jarayonidagi /hisobot, /pm_push esa har safar jonli o'qiydi)
+UNDIRUV_KESH=1 "$PY" analyze.py --date "$TODAY" || alert "analyze bosqichi yiqildi"
 
 # Data audit: dushanba — to'liq bo'lim, boshqa kunlar — faqat kritik 1 qator
 REPORT="$DATA_DIR/snapshots/$TODAY/report.md"

@@ -308,6 +308,7 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
     t_disp["pct_d"] = str(t.get("pct", 0)).replace(".", ",")
     pct = float(t.get("pct", 0) or 0)
     pct_class = "green" if pct >= 85 else ("amber" if pct >= 70 else "red")
+    import undiruv as _u
     pms = []
     overdue_n, overdue_sum = 0, 0
     soon_n, soon_sum = 0, 0
@@ -315,24 +316,27 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         pm = dict(pm)
         pm["sum_d"] = usd(pm.get("sum", 0))
         pm["paid_sum_d"] = usd(pm.get("paid_sum", 0))
-        pm["has_overdue"] = any(i.get("status") == "overdue" for i in pm.get("items", []))
+        pm["has_overdue"] = any(i.get("status") == "overdue" or
+                                (i.get("status") == "otgan" and i.get("otgan_status") == "overdue")
+                                for i in pm.get("items", []))
+        # Joriy oydan tashqari (09:30 push AYNAN shularni ham PM'ga yuboradi) — badge'da ko'rinsin,
+        # aks holda eslatma olgan PM kartochkasida «✓ qarz yo'q» chiqardi (review M5/C2)
+        pm["qoshimcha_d"] = _u.pm_qoshimcha_matn(pm).lstrip(" ·")
         items = []
         for i in pm.get("items", []):
             i = dict(i)
             i["summa_d"] = usd(i.get("summa", 0))
             st, kun = i.get("status"), i.get("kun")
+            belgi = {"overdue": "🔴", "soon": "⏳", "future": "📅", "kochdi": "🔁", "yopildi": "🧹",
+                     "keyingi": "📅", "otgan": "🔴" if i.get("otgan_status") == "overdue" else "⏳",
+                     "nodate": "📋"}.get(st, "📋")
+            i["st_label"] = f"{belgi} {_u.item_holat_matn(i)}"
             if st == "overdue":
-                i["st_label"] = f"🔴 {kun} kun o'tdi"
                 overdue_n += 1
                 overdue_sum += i.get("summa", 0)
             elif st == "soon":
-                i["st_label"] = "⏳ bugun" if kun == 0 else f"⏳ {kun} kun qoldi"
                 soon_n += 1
                 soon_sum += i.get("summa", 0)
-            elif st == "future":
-                i["st_label"] = f"📅 {kun} kun"
-            else:
-                i["st_label"] = "📋 sana yo'q"
             items.append(i)
         pm["items"] = items
         pms.append(pm)
@@ -361,8 +365,14 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         # Prime'da header navy — to'q fon uchun oq logo varianti (bo'lsa)
         logo_uri = logo_data_uri("light" if design.get("header_bg", "").lower() not in
                                  ("#ffffff", "#fff", "") else None)
-    import undiruv as _u
     reconcile_warn = _u.reconcile_warn(data.get("totals") or {})
+    kd = dict(data.get("keyingi") or {})
+    if kd:
+        kd["sum_d"] = usd(kd.get("sum", 0))
+        kd["koch_sum_d"] = usd(kd.get("kochdi_sum", 0) + kd.get("yopildi_sum", 0))
+    od = dict(data.get("otgan") or {})
+    if od:
+        od["sum_d"] = usd(od.get("sum", 0))
     snapshot_banner = ("🧊 SNAPSHOT — JONLI MA'LUMOT EMAS · raqamlar eskirgan bo'lishi mumkin"
                        if data.get("data_source") == "snapshot" else "")
     return tpl.render(
@@ -384,6 +394,9 @@ def build_undiruv_html(data, theme=None, logo_uri=None):
         pct_class=pct_class,
         aktiv_obuna=ao if ao.get("n") else None,
         lose=lose or None,
+        keyingi=kd or None,
+        otgan=od or None,
+        notes=data.get("notes") or [],
         push_info=data.get("push_info") or [],
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )

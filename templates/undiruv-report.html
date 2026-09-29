@@ -124,8 +124,10 @@
   </div>
   <div class="chips">
     {% if overdue_n %}<span class="chip red">🔴 muddat o'tgan {{ overdue_n }} · {{ overdue_sum }}</span>{% endif %}
+    {% if otgan and otgan.n %}<span class="chip red">⏰ {{ otgan.oy }} qoldig'i so'ralmoqda {{ otgan.n }} · {{ otgan.sum_d }}</span>{% endif %}
     {% if soon_n %}<span class="chip amber">⏳ yaqin {{ soon_n }} · {{ soon_sum }}</span>{% endif %}
-    {% if not overdue_n and not soon_n %}<span class="chip green">✓ dolzarb qarz yo'q</span>{% endif %}
+    {% if keyingi and keyingi.n %}<span class="chip amber">📅 {{ keyingi.oy }} ≤5 kun {{ keyingi.n }} · {{ keyingi.sum_d }}</span>{% endif %}
+    {% if not overdue_n and not soon_n and not (keyingi and keyingi.n) and not (otgan and otgan.n) %}<span class="chip green">✓ dolzarb qarz yo'q</span>{% endif %}
   </div>
 </div>
 
@@ -145,6 +147,11 @@
               border-radius: var(--radius); padding: 2.4mm 3.2mm; margin-bottom: var(--sp-2);
               font-size: 9.5px; font-weight: 700;">{{ reconcile_warn }}</div>
   {% endif %}
+  {% if notes and not push_info %}
+  <div style="background: var(--chip-amber-bg); color: var(--chip-amber-text);
+              border-radius: var(--radius); padding: 2.4mm 3.2mm; margin-bottom: var(--sp-2);
+              font-size: 9.5px; font-weight: 600;">{% for n in notes %}{{ n }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
+  {% endif %}
   <div class="kpis">
     <div class="kpi"><div class="l">Kelishilgan</div><div class="v">{{ t.kelishilgan_d }}</div>
       <div class="s">{{ data.counts.jami }} loyiha</div></div>
@@ -153,7 +160,7 @@
     <div class="kpi"><div class="l">Bajarilish</div><div class="v {{ pct_class }}">{{ t.pct_d }}%</div>
       <div class="s">undirildi / kelishilgan</div></div>
     <div class="kpi"><div class="l">Qoldiq</div><div class="v {{ 'plain' if not data.totals.qoldiq else 'amber' }}">{{ t.qoldiq_d }}</div>
-      <div class="s">shu oy so'raladi</div></div>
+      <div class="s">{% if keyingi and (keyingi.kochdi_n or keyingi.yopildi_n) %}shundan {{ keyingi.koch_sum_d }} — {{ keyingi.oy }} tabida (eski muddat bilan so'ralmaydi){% else %}shu oy so'raladi{% endif %}</div></div>
     <div class="kpi"><div class="l">Aktiv obuna</div><div class="v plain">{{ t.aktiv_d }}</div>
       <div class="s">oldindan to'langan</div></div>
     <div class="progress">
@@ -169,6 +176,7 @@
       <div class="top">
         <span class="name">{{ pm.name }}</span>
         {% if pm.n %}<span class="badge {{ 'red' if pm.has_overdue else 'amber' }}">undirilmagan {{ pm.n }} · {{ pm.sum_d }}</span>
+        {% elif pm.qoshimcha_d %}<span class="badge {{ 'red' if pm.has_overdue else 'amber' }}">{{ pm.qoshimcha_d }}</span>
         {% else %}<span class="badge green">✓ qarz yo'q</span>{% endif %}
       </div>
       {% if pm["items"] %}

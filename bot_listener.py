@@ -1460,26 +1460,32 @@ def do_test_undiruv():
     typing()
     mid = send_status("🧪 Undiruv dry-run — jonli o'qilmoqda...")
     today = date.today()
-    # Yagona loader: jonli-birinchi, snapshot fallback (source qaytaradi)
-    rows, tab, source = undiruvmod.load_rows(today.isoformat(), today, prefer_live=True)
+    # Yagona yig'uvchi (09:30 push bilan AYNAN bir xil tasnif): jonli-birinchi, snapshot
+    # fallback; kesh YO'Q — ega sheet'ni tuzatib qayta so'rasa, yangisi o'qiladi
+    view = undiruvmod.korinish(today, today.isoformat(), prefer_live=True)
+    rows, tab, source = view["rows"], view["tab"], view["source"]
     src = ("jonli holat " + datetime.now().strftime("%d.%m %H:%M")) if source == "live" \
         else (f"snapshot {today.isoformat()} — jonli o'qib bo'lmadi" if source == "snapshot"
               else "manba yo'q")
     if not rows:
+        izoh = "\n".join(view.get("notes") or [])
         edit_status(mid, f"«Undiruv {fetchmod.current_month_name(today)}» tabi o'qilmadi "
-                         "(jonli ham, snapshot ham).")
+                         "(jonli ham, snapshot ham)." + (f"\n{izoh}" if izoh else ""))
         return
     # Dizaynli PDF (render_pdf pipeline); yiqilsa avvalgi matn ko'rinishi
     import pm_push as pmp
 
+    # Badge raqami 09:30 push bilan bir manbadan (build_push; hech narsa yuborilmaydi)
+    _per_pm, st = pmp.build_push(today, rows, view["prev"]["rows"] or [], view["prev"]["oy"], view=view)
     pdf_ok = pmp.owner_pdf(rows, tab, today, src, data_source=source,
-                           title=f"🧪 Undiruv dry-run — {tab} ({src})")
+                           title=f"🧪 Undiruv dry-run — {tab} ({src})",
+                           overdue=(st["overdue_n"], st["overdue_sum"]), view=view)
     if pdf_ok:
         delete_status(mid)
         ok = True
     else:
         delete_status(mid)
-        ok = send_retry(undiruvmod.full_report(rows, tab, today, source=src))
+        ok = send_retry(undiruvmod.full_report(rows, tab, today, source=src, view=view))
     log(f"/test_undiruv {'yuborildi' if ok else 'YUBORILMADI'} "
         f"({'PDF' if pdf_ok else 'matn'}, {len(rows)} qator, {src})")
 

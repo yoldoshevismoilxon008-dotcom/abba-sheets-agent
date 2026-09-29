@@ -157,7 +157,12 @@
   </div>
 </div>
 
-{% if undiruv %}
+{% if undiruv and undiruv.topilmadi %}
+<div class="undiruv">
+  <h3>💰 Undiruv ({{ undiruv.oy }})</h3>
+  {% for n in undiruv.notes %}<div class="u-due"><span class="overdue">{{ n }}</span></div>{% endfor %}
+</div>
+{% elif undiruv %}
 <div class="undiruv">
   {% if undiruv.source == "snapshot" %}<div style="background:#0F1111;color:#fff;border-radius:2mm;padding:1.6mm 2.4mm;margin-bottom:1.6mm;font-size:9.5px;font-weight:800;">🧊 SNAPSHOT — JONLI MA'LUMOT EMAS</div>{% endif %}
   <h3>💰 Undiruv ({{ undiruv.oy }}) — {{ undiruv.tab }}</h3>
@@ -168,17 +173,40 @@
     {% if undiruv.aktiv %}<div class="uk"><div class="l">Aktiv obuna</div><div class="v muted">{{ undiruv.aktiv_disp }}</div></div>{% endif %}
     <div class="uk"><div class="l">Bajarilish</div><div class="v">{{ undiruv.pct|string|replace(".", ",") }}%</div></div>
   </div>
+  {% for n in undiruv.notes or [] %}<div class="u-due"><span class="soon">{{ n }}</span></div>{% endfor %}
   {% if undiruv.muddat_otgan %}
   <div class="u-due"><span class="overdue">⏰ Muddati o'tgan, undirilmagan — {{ undiruv.muddat_otgan|length }} loyiha ({{ undiruv.otgan_sum }}):</span>
     {% for i in undiruv.muddat_otgan[:6] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.muddat_otgan|length > 6 %} · +{{ undiruv.muddat_otgan|length - 6 }} ta{% endif %}
   </div>
   {% endif %}
+  {% if undiruv.otgan_oy and undiruv.otgan_oy["items"] %}
+  <div class="u-due"><span class="overdue">⏰ {{ (undiruv.otgan_oy.oy or "o'tgan oy")|capitalize }} qoldig'i (o'tgan oy tabidan, PM'dan so'ralmoqda) — {{ undiruv.otgan_oy["items"]|length }} ta (${{ undiruv.otgan_oy.sum }}):</span>
+    {% for i in undiruv.otgan_oy["items"][:6] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.otgan_oy["items"]|length > 6 %} · +{{ undiruv.otgan_oy["items"]|length - 6 }} ta{% endif %}
+  </div>
+  {% endif %}
   {% if undiruv.muddat_yaqin %}
-  <div class="u-due"><span class="soon">🔜 Muddati ≤4 kun:</span>
+  <div class="u-due"><span class="soon">🔜 Muddati ≤{{ undiruv.yaqin_kun or 5 }} kun:</span>
     {% for i in undiruv.muddat_yaqin[:5] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.muddat_yaqin|length > 5 %} · +{{ undiruv.muddat_yaqin|length - 5 }} ta{% endif %}
   </div>
   {% endif %}
-  {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin %}
+  {% if undiruv.keyingi and undiruv.keyingi.kochgan %}
+  <div class="u-due"><span class="soon">🔁 {{ undiruv.keyingi.oy|capitalize }} tabiga ko'chirilgan (eski muddat bilan so'ralmaydi) — {{ undiruv.keyingi.kochgan|length }} ta (${{ undiruv.keyingi.kochgan_sum }}):</span>
+    {% for i in undiruv.keyingi.kochgan[:6] %}{{ i.matn or (i.loyiha ~ " → " ~ i.yangi_muddat) }}{% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.keyingi.kochgan|length > 6 %} · +{{ undiruv.keyingi.kochgan|length - 6 }} ta{% endif %}
+  </div>
+  {% endif %}
+  {% if undiruv.keyingi and undiruv.keyingi.yopilgan %}
+  <div class="u-due"><span class="soon">🧹 {{ undiruv.keyingi.oy|capitalize }} tabida to'langan/ketgan deb yozilgan, {{ undiruv.oy }} tabida ochiq (so'ralmaydi — tabni tuzating) — {{ undiruv.keyingi.yopilgan|length }} ta (${{ undiruv.keyingi.yopilgan_sum }}):</span>
+    {% for i in undiruv.keyingi.yopilgan[:6] %}{{ i.matn }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% if undiruv.keyingi and undiruv.keyingi.yaqin %}
+  <div class="u-due"><span class="soon">📅 {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) — muddati ≤{{ undiruv.yaqin_kun or 5 }} kun: {{ undiruv.keyingi.yaqin|length }} ta (${{ undiruv.keyingi.yaqin_sum }}):</span>
+    {% for i in undiruv.keyingi.yaqin[:6] %}{{ i.loyiha }} ({{ i.pm }}, ${{ i.summa }}, {{ i.muddat }}){% if not loop.last %} · {% endif %}{% endfor %}{% if undiruv.keyingi.yaqin|length > 6 %} · +{{ undiruv.keyingi.yaqin|length - 6 }} ta{% endif %}
+  </div>
+  {% elif undiruv.keyingi and not undiruv.keyingi.tab %}
+  <div class="u-due"><span class="soon">{% if undiruv.keyingi.source == "xato" %}⚠️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat bilan so'ralmoqda{% else %}ℹ️ {{ undiruv.keyingi.oy|capitalize }} (keyingi oy) tabi hali yo'q — keyingi oy to'lovlari ko'rinmaydi{% endif %}</span></div>
+  {% endif %}
+  {% if not undiruv.muddat_otgan and not undiruv.muddat_yaqin and not (undiruv.keyingi and undiruv.keyingi.yaqin) and not (undiruv.otgan_oy and undiruv.otgan_oy["items"]) %}
   <div class="u-ok">✅ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q</div>
   {% endif %}
 </div>

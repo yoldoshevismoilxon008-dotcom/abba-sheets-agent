@@ -85,16 +85,18 @@ def _send_doc_owner(path, caption, filename):
 
 
 def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source=None,
-              overdue=None):
+              overdue=None, view=None):
     """Egaga dizaynli undiruv PDF (render_pdf pipeline, abba logo, theme).
     data_source ∈ {'live','snapshot'} — 'snapshot' bo'lsa PDF boshiga 🧊 banner.
     overdue=(n, sum) — build_push hisobi; berilsa PDF badge SHU raqamni oladi va
     o'zi qayta hisoblamaydi (bitta hujjatda bitta manba bo'lsin).
+    view — undiruv.korinish(): berilsa PDF o'tgan oy qoldiqlari va keyingi oy ≤5 kunlik
+    to'lovlarini ham ko'rsatadi (09:30 push AYNAN shularni PM'ga yuboradi — C3).
     Muvaffaqiyatda True; yiqilsa False — chaqiruvchi matn fallback yuboradi."""
     try:
         import render_pdf
 
-        d = undiruv.report_data(rows, tab, today, source=source)
+        d = undiruv.report_data(rows, tab, today, source=source, view=view)
         if overdue is not None:
             d["overdue_n"], d["overdue_sum"] = overdue
         # data_source berilmasa — display source satridan chiqaramiz
@@ -348,10 +350,73 @@ def _fmt(v):
     return f"${v:,.0f}".replace(",", " ")
 
 
-def build_push(today, cur_rows, prev_rows, prev_month):
+def _tafsil(r, oy):
+    """Qaror bo'yicha qo'shilgan (jadvalda hali yo'q) qoldiq bo'lsa — PM ko'radigan izoh:
+    « (oktyabr $1 350 + sentyabr qoldig'i $364)», to'lov bo'lsa « … − to'langan $1 000»."""
+    q = r.get("qoshimcha")
+    if not q or q.get("jadvalda"):
+        return ""
+    tol = f" − to'langan {_fmt(r['undirildi'])}" if r.get("undirildi", 0) > 0 else ""
+    return f" ({oy} {_fmt(q['asl'])} + {q['oy']} qoldig'i {_fmt(q['summa'])}{tol})"
+
+
+def _qaror_satri(m, yangi_oy):
+    """Ega qarori qo'llangan ko'chirish → jamlama satri (qaysi qaror nima qildi)."""
+    k = m.get("_kochish") or {}
+    otgan_oy = k.get("oy") or "o'tgan oy"      # f-string ichida teskari chiziq bo'lmasin (3.9)
+    if k.get("turi") == "qaror_qoshildi":
+        kel = k.get("cur_kelishilgan", k.get("cur_summa", 0))
+        qol = k.get("cur_summa", kel)
+        qism = f", qoldiq {_fmt(qol)}" if round(qol) != round(kel) else ""
+        return (f"{m['loyiha']} — {otgan_oy} qoldig'i {_fmt(m['qoldiq'])} "
+                f"{yangi_oy} summasiga qo'shildi (jami {_fmt(kel)}{qism})")
+    if k.get("turi") == "qaror_yangi_toliq":
+        return (f"{m['loyiha']} — {yangi_oy}dagi {_fmt(k.get('cur_summa', 0))} to'liq summa "
+                f"({otgan_oy} {_fmt(m['qoldiq'])} alohida so'ralmaydi)")
+    return None
+
+
+def _noaniq_satr(r, oy):
+    sabab = r.get("_noaniq") or "ikki o'xshash nom"
+    return f"{r['loyiha']} ({r['pm']}, {oy}: {sabab})"
+
+
+def _slotga_yig(per_pm, nodate_pm):
+    """PM ismlari → slot bo'yicha BIRLASHTIRILGAN xabar tarkibi: (by_slot{slot: (ism,
+    satrlar)}, slot_n{slot: soni}, slot_nd{slot: sanasizlar}). Bitta PM ismi ikki tabda
+    ikki xil yozilishi mumkin («Azizxo'ja»/«Azizxo’ja») — bitta xabar. run_daily va
+    /pm_push test (test_to_saved) AYNAN shu yig'uvchidan (sinov haqiqiysidan farq qilmasin)."""
+    by_slot, slot_n, slot_nd = {}, {}, {}
+    for pm_name in sorted(set(per_pm) | set(nodate_pm)):
+        sk = _slot_key(pm_name)
+        nm, lines = by_slot.get(sk, (pm_name, []))
+        by_slot[sk] = (nm, lines + per_pm.get(pm_name, []))
+        slot_nd.setdefault(sk, []).extend(nodate_pm.get(pm_name, []))
+        slot_n[sk] = len(by_slot[sk][1]) + len(slot_nd[sk])
+    return by_slot, slot_n, slot_nd
+
+
+def _xabar_matni(dd, lines, nd):
+    """PM eslatma matni (run_daily va test_to_saved — bitta shakl)."""
+    body = "\n".join(lines)
+    if nd:
+        nd_block = ("📅 Sana belgilanmagan — aniq to'lov sanasini yozing:\n"
+                    + "\n".join(f"• {x}" for x in nd))
+        body = (body + "\n\n" + nd_block) if body else nd_block
+    return (f"🔔 Undiruv eslatmasi — {dd}\n\n" + body
+            + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
+
+
+def build_push(today, cur_rows, prev_rows, prev_month, view=None):
     """(pm_display → [qator matnlari], stats). Filtr: undiruv.is_unpaid +
     muddat o'tgan yoki ≤PUSH_DUE_DAYS kun. Sanasizlar PM'ga ketmaydi (stats'da).
-    Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan."""
+    Carryover (o'tgan oy) qatorlari "(<oy> qoldig'i)" belgisi bilan.
+
+    view — undiruv.korinish() natijasi (production yo'li). Berilsa: o'tgan oy tasnifi
+    shu yerdan (imloga chidamli moslik + ega qarorlari), keyingi oyga ko'chgan joriy
+    qatorlar (`keyingi_oyga`) eski muddat bilan SO'RALMAYDI, keyingi oyning muddati
+    ≤PUSH_DUE_DAYS qatorlari «(<oy>)» belgisi bilan PM'ga qo'shiladi. Berilmasa —
+    eski xulq (carryover_filter)."""
     per_pm = {}
     # overdue_* = JORIY oy tabi (PDF badge/kartochkalari bilan bir xil to'plam).
     # O'tgan oydan ko'chgan qarzlar ALOHIDA sanaladi (overdue_carry_*) — ilgari
@@ -361,7 +426,13 @@ def build_push(today, cur_rows, prev_rows, prev_month):
              "aktiv_n": 0, "aktiv_sum": 0, "closed_carry": [], "moved_carry": [],
              "unpaid_n": 0, "status_blank": [],
              "pm_missing": [], "pm_col_missing": False, "pm_col_tab": "",
-             "nodate_pm": {}, "nodate_n": 0}   # muddatsiz undirilmaganlar (PM kesimida)
+             "nodate_pm": {}, "nodate_n": 0,   # muddatsiz undirilmaganlar (PM kesimida)
+             # oy almashuvi (view bilan): keyingi oy, ko'chganlar, summa farqli, qarorlar
+             "keyingi_n": 0, "keyingi_sum": 0, "keyingi_tab": None, "keyingi_oy": None,
+             "keyingi_bor": False, "keyingi_kochgan": [], "keyingi_yopilgan": [],
+             "keyingi_source": None, "farqli": [], "noaniq": [],
+             "qaror_qollangan": [], "qaror_izoh": []}
+    cur_oy = (view or {}).get("oy") or fetchmod.current_month_name(today)
     # PM ustuni tabda UMUMAN yo'qmi (avgust holati) — joriy oy qatorlaridan
     if cur_rows and not cur_rows[0].get("pm_col_present", True):
         stats["pm_col_missing"] = True
@@ -373,7 +444,17 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     # Carryover: joriy oy tabida allaqachon to'langan/yuritilayotgan loyihalar
     # o'tgan oy qoldig'i sifatida SO'RALMAYDI — faqat ega jamlamasida
     # "sheet'ni tuzatish kerak" bloki
-    prev_real, closed, moved = undiruv.carryover_filter(prev_rows, cur_rows)
+    if view is not None:
+        pv = view["prev"]
+        prev_real, closed, moved = pv["real"], pv["closed"], pv["moved"]
+        stats["farqli"] = [{"loyiha": r["loyiha"], "pm": r["pm"], "otgan": round(r["qoldiq"]),
+                            "yangi": r["_kochish"]["cur_summa"], "yangi_loyiha": r["_kochish"]["cur_loyiha"],
+                            "yonalish": f"{prev_month} → {cur_oy}"} for r in pv["farqli"]]
+        stats["noaniq"] = [_noaniq_satr(r, prev_month) for r in pv["noaniq"]]
+        stats["qaror_izoh"] = list(pv["izoh"])
+        stats["qaror_qollangan"] = [x for x in (_qaror_satri(m, cur_oy) for m in moved) if x]
+    else:
+        prev_real, closed, moved = undiruv.carryover_filter(prev_rows, cur_rows)
     stats["closed_carry"] = [
         {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
         for r in closed
@@ -381,11 +462,16 @@ def build_push(today, cur_rows, prev_rows, prev_month):
     # Joriy oy tabiga KO'CHIRILGAN qoldiqlar — PM'ga ikkinchi marta so'ralmaydi,
     # lekin egaga ko'rinadi (jim yutilmasin).
     stats["moved_carry"] = [
-        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"])}
+        {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"]),
+         "matn": undiruv.kochish_matn(r)}          # «Rivo → Rivo water ($1 800 → 04.10)»
         for r in moved
     ]
     for r, carry in [(r, False) for r in cur_rows] + [(r, True) for r in prev_real]:
         if not undiruv.is_unpaid(r):
+            continue
+        if r.get("keyingi_oyga"):
+            # keyingi oy tabiga ko'chgan/yopilgan (joriy oy qatori ham, o'tgan oy qoldig'i
+            # ham — ega uni keyingi oy tabiga yozgan bo'lsa) — eski muddat bilan so'ralmaydi
             continue
         stats["unpaid_n"] += 1
         summa = r["qoldiq"]  # so'raladigan qarz = D (ayirmasiz)
@@ -394,6 +480,7 @@ def build_push(today, cur_rows, prev_rows, prev_month):
         if r.get("status_blank"):
             stats["status_blank"].append(f"{r['loyiha']} ({r['pm']})")
         name = r["loyiha"] + (f" ({prev_month} qoldig'i)" if carry else "")
+        tafsil = "" if carry else _tafsil(r, cur_oy)
         if r["holat"] == "pauza":
             stats["pauza"].append(f"{r['loyiha']} ({r['pm']})")
         # Muddat yo'q, lekin qarz bor — YO'QOLMASIN: PM'i borlar PM xabaridagi
@@ -411,7 +498,7 @@ def build_push(today, cur_rows, prev_rows, prev_month):
         if days_left > PUSH_DUE_DAYS:
             continue
         if days_left < 0:
-            line = f"🔴 MUDDAT O'TDI ({-days_left} kun): {name} — qoldiq {_fmt(summa)}"
+            line = f"🔴 MUDDAT O'TDI ({-days_left} kun): {name} — qoldiq {_fmt(summa)}{tafsil}"
             if carry:                      # o'tgan oy qoldig'i — alohida hisob
                 stats["overdue_carry_sum"] += summa
                 stats["overdue_carry_n"] += 1
@@ -420,7 +507,7 @@ def build_push(today, cur_rows, prev_rows, prev_month):
                 stats["overdue_n"] += 1
         else:
             qoldi = "bugun oxirgi kun" if days_left == 0 else f"{days_left} kun qoldi"
-            line = (f"⏳ Undiruv: {name} — qoldiq {_fmt(summa)}, "
+            line = (f"⏳ Undiruv: {name} — qoldiq {_fmt(summa)}{tafsil}, "
                     f"muddat {undiruv._due_str(r['muddat'])} ({qoldi})")
         # PM aniqlanmagan (ustun yo'q yoki katak bo'sh) — PM'GA YO'NALTIRILMAYDI,
         # egaga ogohlantirish + qo'lda yuborish uchun tayyor matn
@@ -428,6 +515,42 @@ def build_push(today, cur_rows, prev_rows, prev_month):
             stats["pm_missing"].append({"loyiha": r["loyiha"], "line": line})
             continue
         per_pm.setdefault(r["pm"], []).append(line)
+    # Keyingi oy (oy oxirida): muddati ≤PUSH_DUE_DAYS — PM'ga «(<oy>)» belgisi bilan
+    k = (view or {}).get("keyingi")
+    if k is not None:
+        stats["keyingi_bor"] = True
+        stats["keyingi_tab"], stats["keyingi_oy"] = k.get("tab"), k.get("oy")
+        stats["keyingi_source"] = k.get("source")
+        flag = ([r for r in cur_rows if r.get("keyingi_oyga")]
+                + [r for r in prev_real if r.get("keyingi_oyga")])
+
+        def _ki(r):
+            kk = r["keyingi_oyga"]
+            return {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"]),
+                    "yangi_muddat": undiruv._due_str(kk.get("muddat")), "turi": kk.get("turi"),
+                    "matn": undiruv.kochish_matn(r)}
+        stats["keyingi_kochgan"] = [_ki(r) for r in flag if r["keyingi_oyga"].get("turi") != "yopilgan"]
+        stats["keyingi_yopilgan"] = [_ki(r) for r in flag if r["keyingi_oyga"].get("turi") == "yopilgan"]
+        stats["farqli"] += [{"loyiha": r["loyiha"], "pm": r["pm"], "otgan": round(r["qoldiq"]),
+                             "yangi": r["_kochish"]["cur_summa"], "yangi_loyiha": r["_kochish"]["cur_loyiha"],
+                             "yonalish": r.get("_yonalish") or f"{cur_oy} → {k['oy']}"}
+                            for r in k.get("farqli", [])]
+        stats["noaniq"] += [_noaniq_satr(r, cur_oy) for r in k.get("noaniq", [])]
+        stats["qaror_izoh"] += list(k.get("izoh", []))
+        stats["qaror_qollangan"] += [x for x in (_qaror_satri(m, k["oy"]) for m in k.get("kochgan", [])) if x]
+        for r in k.get("yaqin", []):
+            days_left = (r["muddat"] - today).days
+            qoldi = "bugun oxirgi kun" if days_left == 0 else f"{days_left} kun qoldi"
+            line = (f"⏳ Undiruv: {r['loyiha']} ({k['oy']}) — qoldiq {_fmt(r['qoldiq'])}"
+                    f"{_tafsil(r, k['oy'])}, muddat {undiruv._due_str(r['muddat'])} ({qoldi})")
+            if r.get("pm_missing"):
+                # PM'siz — PM xabariga TUSHMAYDI (egaga qo'lda yuborish ro'yxati); «PM xabarlariga
+                # qo'shildi» sanog'iga kirmasin (review C6)
+                stats["pm_missing"].append({"loyiha": r["loyiha"], "line": line})
+                continue
+            stats["keyingi_n"] += 1
+            stats["keyingi_sum"] += round(r["qoldiq"])
+            per_pm.setdefault(r["pm"], []).append(line)
     # Summa katagi son emas (bo'sh ham, raqamli ham emas — masalan #REF!, matn)
     import re as _re
 
@@ -448,34 +571,49 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         return "skip", ""
 
     cur_month = fetchmod.current_month_name(today)
-    prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
+    prev_month = undiruv.oy_ofset(today, -1)[0]
     snap_day = day
     prev_tab = st.get("tab")           # o'tgan run tabi — yangi oy aniqlash uchun
-    # JONLI-birinchi (production MAJBURIY jonli); jonli xato bo'lsa snapshot
-    tab, cur_rows, cur_src = _month_rows_src(cur_month, today, snap_day)
-    tab_note = undiruv.consume_tab_note()   # tab ambiguity/fallback ogohlantirishi (egaga)
-    if tab is None and cur_src == "none":
+    # YAGONA yig'uvchi (C3): joriy + o'tgan (+ oy oxirida keyingi) oy — kunlik KPI
+    # bloki, dashboard va /test_undiruv bilan AYNAN bir xil tasnif. JONLI-birinchi
+    # (production MAJBURIY jonli); jonli xato bo'lsa snapshot.
+    view = undiruv.korinish(today, day=snap_day, prefer_live=True)
+    tab, cur_rows, cur_src = view["tab"], view["rows"], view["source"]
+    birinchi_izoh, birinchi_src = list(view.get("notes") or []), cur_src
+    if tab is None and cur_src in ("none", "xato"):
         # snapshot ham bugun yo'q — oxirgi mavjud kundan urinamiz
         days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()
                       if d.is_dir() and len(d.name) == 10) if diffmod.SNAPSHOTS.is_dir() else []
         if days and days[-1] != snap_day:
             snap_day = days[-1]
-            tab, cur_rows = _month_rows(snap_day, cur_month, today)
-            cur_src = "snapshot" if tab else "none"
+            view = undiruv.korinish(today, day=snap_day, prefer_live=False)
+            tab, cur_rows, cur_src = view["tab"], view["rows"], view["source"]
+            # jonli o'qish xatosi haqidagi izoh yo'qolmasin (review DN6/CN5)
+            view["notes"] = [n for n in birinchi_izoh if "o'qilmadi" in n] + [
+                n for n in (view.get("notes") or []) if n not in birinchi_izoh]
+    # Egaga izohlar: tab ambiguity/xato, ega qarorlari holati, oy oxiri ogohlantirishlari —
+    # har biri alohida satr, belgisi bilan (PDF'da bir qatorga qo'shilib ketmasin — CN7)
+    izoh_satrlar = undiruv.izoh_satrlari(view.get("notes") or [])
+    tab_note = "\n".join(izoh_satrlar)
     if tab is None:
-        msg = (f"⚠️ Undiruv push: joriy oy tabi «Undiruv {cur_month}» topilmadi "
-               f"(jonli va snapshot) — PM'larga hech narsa yuborilmadi. "
-               "Yangi oy tabi ochilganda avtomatik davom etadi.")
+        oqilmadi = birinchi_src == "xato" or cur_src == "xato"
+        msg = (f"⚠️ Undiruv push: joriy oy tabi «Undiruv {cur_month}({view.get('yil', today.year)})» "
+               + ("O'QILMADI (jonli xato, snapshot'da ham yo'q) — PM'larga hech narsa yuborilmadi. "
+                  "Keyinroq /pm_push force bilan qayta urining."
+                  if oqilmadi else
+                  "topilmadi (jonli va snapshot) — PM'larga hech narsa yuborilmadi. "
+                  "Yangi oy tabi ochilganda avtomatik davom etadi.")
+               + (f"\n{tab_note}" if tab_note else ""))
         if not dry_run:
             send_owner(msg)
             _save_state({"date": today.isoformat(), "tab": None, "sent": {}})
         log("joriy oy tabi yo'q — ogohlantirish yuborildi")
         return "no-tab", msg
 
-    _ptab, prev_rows, prev_src = _month_rows_src(prev_month, today, snap_day)
+    prev_rows = view["prev"]["rows"]
     # Manba: jonli bo'lmasa (birortasi snapshot) — banner chiqadi
-    data_source = "snapshot" if "snapshot" in (cur_src, prev_src) else "live"
-    per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month)
+    data_source = view.get("data_source", "live")
+    per_pm, stats = build_push(today, cur_rows, prev_rows or [], prev_month, view=view)
     stats["pm_col_tab"] = tab  # guard xabari uchun
     # Yangi oy tabi birinchi marta o'qildi (o'tgan run boshqa tab edi)
     new_month_tab = bool(prev_tab) and fetchmod.norm(prev_tab) != fetchmod.norm(tab)
@@ -484,24 +622,16 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     slots = slots_from_config()
     nodate_pm = stats.get("nodate_pm", {})
     # by_slot: overdue/due-soon YOKI faqat-muddatsiz qatorli PM'lar ham kirsin
-    by_slot, slot_n = {}, {}
-    for pm_name in set(per_pm) | set(nodate_pm):
-        sk = _slot_key(pm_name)
-        by_slot[sk] = (pm_name, per_pm.get(pm_name, []))
-        slot_n[sk] = len(per_pm.get(pm_name, [])) + len(nodate_pm.get(pm_name, []))
+    # Bitta PM ismi ikki tabda ikki xil yozilishi mumkin («Azizxo'ja»/«Azizxo’ja») —
+    # bir slotga BIRLASHTIRILADI (ilgari ikkinchisi birinchisining satrlarini
+    # jimgina ustidan yozardi; keyingi oy qatorlari qo'shilgach xavf oshdi).
+    by_slot, slot_n, slot_nd = _slotga_yig(per_pm, nodate_pm)
 
     dd = today.strftime("%d.%m.%Y")
     # Xabarlarni tayyorlash (yetkazish: EGANING akkauntidan, userbot_sender)
     msgs, no_contact, texts = [], {}, {}
     for slot, (pm_name, lines) in by_slot.items():
-        body = "\n".join(lines)
-        nd = nodate_pm.get(pm_name, [])
-        if nd:
-            nd_block = ("📅 Sana belgilanmagan — aniq to'lov sanasini yozing:\n"
-                        + "\n".join(f"• {x}" for x in nd))
-            body = (body + "\n\n" + nd_block) if body else nd_block
-        text = (f"🔔 Undiruv eslatmasi — {dd}\n\n" + body
-                + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
+        text = _xabar_matni(dd, lines, slot_nd.get(slot, []))
         texts[slot] = text
         c = contacts.get(slot)
         if not c:
@@ -551,8 +681,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     _banner = undiruv.snapshot_banner(data_source, snap_day)
     if _banner:
         L.append(_banner)
-    if tab_note:                       # tab ambiguity/fallback (2 tab, imlo, topilmadi)
-        L.append(tab_note)
+    L.extend(izoh_satrlar)             # tab/xato/qaror/oy oxiri izohlari — har biri alohida satr
     if new_month_tab:                  # yangi oy tabi birinchi marta o'qildi
         t = undiruv.totals(cur_rows)
         n_unpaid = sum(1 for r in cur_rows if undiruv.is_unpaid(r))
@@ -613,17 +742,58 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         cc = stats["closed_carry"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in cc[:6])
         more = f" +{len(cc) - 6}" if len(cc) > 6 else ""
-        L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan): "
+        L.append(f"🧹 {prev_month.capitalize()} tabida yopilmagan ({cur_month}da to'langan "
+                 f"yoki ketgan deb yozilgan): "
                  f"{len(cc)} ta, {_fmt(sum(i['summa'] for i in cc))} — sheet'ni tuzatish "
                  f"kerak: {det}{more}")
     if stats["moved_carry"]:
         mc = stats["moved_carry"]
-        det = ", ".join(f"{i['loyiha']} ({i['pm']}, {_fmt(i['summa'])})" for i in mc[:8])
+        # nomi farqli (fuzzy) bog'lanishlar «A → B» bo'lib ko'rinadi — ega tekshira olsin (M3)
+        det = ", ".join(f"{i['matn']} — {i['pm']}" for i in mc[:8])
         more = f" +{len(mc) - 8}" if len(mc) > 8 else ""
         L.append(f"🔁 {prev_month.capitalize()}dan {cur_month} tabiga ko'chirilgan "
-                 f"(aynan bir xil summa): {len(mc)} ta, "
+                 f"(nomi mos va summa teng yoki ega qarori): {len(mc)} ta, "
                  f"{_fmt(sum(i['summa'] for i in mc))} — PM'ga IKKI marta "
                  f"so'ralmadi: {det}{more}")
+    # Oy oxiri: keyingi oy tabi — ko'chganlar, muddati yaqinlar, tab yo'qligi (jim emas)
+    k_oy = (stats.get("keyingi_oy") or "keyingi oy")
+    if stats.get("keyingi_kochgan"):
+        kc = stats["keyingi_kochgan"]
+        det = ", ".join(i["matn"] for i in kc[:8])
+        more = f" +{len(kc) - 8}" if len(kc) > 8 else ""
+        L.append(f"🔁 {k_oy.capitalize()} tabiga ko'chirilgan — eski muddat bilan "
+                 f"PM'dan SO'RALMADI: {len(kc)} ta, {_fmt(sum(i['summa'] for i in kc))}: {det}{more}")
+    if stats.get("keyingi_yopilgan"):
+        ky = stats["keyingi_yopilgan"]
+        det = ", ".join(f"{i['matn']} — {i['pm']}" for i in ky[:8])
+        L.append(f"🧹 {k_oy.capitalize()} tabida to'langan/ketgan deb yozilgan, eski tabda ochiq — "
+                 f"PM'dan so'ralmadi, eski tabni tuzating: {len(ky)} ta, "
+                 f"{_fmt(sum(i['summa'] for i in ky))}: {det}")
+    if stats.get("keyingi_n"):
+        # «eslatildi» emas: yetkazish holati (yuborildi/xato/kontakt yo'q/DRY) yuqoridagi
+        # PM satrlarida — bu satr faqat nima qo'shilganini aytadi (review M10/C6/S7)
+        L.append(f"📅 {k_oy.capitalize()} (keyingi oy, «{stats.get('keyingi_tab')}»): muddati "
+                 f"≤{PUSH_DUE_DAYS} kun — {stats['keyingi_n']} ta, {_fmt(stats['keyingi_sum'])} — "
+                 f"PM xabarlariga qo'shildi (yetkazish holati yuqorida)")
+    elif stats.get("keyingi_bor") and not stats.get("keyingi_tab"):
+        if stats.get("keyingi_source") == "xato":
+            L.append(f"⚠️ {k_oy.capitalize()} tabi O'QILMADI (xato) — ko'chgan qarzlar eski muddat "
+                     f"bilan so'raldi, keyingi oy to'lovlari eslatilmadi")
+        else:
+            L.append(f"ℹ️ {k_oy.capitalize()} tabi hali yo'q — keyingi oy to'lovlari oldindan eslatilmadi")
+    if stats.get("farqli"):
+        fq = stats["farqli"]
+        det = ", ".join(f"{i['loyiha']} ({i['pm']}, {i['yonalish']}: {_fmt(i['otgan'])} → "
+                        f"{_fmt(i['yangi'])})" for i in fq[:6])
+        L.append(f"⚖️ Summa farqli — ko'chirilgan deb OLINMADI, o'tgan qoldiq ham so'ralmoqda "
+                 f"(qaror kerak): {det}" + (f" +{len(fq) - 6}" if len(fq) > 6 else ""))
+    if stats.get("noaniq"):
+        L.append(f"⚠️ Moslik noaniq — qarz alohida so'ralmoqda (bir loyiha bo'lsa tabni "
+                 f"tuzating): {'; '.join(stats['noaniq'][:6])}")
+    for q in stats.get("qaror_qollangan") or []:
+        L.append("📝 Ega qarori: " + q)
+    for q in stats.get("qaror_izoh") or []:
+        L.append("📝 " + q)
     # PM ustuni BOR, lekin ayrim kataklar bo'sh (ustun umuman yo'q bo'lsa
     # yuqorida qora banner chiqqan — bu yerda takrorlanmaydi)
     if stats["pm_missing"] and not stats["pm_col_missing"]:
@@ -654,7 +824,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     pdf_src = "jonli holat" if data_source == "live" else f"snapshot {snap_day}"
     if not owner_pdf(cur_rows, tab, today, pdf_src, push_lines=push_lines,
                      title=dd_title, data_source=data_source,
-                     overdue=(stats["overdue_n"], stats["overdue_sum"])):
+                     overdue=(stats["overdue_n"], stats["overdue_sum"]), view=view):
         send_owner(("[DRY-RUN — PM'larga yuborilmadi]\n" if dry_run else "") + summary)
     # Userbot butunlay ishlamagan kun: egaga 4 TAYYOR matn — qo'lda yuborish uchun
     if fallback_reason and not dry_run:
@@ -685,34 +855,31 @@ def test_to_saved(today=None, day=None):
     today = today or date.today()
     day = day or today.isoformat()
     cur_month = fetchmod.current_month_name(today)
-    prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
-    tab, cur_rows = _month_rows(day, cur_month, today)
+    prev_month = undiruv.oy_ofset(today, -1)[0]
+    # run_daily bilan AYNAN bir xil yig'uvchi (C3) — sinov xabari haqiqiysidan farq qilmasin
+    view = undiruv.korinish(today, day=day, prefer_live=True)
+    tab, cur_rows = view["tab"], view["rows"]
     if tab is None:
         days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()
                       if d.is_dir() and len(d.name) == 10) if diffmod.SNAPSHOTS.is_dir() else []
         if days:
             day = days[-1]
-            tab, cur_rows = _month_rows(day, cur_month, today)
+            view = undiruv.korinish(today, day=day, prefer_live=False)
+            tab, cur_rows = view["tab"], view["rows"]
     if tab is None:
         return f"«Undiruv {cur_month}» tabi topilmadi — sinov uchun ma'lumot yo'q."
-    _pt, prev_rows = _month_rows(day, prev_month, today)
-    per_pm, _stats = build_push(today, cur_rows, prev_rows or [], prev_month)
+    per_pm, _stats = build_push(today, cur_rows, view["prev"]["rows"] or [], prev_month, view=view)
     nodate_pm = _stats.get("nodate_pm", {})
     if not per_pm and not nodate_pm:
         return "Bugun birorta PM uchun eslatma yo'q — sinovga xabar chiqmadi."
     dd = today.strftime("%d.%m.%Y")
+    # run_daily bilan AYNAN bir xil yig'uvchi: PM ismi variantlari bitta xabarga (review C8/S8)
+    by_slot, _slot_n, slot_nd = _slotga_yig(per_pm, nodate_pm)
     msgs = []
-    for pm_name in set(per_pm) | set(nodate_pm):     # muddatli YOKI faqat-muddatsizlar
-        body = "\n".join(per_pm.get(pm_name, []))
-        nd = nodate_pm.get(pm_name, [])
-        if nd:
-            nd_block = ("📅 Sana belgilanmagan — aniq to'lov sanasini yozing:\n"
-                        + "\n".join(f"• {x}" for x in nd))
-            body = (body + "\n\n" + nd_block) if body else nd_block
+    for slot, (pm_name, lines) in by_slot.items():
         text = (f"🧪 [SINOV — {pm_name} ko'radigan xabar]\n"
-                f"🔔 Undiruv eslatmasi — {dd}\n\n" + body
-                + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
-        msgs.append((_slot_key(pm_name), "me", text))
+                + _xabar_matni(dd, lines, slot_nd.get(slot, [])))
+        msgs.append((slot, "me", text))
     import userbot_sender
 
     res = userbot_sender.send_messages(msgs)
