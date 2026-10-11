@@ -729,8 +729,7 @@ _YEAR_RE = re.compile(r"20\d{2}")
 # tabi (JORIY oy ham) faqat yil suffiksi bilan qidiriladi: 01.11 da «noyabr(2026)» hali
 # ochilmagan bo'lsa, bot 2025 arxivini jimgina «joriy oy» deb o'qib, oktabr qarzlarini
 # arxivdagi to'langan qatorlarga qarab yopib yubormasin (review M8/D5/S4).
-# Yagona manba fetch'da: kunlik diff (fetch.resolve_month_template) ham shu sanadan qat'iy.
-QATIY_DAN = fetchmod.QATIY_DAN
+QATIY_DAN = fetchmod.QATIY_DAN   # yagona manba: fetch.py (diff watch va Q&A ham shunga qaraydi)
 
 
 def qatiy_oy(oy_1):
@@ -806,6 +805,29 @@ def find_tab(snap, today=None, month=None, year=None, qat_iy=False):
         by_title.setdefault(fetchmod.tab_of_range(rng), rng)
     ranked = rank_month_tabs(list(by_title), month, today, year=year, suffikssiz=not qat_iy)
     return by_title[ranked[0]] if ranked else None
+
+
+def month_tab(titles, month, today=None):
+    """Oy nomi bo'yicha «haqiqiy» Undiruv tabi — 💰 blok bilan aynan bir qoida.
+
+    Yil — shu oyning bugungacha bo'lgan eng so'nggi uchrashi (11.10.2026 da «dekabr» →
+    2025, «oktyabr» → 2026). Istisno: kelasi oyning JORIY yil tabi oldindan ochilgan
+    bo'lsa (29.09 da «Undiruv oktabr(2026)») — o'sha, o'tgan yil arxivi emas.
+    QATIY_DAN dan keyingi oy — faqat o'sha yil suffiksli tab; undan oldingi oy
+    (2025-08…2026-07) — yilsiz arxiv tab ham to'g'ri tab.
+    Qaytadi: (tab yoki None, yil). Q&A (loyiha qidiruvi, «undiruv» oy guruhi) shundan
+    foydalanadi, aks holda 01.11 da 2025 yilgi «Undiruv noyabr» joriy oy deb o'qilardi."""
+    today = today or date.today()
+    m = fetchmod.norm(month)
+    canon = fetchmod.MONTH_ALIASES.get(m, m)
+    i = fetchmod.MONTHS.index(canon) + 1
+    if i > today.month:
+        oldindan = rank_month_tabs(titles, canon, today, year=today.year, suffikssiz=False)
+        if oldindan:
+            return oldindan[0], today.year
+    y = today.year if i <= today.month else today.year - 1
+    ranked = rank_month_tabs(titles, canon, today, year=y, suffikssiz=not qatiy_oy(date(y, i, 1)))
+    return (ranked[0] if ranked else None), y
 
 
 def smm_sheet_id():

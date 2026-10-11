@@ -89,6 +89,9 @@ def build_context(diff):
         L.append(f"\n=== SHEET: {sheet['name']} ===")
         if sheet.get("watch"):
             L.append(f"E'tibor (watch): {sheet['watch']}")
+        for t in sheet.get("watch_missing") or []:
+            L.append(f"DIQQAT: kuzatiladigan «{t}» tabi sheet'da yo'q — bu tab bo'yicha "
+                     "o'zgarish yoki pul xulosasi chiqarma (hisobotga ⚠️ qatori avtomatik qo'shiladi).")
         if sheet.get("baseline"):
             L.append("(bu sheet uchun birinchi snapshot — solishtirish yo'q)")
         if sheet.get("removed_ranges"):
@@ -235,6 +238,20 @@ def is_quiet(diff):
         and not diff.get("missing_today")
         and not any(s.get("baseline") or s.get("removed_ranges") for s in diff["sheets"].values())
     )
+
+
+def watch_missing_note(diff):
+    """Kuzatilishi kerak bo'lgan, lekin topilmagan oy tablari (masalan 01.11 da hali
+    ochilmagan «Undiruv noyabr(2026)») uchun DETERMINISTIK ⚠️ qatorlar — AI matniga
+    tayanilmaydi. AUDIT.md P0-1: avgustda diff jimgina yilsiz arxiv tabni kuzatgan."""
+    L = []
+    for sheet in diff["sheets"].values():
+        for t in sheet.get("watch_missing") or []:
+            L.append(
+                f"⚠️ {sheet['name']}: «{t}» tabi topilmadi — bugun bu tab bo'yicha diff yo'q. "
+                "Yilsiz eski tab arxiv sifatida ataylab o'qilmaydi; joriy oy tabini shu nom bilan oching."
+            )
+    return L
 
 
 def other_tabs_note(diff):
@@ -441,7 +458,7 @@ def main():
             f"O'zgarish yo'q. {len(diff['sheets'])} ta sheet ({names}), jami {rows} qator "
             f"tekshirildi — {diff['prev_date']} holatidan farq topilmadi."
         )
-        for note in other_tabs_note(diff):
+        for note in watch_missing_note(diff) + other_tabs_note(diff):
             report += f"\n{note}"
         ub = undiruv_block(args.date)
         if ub:
@@ -490,6 +507,9 @@ def main():
         log("fallback hisobot yozilyapti (quruq raqamlar)")
         report = fallback_report(diff, str(e))
 
+    wm = watch_missing_note(diff)
+    if wm:
+        report += "\n\n" + "\n".join(wm)
     ub = undiruv_block(args.date)
     if ub:
         report += "\n\n———\n" + ub

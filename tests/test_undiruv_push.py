@@ -281,10 +281,9 @@ def test_tpl_other_year_never():
 
 
 def test_tpl_suffixless_fallback():
-    # QATIY_DAN (2026-08) gacha suffikssiz tab — yagona variant, olinadi
+    # QATIY_DAN (2026-08-01) gacha yilsiz tab hali joriy oy edi — moslik saqlanadi
     assert fmod.resolve_month_template("Undiruv <oy>", ["Undiruv iyul"], date(2026, 7, 15)) == ["Undiruv iyul"]
-    # undan keyin suffikssiz = 2025 arxivi — kunlik diff ham uni olmaydi (audit K8,
-    # undiruv.rank_month_tabs qat'iy rejimi bilan bir xil)
+    # QATIY_DAN dan keyin yilsiz tab — 2025 arxivi: tanlanmaydi (AUDIT.md P0-1, 01.09 hodisasi)
     assert fmod.resolve_month_template("Undiruv <oy>", ["Undiruv sentabr"], SEP) == []
 
 
