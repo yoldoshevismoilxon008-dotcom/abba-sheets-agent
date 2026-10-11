@@ -11,6 +11,7 @@ Maxsus holatlar:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -203,16 +204,20 @@ def _cli_qollaydi(flag):
             _CLI_YORDAM["txt"] = (r.stdout or "") + (r.stderr or "")
         except Exception:                            # noqa: BLE001
             _CLI_YORDAM["txt"] = ""
-    return flag in _CLI_YORDAM["txt"]
+    return re.search(r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])", _CLI_YORDAM["txt"]) is not None
 
 
-def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
+def run_claude(prompt, effort=None, allowed_tools=None, timeout=None, ish_papka=None):
     """effort: None (default — settings'dagi max) yoki 'low'..'max'.
     --effort FLAG ishlatiladi — settings.json'dagi global env'ni ham yengadi
     (env-override ishonchsiz: settings o'z qiymatini qaytadan qo'yadi).
     allowed_tools: masalan ["Read"] — vision (rasm o'qish) uchun; qolgan BARCHA toollar
-    o'chiq. allowed_tools=None — hech qanday tool yo'q va cwd bo'sh vaqtinchalik papka
-    (prompt injection sirlarni o'qiy olmasin — audit P1-S4).
+    o'chiq. allowed_tools=None — hech qanday tool yo'q (audit P1-S4).
+    cwd DOIM izolyatsiyalangan papka: ish_papka (vision — rasm nusxasi turgan vaqtinchalik
+    papka) yoki bo'sh vaqtinchalik papka. CLI qo'llasa: --tools (aniq ro'yxat, "" — hech
+    narsa), --strict-mcp-config (foydalanuvchi MCP serverlari yo'q), --disable-slash-commands
+    (skill'lar yo'q), --permission-mode dontAsk (ruxsat so'raydigan har narsa — masalan cwd
+    tashqarisini o'qish — rad etiladi). Eski CLI'da — --allowedTools + --disallowedTools.
     timeout: None → CLAUDE_TIMEOUT (mavjud chaqiruvlar o'zgarmaydi); KB kabi
     qisqa chaqiruvlar timeout=30 beradi — osilgan chaqiruv poll loop'ni bloklamasin."""
     cmd = [find_claude(), "-p", "--output-format", "text"]
@@ -221,19 +226,31 @@ def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
         cmd += ["--model", model]
     if effort:
         cmd += ["--effort", effort]
-    if allowed_tools:
-        cmd += ["--allowedTools", ",".join(allowed_tools)]
+    tools = list(allowed_tools or [])
+    if _cli_qollaydi("--tools"):
+        cmd += ["--tools", ",".join(tools)]             # "" — hech qanday tool
+    elif tools:
+        cmd += ["--allowedTools", ",".join(tools)]      # eski CLI
+    for flag in ("--strict-mcp-config", "--disable-slash-commands"):
+        if _cli_qollaydi(flag):
+            cmd += [flag]
+    if _cli_qollaydi("dontAsk"):
+        cmd += ["--permission-mode", "dontAsk"]
     # Prompt (sheet qatorlari, maxfiy tab ham) ~/.claude/projects transkriptiga yozilmasin
     if _cli_qollaydi("--no-session-persistence"):
         cmd += ["--no-session-persistence"]
     taqiq = [t for t in CLAUDE_TOOLS if t not in (allowed_tools or ())]
+    if _cli_qollaydi("--tools"):
+        # yangi CLI'da bu nomli tool yo'q — «matches no known tool» ogohlantirishi stderr'ni
+        # (xato xabarimiz manbasini) to'ldirmasin; --tools baribir hammasini yopadi
+        taqiq = [t for t in taqiq if t not in ("MultiEdit", "LS")]
     cmd += ["--disallowedTools", ",".join(taqiq)]
     with tempfile.TemporaryDirectory(prefix="claude-p-") as bosh:
         r = subprocess.run(
             cmd, input=prompt, capture_output=True, text=True,
             timeout=timeout if timeout is not None else CLAUDE_TIMEOUT,
-            # vision (Read) — rasm yo'li absolyut, eski cwd saqlanadi; qolganlari — bo'sh papka
-            cwd=None if allowed_tools else bosh,
+            cwd=ish_papka or bosh,
+
         )
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError(f"claude -p xato (kod {r.returncode}): {r.stderr.strip()[:400]}")

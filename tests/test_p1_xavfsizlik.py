@@ -245,6 +245,11 @@ def test_s3_maxfiy_javob_outbox_ga_yozilmaydi():
 
 # ------------------------------------------------------------------ S4
 
+YANGI_CLI_HELP = ("  --tools <tools...>\n  --strict-mcp-config\n  --disable-slash-commands\n"
+                  "  --permission-mode <mode> (choices: \"auto\", \"dontAsk\")\n"
+                  "  --no-session-persistence\n  --allowedTools, --allowed-tools <tools...>\n")
+
+
 def _claude_chaqiruvi(**kw):
     seen = {}
 
@@ -253,7 +258,7 @@ def _claude_chaqiruvi(**kw):
         seen.update(cmd=cmd, cwd=cwd, bosh=(cwd is not None and os.listdir(cwd) == []))
         return type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
 
-    analyze._CLI_YORDAM["txt"] = "--no-session-persistence"     # o'rnatilgan CLI qo'llaydi
+    analyze._CLI_YORDAM["txt"] = YANGI_CLI_HELP                   # o'rnatilgan CLI qo'llaydi
     try:
         with _soxta(analyze, "find_claude", lambda: "claude"), _soxta(analyze.subprocess, "run", run):
             assert analyze.run_claude("prompt", **kw) == "ok"
@@ -265,6 +270,9 @@ def _claude_chaqiruvi(**kw):
 def test_s4_claude_toollarsiz_va_bosh_papkada():
     s = _claude_chaqiruvi()
     cmd = s["cmd"]
+    assert cmd[cmd.index("--tools") + 1] == ""                  # hech qanday tool (Skill/MCP ham)
+    assert {"--strict-mcp-config", "--disable-slash-commands"} <= set(cmd)
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
     taqiq = cmd[cmd.index("--disallowedTools") + 1].split(",")
     assert {"Read", "Glob", "Grep", "Bash", "WebFetch", "Write"} <= set(taqiq), taqiq
     assert "--allowedTools" not in cmd
@@ -289,15 +297,40 @@ def test_s4_eski_cli_noma_lum_flagsiz():
     finally:
         analyze._CLI_YORDAM.clear()
     assert "--no-session-persistence" not in seen["cmd"] and "--disallowedTools" in seen["cmd"]
+    assert "--tools" not in seen["cmd"] and "--permission-mode" not in seen["cmd"]
 
 
-def test_s4_vision_faqat_read():
-    s = _claude_chaqiruvi(allowed_tools=["Read"])
+def test_s4_vision_faqat_read_va_izolyatsiya():
+    """Review: vision Read'i cheklanmagan edi (rasm ichidagi ko'rsatma .env/SA faylini
+    o'qitishi mumkin edi). Endi: --tools Read (allowedTools emas — u Read'ni HAR YERDA
+    ruxsat qilardi), dontAsk, cwd — rasm nusxasi turgan vaqtinchalik papka."""
+    with tempfile.TemporaryDirectory() as d:
+        s = _claude_chaqiruvi(allowed_tools=["Read"], ish_papka=d)
+        assert s["cwd"] == d
     cmd = s["cmd"]
-    assert cmd[cmd.index("--allowedTools") + 1] == "Read"
+    assert cmd[cmd.index("--tools") + 1] == "Read" and "--allowedTools" not in cmd, cmd
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
     taqiq = cmd[cmd.index("--disallowedTools") + 1].split(",")
     assert "Read" not in taqiq and "Bash" in taqiq and "WebFetch" in taqiq, taqiq
-    assert s["cwd"] is None
+
+
+def test_s4_design_rasm_nusxasi_vaqtinchalik_papkada():
+    import design
+
+    seen = {}
+
+    def soxta(prompt, **kw):
+        papka = Path(kw["ish_papka"])
+        seen.update(kw, fayllar=[x.name for x in papka.iterdir()], prompt=prompt, papka=papka)
+        return "palette: {}"
+
+    with tempfile.TemporaryDirectory() as d:
+        rasm = Path(d) / "dizayner.JPG"
+        rasm.write_bytes(b"\xff\xd8")
+        with _soxta(analyze, "run_claude", soxta):
+            design.analyze_reference(str(rasm))
+    assert seen["allowed_tools"] == ["Read"] and seen["fayllar"] == ["referens.jpg"], seen
+    assert str(seen["papka"] / "referens.jpg") in seen["prompt"] and not seen["papka"].exists()
 
 
 def test_s4_promptlarda_ishonchsiz_blok_himoyasi():
