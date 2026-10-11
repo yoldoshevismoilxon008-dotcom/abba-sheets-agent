@@ -96,6 +96,9 @@ def expand_month(s, today=None):
 
 
 _YEAR_RE = re.compile(r"20\d{2}")
+# Suffikssiz «Undiruv <oy>» tablari — 2025-08…2026-07 ARXIVI. Shu oydan boshlab oy tabi
+# faqat yil suffiksi bilan olinadi. YAGONA manba: undiruv.QATIY_DAN shunga ishora qiladi.
+QATIY_DAN = date(2026, 8, 1)
 
 
 def month_spellings(month):
@@ -122,12 +125,19 @@ def resolve_month_template(tpl, tab_titles, today=None):
     Sabab (01.09.2026): current_month_name → "sentyabr", real tab esa
     "Undiruv sentabr(2026)" — aniq tenglik hech nimaga mos kelmagan va kunlik
     diff Undiruv tabini BUTUNLAY yo'qotgan. Avgustda esa aynan tenglik 2025
-    arxivi "Undiruv avgust" ga tushib qolgan (jim xato)."""
+    arxivi "Undiruv avgust" ga tushib qolgan (jim xato).
+
+    QAT'IY REJIM (audit K8, undiruv.qatiy_oy bilan bir xil): QATIY_DAN (2026-08) dan
+    boshlab suffikssiz tab — 2025 ARXIVI, hech qachon tanlanmaydi. Avval 01.11 da
+    «noyabr(2026)» hali ochilmagan bo'lsa kunlik diff 2025 arxivi «Undiruv noyabr» ni
+    «joriy oy» deb o'qirdi, undiruv.py esa uni rad etardi — ikki yo'l bir-biriga zid edi."""
     tpl = str(tpl)
     if "<oy>" not in tpl:
         n = norm(tpl)
         return [t for t in tab_titles if norm(t) == n]
-    yr = str((today or date.today()).year)
+    today = today or date.today()
+    yr = str(today.year)
+    qatiy = date(today.year, today.month, 1) >= QATIY_DAN
     cands = [norm(tpl.replace("<oy>", sp)) for sp in month_spellings(current_month_name(today))]
     scored = []
     for t in tab_titles:
@@ -137,6 +147,8 @@ def resolve_month_template(tpl, tab_titles, today=None):
         years = _YEAR_RE.findall(nt)
         if years and yr not in years:
             continue                       # boshqa yil arxivi — hech qachon
+        if not years and qatiy:
+            continue                       # suffikssiz — 2025 arxivi (qat'iy rejim)
         scored.append((0 if yr in years else 1, nt, t))
     scored.sort(key=lambda x: (x[0], x[1]))
     return [t for _, _, t in scored]
@@ -175,10 +187,12 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
         None if main_exists
         else next((t for t in tab_titles if "ishlash muddati" in norm(t)), None)
     )
-    by_name = {norm(expand_month(k, today)): v for k, v in key_cfg.items()}
-    # "<oy>" shabloni imlo/yil qoidasi bilan REAL tab nomiga bog'lanadi
+    by_name = {norm(k): v for k, v in key_cfg.items() if "<oy>" not in str(k)}
+    # "<oy>" shabloni FAQAT imlo/yil qoidasi bilan REAL tab nomiga bog'lanadi
     # (aks holda "Undiruv sentyabr" kaliti "Undiruv sentabr(2026)" ga tushmaydi
-    #  va key_column 1-ustunga qaytib, diff soxta "yangi qator" beradi).
+    #  va key_column 1-ustunga qaytib, diff soxta "yangi qator" beradi). To'g'ridan-
+    # to'g'ri expand_month nomi bilan bog'lanmaydi: 01.11 da u 2025 arxivi «Undiruv
+    # noyabr» ga tushardi (audit K8).
     for k, v in key_cfg.items():
         if "<oy>" in str(k):
             for t in resolve_month_template(k, tab_titles, today)[:1]:
@@ -286,6 +300,9 @@ def fetch_sheet(gc, s, today=None):
                 hits = resolve_month_template(w, fetch_tabs, today)
                 if "<oy>" in str(w):
                     hits = hits[:1]        # oy shabloni — faqat ENG MOS tab
+                    if not hits:
+                        log(f"'{name}': DIQQAT — «{expand_month(w, today)}({(today or date.today()).year})» "
+                            f"tabi hali yo'q, suffikssiz 2025 arxivi o'qilmaydi")
                 for t in hits:
                     if t not in resolved:
                         resolved.append(t)

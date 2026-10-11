@@ -277,19 +277,8 @@ def _day_stats(day):
             if fetchmod.norm(tab) not in fetchmod.MONTHS:
                 continue
             vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
-            header, rows = auditmod.data_rows(vals)
-            ci = auditmod.find_col(header, "ideal")
-            cf = auditmod.find_col(header, "proekt bali")
-            ck = auditmod.find_col(header, "kechga qolgan", "kech")
-            aktiv, si, sf, dl = 0, 0.0, 0.0, 0.0
-            for _, row in rows:
-                vi = auditmod._numval(auditmod.cell(row, ci)) or 0.0
-                vf = auditmod._numval(auditmod.cell(row, cf)) or 0.0
-                dl += auditmod._numval(auditmod.cell(row, ck)) or 0.0
-                if vi > 0:
-                    aktiv += 1
-                si += vi
-                sf += vf
+            st = auditmod.pm_stats(vals)   # yagona hisob: dashboard va Q&A bilan bir xil
+            aktiv, si, sf, dl = st["aktiv"], st["ideal"], st["fakt"], st["delay"]
             out[snap.get("name", "?")] = {
                 "aktiv": aktiv, "ideal": round(si, 1), "fakt": round(sf, 1),
                 "pct": round(sf / si * 100, 1) if si else 0.0,

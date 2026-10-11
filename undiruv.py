@@ -495,8 +495,10 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
       cur_rows — joriy qatorlar NUSXASI («qoshilsin» qarori qo'llangan — qaror_qoll);
       real     — hali so'raladigan o'tgan-oy qoldiqlari;
       closed   — joriyda to'langan/ketgan yoki undirildi>0 (o'tgan oy tabi tuzatilmagan).
-                 FAQAT nomi aynan mos juftda — fuzzy juft (boshqa loyiha bo'lishi mumkin)
-                 to'langan bo'lsa qarz yopilmaydi, so'raladi + noaniq (review M3);
+                 Qisman to'lov (joriy qatorda qarz qolgan) faqat kelishilgan == o'tgan
+                 qoldiq bo'lsa yopadi (audit K1). Fuzzy juft (boshqa loyiha bo'lishi
+                 mumkin) faqat summa dalili bilan yopiladi: kelishilgan == qoldiq yoki
+                 ketganda «Lose summa» == qoldiq (K2); aks holda so'raladi + noaniq (M3);
       moved    — joriy oyga KO'CHIRILGAN: summa AYNAN teng yoki ega qarori bor. PM'dan
                  IKKINCHI marta so'ralmaydi (egasining konvensiyasi, 01.09 va 29.09:
                  yangi oy tabini ochganda to'lanmagan qoldiqni ko'chiradi). Ega qarori
@@ -550,12 +552,25 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
             else:
                 out["real"].append(r)
             continue
-        if c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0:
-            # Fuzzy juft faqat yangi qator KELISHILGANI o'tgan qoldiqqa AYNAN teng bo'lsa yopiladi
-            # (to'lovdan oldin shu tenglik uni «ko'chirilgan» qilgan edi — «Bosimov shcool» →
-            # «Bosimov School»): aks holda to'lovdan keyin to'langan qarz har kuni «muddat o'tdi»
-            # deb so'ralardi (review KN2). Summa farqli yoki ketgan — so'raladi + noaniq (M3).
-            if i in fuzzy_i and (c["holat"] == "ketdi" or kel_c != rq):
+        tolov_yopadi = c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0
+        if (tolov_yopadi and i not in fuzzy_i and c["holat"] not in ("paid", "ketdi")
+                and c["qoldiq"] > 0 and kel_c != rq):
+            # QISMAN to'lov (audit K1): joriy qatorda qarz hali bor va uning kelishilgani o'tgan
+            # qoldiqqa teng emas — to'lov joriy oy hisobiga tushgan bo'lishi mumkin, o'tgan
+            # qoldiq jimgina yopilmaydi. Pastdagi oddiy qoida ishlaydi: summa teng —
+            # ko'chirilgan, farqli — so'raladi + egaga «qaror kerak» (to'lovdan oldingidek).
+            tolov_yopadi = False
+        if tolov_yopadi:
+            # Fuzzy juft faqat summa dalili bo'lsa yopiladi: to'langan/qisman to'langan qatorning
+            # KELISHILGANI o'tgan qoldiqqa AYNAN teng (to'lovdan oldin shu tenglik uni
+            # «ko'chirilgan» qilgan edi — «Bosimov shcool» → «Bosimov School», review KN2) yoki
+            # ketgan qatorning «Lose summa»si o'tgan qoldiqqa AYNAN teng (aynan shu qarz hisobdan
+            # chiqarilgan — 09.10 real holati, audit K2). Aks holda so'raladi + noaniq (M3).
+            if i in fuzzy_i:
+                mos = (round(c.get("lose") or 0) == rq) if c["holat"] == "ketdi" else (kel_c == rq)
+            else:
+                mos = True
+            if not mos:
                 out["real"].append(r)
                 out["noaniq"].append(dict(r, _noaniq=f"nomi aynan mos emas: «{c['loyiha']}» "
                                                      f"{cur_tab or 'joriy tab'}da to'langan/ketgan"))
@@ -714,7 +729,8 @@ _YEAR_RE = re.compile(r"20\d{2}")
 # tabi (JORIY oy ham) faqat yil suffiksi bilan qidiriladi: 01.11 da «noyabr(2026)» hali
 # ochilmagan bo'lsa, bot 2025 arxivini jimgina «joriy oy» deb o'qib, oktabr qarzlarini
 # arxivdagi to'langan qatorlarga qarab yopib yubormasin (review M8/D5/S4).
-QATIY_DAN = date(2026, 8, 1)
+# Yagona manba fetch'da: kunlik diff (fetch.resolve_month_template) ham shu sanadan qat'iy.
+QATIY_DAN = fetchmod.QATIY_DAN
 
 
 def qatiy_oy(oy_1):

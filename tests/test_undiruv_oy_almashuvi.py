@@ -741,8 +741,14 @@ def test_fuzzy_juft_tolovdan_keyin_yopiladi():
         cur = _tab(["1", "Bosimov School", "Zubair", "", summa, und, "", "", "18.10", holat, ""])
         t = u.month_transition(prev, cur)
         assert [r["loyiha"] for r in t["closed"]] == ["Bosimov shcool"] and not t["real"], (summa, t)
+    # ketdi + «Lose summa» o'tgan qoldiqqa AYNAN teng — aynan shu qarz hisobdan chiqarilgan,
+    # yopiladi (audit K2: 09.10 da $1 500 bir vaqtda «lose» va «sentyabr qarzi» edi)
     cur = _tab(["1", "Bosimov School", "Zubair", "", "$0", "", "", "$2 500", "18.10", "Ketdi", ""])
-    t = u.month_transition(prev, cur)                                    # ketdi — so'raladi + noaniq
+    t = u.month_transition(prev, cur)
+    assert [r["loyiha"] for r in t["closed"]] == ["Bosimov shcool"] and not t["real"], t
+    # ketdi, lekin Lose boshqa summa — boshqa loyiha bo'lishi mumkin: so'raladi + noaniq (M3)
+    cur = _tab(["1", "Bosimov School", "Zubair", "", "$0", "", "", "$1 000", "18.10", "Ketdi", ""])
+    t = u.month_transition(prev, cur)
     assert not t["closed"] and t["real"] and t["noaniq"], t
 
 
