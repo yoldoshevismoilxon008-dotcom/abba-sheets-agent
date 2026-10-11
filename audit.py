@@ -48,6 +48,7 @@ ACK_FILE = DATA / "audit-acknowledged.yaml"
 KEY_LABELS = {
     "main-tab-yoq": "Main tabi yo'q",
     "oy-tab-yoq": "Joriy oy tabi yo'q",
+    "oy-tab-dublikat": "Joriy oyga bir nechta tab",
     "nomsiz-qator": "Nomsiz to'ldirilgan qator",
     "manager-bosh": "Manager katagi bo'sh",
     "reyting-bosh": "Reyting bo'sh",
@@ -252,8 +253,9 @@ def audit_month_tab(sheet_name, tab, vals, findings):
     return names
 
 
-def audit_sheet(snap, findings):
-    """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar."""
+def audit_sheet(snap, findings, today=None):
+    """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar.
+    today — snapshot sanasi (joriy oy shundan; None — bugun)."""
     if not snap.get("pm_kpi", True):
         return  # PM KPI formatida emas (masalan SMM) — Main/oy tekshiruvlari yot
     name = snap.get("name", snap.get("id", "?"))
@@ -262,9 +264,15 @@ def audit_sheet(snap, findings):
     tabs = snap.get("tabs") or list(by_tab.keys())
 
     main_tab = next((t for t in tabs if fetchmod.norm(t) == "main"), None)
-    month = fetchmod.current_month_name()
-    month_tabs = [t for t in tabs if fetchmod.norm(t) == month]
-    month_tab = month_tabs[-1] if month_tabs else None
+    # Joriy oy SNAPSHOT sanasidan: eski snapshot qayta tekshirilsa devor soati boshqa oyni
+    # berib soxta «oy tabi topilmadi» CRIT chiqardi; oy tabi — fetch bilan yagona qoida
+    # (imlo/yil suffiksi; dublikatda ogohlantirish) (P2)
+    month = fetchmod.current_month_name(today)
+    month_tabs = fetchmod.pm_month_tabs(tabs, today)
+    month_tab = month_tabs[0] if month_tabs else None
+    dup = fetchmod.month_tab_dup_note(tabs, today)
+    if dup:
+        findings.append((name, month_tab, WARN, dup.capitalize(), "oy-tab-dublikat"))
 
     main_names = None
     if main_tab is None:
@@ -309,9 +317,10 @@ def gather(from_snapshot=None):
 
 def run_checks(from_snapshot=None):
     snaps, source = gather(from_snapshot)
+    today = date.fromisoformat(from_snapshot) if from_snapshot else None
     findings = []
     for snap in snaps:
-        audit_sheet(snap, findings)
+        audit_sheet(snap, findings, today)
     return findings, source
 
 

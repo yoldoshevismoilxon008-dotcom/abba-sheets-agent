@@ -225,7 +225,10 @@ def main():
 
     # ---- 6) BONUS: TrendWide (yashirin, QUERY) + Umumiy'da line chart ----
     try:
-        n_pm = len(fetchmod.load_full_config().get("sheets", []))
+        # Faqat PM sheet'lari — Trend'da SMM (pm_kpi: false) qatori yo'q, QUERY pivot ham
+        # shuncha ustun beradi; ilgari 5-seriya bo'sh ustunga qarardi (P2)
+        n_pm = sum(1 for s in fetchmod.load_full_config().get("sheets", [])
+                   if s.get("pm_kpi", True) and not s.get("qa_only"))
         if "Umumiy" not in sheets or "Trend" not in sheets or n_pm == 0:
             raise RuntimeError("Umumiy/Trend tabi yoki PM ro'yxati yo'q")
         if HELPER in sheets:

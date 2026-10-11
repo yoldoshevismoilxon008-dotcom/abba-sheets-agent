@@ -95,6 +95,29 @@ def load_day(day):
     return sheets, meta
 
 
+def prev_snapshot(sid, before, max_days=7):
+    """`sid` sheet'ining `before` kunidan oldingi eng so'nggi snapshot'i (ko'pi bilan
+    max_days kun orqaga): (snap, kun) yoki (None, None). prev_day global — bitta sheet
+    bir kun o'qilmasa, ertasi kuni u «yangi sheet» (baseline) bo'lib, ikki kunlik
+    o'zgarishlar izsiz yo'qolardi (P2)."""
+    if not SNAPSHOTS.is_dir() or not sid or "/" in sid or "\\" in sid or sid.startswith("."):
+        return None, None
+    days = sorted((x.name for x in SNAPSHOTS.iterdir()
+                   if x.is_dir() and len(x.name) == 10 and x.name < before), reverse=True)
+    for d in days[:max_days]:
+        p = SNAPSHOTS / d / f"{sid}.json"
+        if not p.is_file():
+            continue
+        try:
+            snap = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            log(f"o'qib bo'lmadi: {d}/{p.name} — {e}")
+            continue
+        if snap.get("id") == sid:
+            return snap, d
+    return None, None
+
+
 def prev_day(today):
     """Bugundan oldingi, ichida sheet snapshotlari bor eng oxirgi kun."""
     if not SNAPSHOTS.is_dir():
@@ -306,9 +329,17 @@ def main():
         if snap.get("watch_missing"):
             # Kuzatilishi kerak bo'lgan, lekin topilmagan oy tabi (fetch.expected_month_tab)
             entry["watch_missing"] = list(snap["watch_missing"])
+        if snap.get("watch_notes"):
+            entry["watch_notes"] = list(snap["watch_notes"])  # oy tabi dublikati
         old_snap = old_sheets.get(sid)
         if prev is not None and old_snap is None:
-            entry["baseline"] = True  # yangi qo'shilgan sheet
+            # Kecha o'qilmagan bo'lsa — shu sheet'ning oxirgi mavjud snapshot'i bilan
+            old_snap, old_day = prev_snapshot(sid, prev)
+            if old_snap is None:
+                entry["baseline"] = True  # yangi qo'shilgan sheet
+            else:
+                entry["prev_date"] = old_day
+                log(f"{entry['name']}: {prev} da snapshot yo'q — {old_day} bilan solishtirildi")
         all_ranges = snap.get("ranges", {})
         # Kunlik diff faqat watch range'lar bo'yicha (Main + joriy oy) — shovqin bo'lmasin.
         # Eski (watch_ranges'siz) snapshotlarda hammasi olinadi.

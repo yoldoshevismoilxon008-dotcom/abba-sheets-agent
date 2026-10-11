@@ -46,7 +46,7 @@ def sheet_stats(snap):
     """Snapshot'dagi joriy oy watch tabidan PM statistikasi."""
     for rng in snap.get("watch_ranges", []):
         tab = fetchmod.tab_of_range(rng)
-        if fetchmod.norm(tab) not in fetchmod.MONTHS:
+        if fetchmod.month_tab_of(tab) is None:
             continue
         vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
         header, rows = auditmod.data_rows(vals)
@@ -67,10 +67,16 @@ def sheet_stats(snap):
     return None
 
 
+ONE_PCT_MIN_N, ONE_PCT_MAX_N = 6, 16   # qoidadagi jadval faqat shu oraliqni qamraydi
+
+
 def one_pct_rate(n):
-    """1% qiymati: 100k + (n−6)×25k, n [6..16] oralig'iga qisiladi (qoidadagi jadval)."""
-    n = max(6, min(16, n))
-    return 100_000 + (n - 6) * 25_000
+    """1% qiymati: 100k + (n−6)×25k, n — aktiv loyihalar [6..16]. Oraliqdan tashqarida
+    None («qoida yo'q»): ilgari qisilardi — n=18 da 350 000 (formula 400 000), n=0 da
+    100 000 va prognozda pul chiqardi, qoida esa n<6 / n>16 ni hali belgilamagan (P2)."""
+    if not (ONE_PCT_MIN_N <= n <= ONE_PCT_MAX_N):
+        return None
+    return 100_000 + (n - ONE_PCT_MIN_N) * 25_000
 
 
 def build(day):
@@ -103,10 +109,16 @@ def build(day):
         trend_rows.append([day, name, st["aktiv"], num(st["ideal"]), num(st["fakt"]),
                            num(pct), num(st["delay"]), crit])
         rate = one_pct_rate(st["aktiv"])
-        ball_comp = max(0.0, pct - 70) * rate
         delay_pct = (st["delay"] * 3.33 / st["aktiv"]) if st["aktiv"] else 0.0
+        if rate is None:
+            # Qoida bu aktiv soni uchun 1% qiymatini bermaydi — taxminiy pul ko'rsatilmaydi
+            kpi_prog.append([name, st["aktiv"], f"qoida yo'q (n={st['aktiv']})", num(pct), "—",
+                             num(delay_pct, 2), "—", 5_000_000, "—"])
+            continue
+        ball_comp = max(0.0, pct - 70) * rate
         delay_comp = max(0.0, 10 - delay_pct) * rate
-        kpi_prog.append([name, st["aktiv"], f"{rate:,.0f}".replace(",", " "),
+        # 1% qiymati SON bo'lib yoziladi (ilgari "350 000" matni — #,##0 formati ishlamasdi)
+        kpi_prog.append([name, st["aktiv"], rate,
                          num(pct), round(ball_comp), num(delay_pct, 2),
                          round(delay_comp), 5_000_000,
                          round(ball_comp + delay_comp + 5_000_000)])

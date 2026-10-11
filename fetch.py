@@ -189,9 +189,52 @@ def resolve_month_template(tpl, tab_titles, today=None):
     return [x[4] for x in scored]
 
 
+_YEAR_SUFFIX_RE = re.compile(r"\s*\(?\s*20\d{2}\s*\)?$")
+
+
+def month_tab_of(tab):
+    """PM oy tabi nomi → kanonik oy («Oktabr», «Oktyabr(2026)», «oktyabr 2026» →
+    «oktyabr»), oy tabi bo'lmasa None. dashboard/analyze/audit oy tabini shu bilan
+    taniydi — ilgari faqat aniq «oktyabr» yozilishi tanilardi (P2)."""
+    return MONTH_ALIASES.get(_YEAR_SUFFIX_RE.sub("", norm(tab)).strip())
+
+
+def pm_month_tabs(tab_titles, today=None):
+    """Joriy oy PM tablari, ENG MOSI birinchi — detect_watch_tabs, resolve_key_columns
+    va audit uchun YAGONA qoida. Ilgari faqat aniq «Oktyabr» topilardi: «Oktabr» yoki
+    «Oktyabr(2026)» kuzatilmay, PM dashboard va PDF'dan jimgina yo'qolardi (P2).
+      • imlo aliasi (MONTH_ALIASES) va yil suffiksi «(2026)» / « 2026»;
+      • boshqa yil suffiksli tab — arxiv, olinmaydi;
+      • joriy yil suffiksli tab yilsizdan ustun; bir xil darajada tartibda OXIRGISI
+        birinchi (eski konvensiya: bo'shliq bilan farqlanuvchi dublikatda oxirgisi
+        joriy yilniki). Bittadan ko'p bo'lsa — month_tab_dup_note ogohlantiradi."""
+    today = today or date.today()
+    month, yr = current_month_name(today), str(today.year)
+    scored = []
+    for i, t in enumerate(tab_titles):
+        if month_tab_of(t) != month:
+            continue
+        years = _YEAR_RE.findall(norm(t))
+        if years and yr not in years:
+            continue
+        scored.append((0 if years else 1, -i, t))
+    scored.sort()
+    return [x[2] for x in scored]
+
+
+def month_tab_dup_note(tab_titles, today=None):
+    """Joriy oyga >1 PM tab bo'lsa egaga izoh ("" — bitta yoki yo'q). Ilgari jim
+    oxirgisi olinardi (Zubair: ikki sentyabr tabi, 62,88% va 94,4%)."""
+    tabs = pm_month_tabs(tab_titles, today)
+    if len(tabs) < 2:
+        return ""
+    return (f"joriy oyga {len(tabs)} tab bor — «{tabs[0]}» o'qildi; boshqalari e'tiborsiz: "
+            + ", ".join(f"«{t}»" for t in tabs[1:]) + " (nusxa bo'lsa o'chiring/nomini o'zgartiring)")
+
+
 def detect_watch_tabs(tab_titles, today=None):
-    """Main + joriy oy tabini topadi. Bir xil nomli (bo'shliq bilan farqlanuvchi)
-    oy tab'laridan tartibda OXIRGISI olinadi — u joriy yilniki.
+    """Main + joriy oy tabini topadi (oy tabi — pm_month_tabs: imlo/yil suffiksi,
+    dublikatda tartibda OXIRGISI — u joriy yilniki).
     Main yo'q bo'lsa — vaqtinchalik manba sifatida "...ishlash muddati" tabi
     olinadi (deadline/muddat ma'lumotlari uchun); Main qaytsa avtomatik tiklanadi."""
     watch = []
@@ -202,10 +245,9 @@ def detect_watch_tabs(tab_titles, today=None):
         fb = next((t for t in tab_titles if "ishlash muddati" in norm(t)), None)
         if fb:
             watch.append(fb)
-    month = current_month_name(today)
-    candidates = [t for t in tab_titles if norm(t) == month]
+    candidates = pm_month_tabs(tab_titles, today)
     if candidates:
-        watch.append(candidates[-1])
+        watch.append(candidates[0])
     return watch
 
 
@@ -237,9 +279,8 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
     skalyar) ni real range kalitlariga yoyadi: {range_key: kalit}."""
     if not isinstance(key_cfg, dict):
         return key_cfg or 1
-    month = current_month_name(today)
-    month_tabs = [t for t in tab_titles if norm(t) == month]
-    cur_month_tab = month_tabs[-1] if month_tabs else None
+    month_tabs = pm_month_tabs(tab_titles, today)
+    cur_month_tab = month_tabs[0] if month_tabs else None
     main_exists = any(norm(t) == "main" for t in tab_titles)
     fallback_tab = (
         None if main_exists
@@ -357,6 +398,11 @@ def fetch_sheet(gc, s, today=None):
             "key_column": resolve_key_columns(fetch_tabs, s.get("key_column", 1), today),
             "watch_missing": missing,
         }
+        if s.get("watch_tabs", "auto") in (None, "auto") and s.get("pm_kpi", True):
+            dup = month_tab_dup_note(fetch_tabs, today)
+            if dup:
+                meta["watch_notes"] = [dup]
+                log(f"'{name}': DIQQAT — {dup}")
         for m in missing:
             log(f"'{name}': DIQQAT — «{m}» tabi topilmadi, bugun u kuzatilmaydi "
                 "(yilsiz eski tab arxiv sifatida ataylab o'qilmaydi)")
@@ -438,6 +484,7 @@ def main():
                 "excluded_tabs": meta.get("excluded_tabs", []),
                 "watch_ranges": meta["watch_ranges"],
                 "watch_missing": meta.get("watch_missing", []),
+                "watch_notes": meta.get("watch_notes", []),
                 "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "ranges": ranges,
             }

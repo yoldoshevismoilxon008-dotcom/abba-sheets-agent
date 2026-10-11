@@ -1017,7 +1017,7 @@ def month_aggregate(snap):
     """Snapshot'dagi joriy oy watch tabidan (Σideal, Σfakt) hisoblaydi."""
     for rng in snap.get("watch_ranges", []):
         tab = fetchmod.tab_of_range(rng)
-        if fetchmod.norm(tab) in fetchmod.MONTHS:
+        if fetchmod.month_tab_of(tab):
             vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
             header, rows = auditmod.data_rows(vals)
             ci = auditmod.find_col(header, "ideal")
