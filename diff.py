@@ -201,6 +201,9 @@ def main():
 
     for sid, snap in new_sheets.items():
         entry = {"name": snap.get("name", sid), "watch": snap.get("watch", ""), "ranges": {}}
+        if snap.get("watch_missing"):
+            # Kuzatilishi kerak bo'lgan, lekin topilmagan oy tabi (fetch.expected_month_tab)
+            entry["watch_missing"] = list(snap["watch_missing"])
         old_snap = old_sheets.get(sid)
         if prev is not None and old_snap is None:
             entry["baseline"] = True  # yangi qo'shilgan sheet
