@@ -204,8 +204,9 @@ def build_undiruv(day, now):
     out.append(["JAMI (kelishilgan)", "", t["kelishilgan"], t["undirildi"], t["qoldiq"], "", pct])
     if t["aktiv"]:
         out.append(["Aktiv obuna (so'ralmaydi)", "", t["aktiv"], "", "", "", ""])
-    if t["status_blank_n"]:
-        out.append([f"⚠️ Status bo'sh: {t['status_blank_n']} ta qator", "", "", "", "", "", ""])
+    for w in (undiruvmod.status_blank_warn(t), undiruvmod.bad_sum_warn(t)):
+        if w:
+            out.append([w, "", "", "", "", "", ""])
     # Ega qarori bo'yicha qo'shilgan (jadvalda hali yo'q) qoldiq — JAMI sheet «Jami»sidan
     # shuncha farq qiladi; izohsiz farq chalg'itadi (review M9/C11)
     for r in rows:

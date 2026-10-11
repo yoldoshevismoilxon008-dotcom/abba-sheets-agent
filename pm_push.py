@@ -558,12 +558,10 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
             stats["keyingi_n"] += 1
             stats["keyingi_sum"] += round(r["qoldiq"])
             per_pm.setdefault(r["pm"], []).append(line)
-    # Summa katagi son emas (bo'sh ham, raqamli ham emas — masalan #REF!, matn)
-    import re as _re
-
+    # Pul katagi son emas (#REF!, matn) — undiruv.money_parse bilan bir xil qoida:
+    # "$1,800" endi son (ilgari 1,8), "—" bo'sh; Summa/Undirildi/Lose (P2)
     for r in cur_rows + prev_rows:
-        raw = str(r.get("qoldiq_raw", "")).strip()
-        if raw and not _re.search(r"\d", raw):
+        if r.get("bad_sum") or undiruv.money_parse(r.get("qoldiq_raw", "")) is None:
             stats["bad_sum"] += 1
     return per_pm, stats
 
@@ -815,7 +813,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     if stats["bad_sum"] or stats["no_date"]:
         parts = []
         if stats["bad_sum"]:
-            parts.append(f"Summa son emas — {stats['bad_sum']} qator")
+            parts.append(f"Summa son emas (0 deb sanaldi) — {stats['bad_sum']} qator")
         if stats["no_date"]:
             nd_pm = sum(len(v) for v in stats.get("nodate_pm", {}).values())
             parts.append(f"sanasiz — {stats['no_date']} qator "
