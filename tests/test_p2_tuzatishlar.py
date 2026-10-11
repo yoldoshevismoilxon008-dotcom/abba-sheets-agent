@@ -13,6 +13,8 @@
   D  xavfsizlik: PM onboarding so'rovlari chat_id bo'yicha (begona so'rov haqiqiysini
      almashtirmaydi, bir nechta bo'lsa /approve_<slot> <chat_id>, rate-limit); inbox
      fayl nomi kengaytmani saqlaydi va tozalanadi; GitHub token git argv'ida yo'q.
+  E  testsiz kritik joylar: dashboard_writer.guard (PM sheet'lariga yozishni to'xtatadigan
+     yagona himoya) va pm_push.run_daily muvaffaqiyatli yetkazish shoxi.
 
 pytest tests/test_p2_tuzatishlar.py  yoki  python3 tests/test_p2_tuzatishlar.py
 Tarmoq/kredensial kerak emas.
@@ -245,7 +247,7 @@ def test_bir_foiz_stavka_qoida_oraligi_va_son():
 
 
 def test_rang_yaxlitlanmagan_foizdan():
-    snap = _pm_snap(rows=[["1", "Alfa", "2500", "2249", "0"]])      # 89,96%
+    snap = _pm_snap(rows=[["1", "Alfa", "125", "112,45", "0"]])     # 89,96%
     with _soxta(diffmod, "load_day", lambda d: ({"pm1": snap}, {})):
         st = analyze._day_stats("2026-10-05")["Ali PM"]
     assert st["pct"] == 90.0 and abs(st["pct_raw"] - 89.96) < 1e-9
@@ -626,6 +628,127 @@ def test_push_reports_va_push_chat_tokenni_argv_ga_qoymaydi():
     assert not any("SIRTOKEN" in " ".join(map(str, c)) for c, _ in log)      # ps ko'rmaydi
     assert all(e and e.get("GIT_CONFIG_KEY_" + str(int(e["GIT_CONFIG_COUNT"]) - 1))
                == "http.https://github.com/.extraheader" for _, e in tarmoq)
+
+
+# ---------------------------------------------------------------- E: testsiz kritik joylar
+
+@contextlib.contextmanager
+def _dw_muhit(did="DASH-ID"):
+    import dashboard_writer as dw
+    alert = []
+
+    def _tarmoq():
+        raise AssertionError("guard'dan oldin tarmoqqa chiqildi")
+    with _soxta(dw.fetchmod, "load_full_config", lambda: {"dashboard_id": did}), \
+            _soxta(dw, "_alert", alert.append), _soxta(dw, "rw_client", _tarmoq):
+        yield dw, alert
+
+
+def test_dashboard_writer_guard_faqat_dashboard_ga_ruxsat():
+    with _dw_muhit() as (dw, alert):
+        dw.guard("DASH-ID")
+        dw.guard("  DASH-ID ")                                   # bo'shliq — o'sha id
+        assert alert == []
+        for begona in ("PM-SHEET-ID", "", "DASH-ID-2", "dash-id"):
+            try:
+                dw.guard(begona)
+            except dw.WriteDeniedError:
+                pass
+            else:
+                raise AssertionError(f"guard o'tkazib yubordi: {begona!r}")
+        assert len(alert) == 4 and all("XAVFSIZLIK" in a for a in alert)
+        # write_values ham guard'dan o'tadi — tarmoqqa (rw_client) yetib bormaydi
+        try:
+            dw.write_values("PM-SHEET-ID", "Umumiy", [["x"]])
+        except dw.WriteDeniedError:
+            pass
+        else:
+            raise AssertionError("write_values begona id'ga yozdi")
+    with _dw_muhit(did="") as (dw, alert):
+        for sid in ("", "PM-SHEET-ID"):                          # dashboard_id yo'q — hammasi yopiq
+            try:
+                dw.guard(sid)
+            except dw.WriteDeniedError as e:
+                assert "to'ldirilmagan" in str(e)
+            else:
+                raise AssertionError("dashboard_id bo'sh, lekin yozishga ruxsat berildi")
+
+
+def test_dashboard_writer_ruxsat_etilgan_yozuv():
+    import dashboard_writer as dw
+    yozildi = []
+
+    class _Ws:
+        def clear(self):
+            yozildi.append("clear")
+
+        def update(self, values, range_name, value_input_option):
+            yozildi.append((range_name, values))
+
+    class _Sh:
+        def __init__(self, key):
+            self.key = key
+
+    with _dw_muhit() as (dw, alert), \
+            _soxta(dw, "rw_client", lambda: type("C", (), {"open_by_key": lambda self, k: _Sh(k)})()), \
+            _soxta(dw, "_worksheet", lambda sh, t, rows=0, cols=0: (yozildi.append(sh.key), _Ws())[1]):
+        dw.overwrite_tab("Umumiy", [["a", 1]])
+    assert yozildi == ["DASH-ID", "clear", ("A1", [["a", 1]])]
+
+
+@contextlib.contextmanager
+def _pm_run_muhit(contacts, natija):
+    """pm_push.run_daily — tarmoqsiz: ko'rinish, push matni, userbot va state soxta."""
+    import pm_push
+    import userbot_sender
+    holat, ega, yuborilgan = {}, [], []
+    view = {"tab": "Undiruv oktabr(2026)", "rows": [_row("Alfa"), _row("Beta")], "source": "live",
+            "oy": "oktyabr",
+            "prev": {"tab": None, "rows": [], "source": "none", "oy": "sentyabr", "real": [],
+                     "closed": [], "moved": [], "farqli": [], "noaniq": [], "izoh": []},
+            "keyingi": None, "notes": [], "data_source": "live"}
+    stats = {"overdue_n": 1, "overdue_sum": 100, "aktiv_n": 0, "aktiv_sum": 0, "bad_sum": 0,
+             "no_date": 0, "pauza": [], "status_blank": [], "unpaid_n": 2, "pm_missing": [],
+             "pm_col_missing": False, "closed_carry": [], "moved_carry": [], "nodate_pm": {}}
+
+    def _send(msgs):
+        yuborilgan.extend(msgs)
+        return [(slot, *natija.get(slot, (True, ""))) for slot, _c, _t in msgs]
+    with _soxta(pm_push, "_load_state", lambda: dict(holat.get("s") or {})), \
+            _soxta(pm_push, "_save_state", lambda d: holat.__setitem__("s", d)), \
+            _soxta(u, "korinish", lambda today=None, day=None, prefer_live=True, qlar=None: view), \
+            _soxta(pm_push, "build_push", lambda today, cur, prev, pm, view=None: (
+                {"Ali": ["• Alfa — $100"], "Vali": ["• Beta — $200"]}, dict(stats))), \
+            _soxta(pm_push, "load_contacts", lambda: contacts), \
+            _soxta(pm_push, "slots_from_config", lambda: {"ali": "Ali", "vali": "Vali"}), \
+            _soxta(pm_push, "send_owner", ega.append), \
+            _soxta(pm_push, "owner_pdf", lambda *a, **k: True), \
+            _soxta(userbot_sender, "send_messages", _send):
+        yield pm_push, holat, ega, yuborilgan
+
+
+def test_pm_push_run_daily_muvaffaqiyatli_yetkazish():
+    with _pm_run_muhit({"ali": "@ali", "vali": "@vali"}, {}) as (pm, holat, ega, yub):
+        st, summary = pm.run_daily(today=OKT)
+        assert st == "sent"
+        assert [(s, c) for s, c, _t in yub] == [("ali", "@ali"), ("vali", "@vali")]
+        assert "• Alfa — $100" in yub[0][2] and "05.10.2026" in yub[0][2]
+        assert "• Ali (@ali): 1 eslatma yuborildi ✅" in summary
+        assert "• Vali (@vali): 1 eslatma yuborildi ✅" in summary
+        assert holat["s"]["date"] == "2026-10-05" and holat["s"]["sent"] == {"ali": 1, "vali": 1}
+        assert holat["s"]["failed"] == {} and holat["s"]["tab"] == "Undiruv oktabr(2026)"
+        # o'sha kuni qayta (09:30 cron + catch-up) — ikkinchi marta yuborilmaydi
+        assert pm.run_daily(today=OKT) == ("skip", "") and len(yub) == 2
+
+
+def test_pm_push_run_daily_qisman_xato():
+    with _pm_run_muhit({"ali": "@ali", "vali": "@vali"}, {"vali": (False, "PEER_FLOOD")}) \
+            as (pm, holat, ega, yub):
+        st, summary = pm.run_daily(today=OKT)
+    assert st == "sent"
+    assert "• Ali (@ali): 1 eslatma yuborildi ✅" in summary
+    assert "• Vali (@vali): YUBORILMADI ❌ — PEER_FLOOD" in summary
+    assert holat["s"]["sent"] == {"ali": 1} and holat["s"]["failed"] == {"vali": "PEER_FLOOD"}
 
 
 # ---------------------------------------------------------------- skript rejimi

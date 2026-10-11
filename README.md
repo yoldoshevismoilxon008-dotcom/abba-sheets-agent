@@ -119,7 +119,7 @@ sudo pmset repeat wakeorpoweron MTWRFSU 08:58:00
 - **Yozish:** faqat `dashboard_writer.py` orqali va faqat `config.yaml` dagi
   `dashboard_id` ga (qat'iy allowlist). Boshqa istalgan sheet'ga yozish
   urinishi: exception + log + Telegram'ga 🚨 alert (tarmoqqa chiqmasdan
-  bloklanadi — unit-test bilan isbotlangan).
+  bloklanadi — `tests/test_p2_tuzatishlar.py` dagi `test_dashboard_writer_*`).
 - **SA huquqlari qoidasi:** PM sheet'larda faqat **Viewer**, dashboard'da
   **Editor** — bu qoida buzilmasin.
 
