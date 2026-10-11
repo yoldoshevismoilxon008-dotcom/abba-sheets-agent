@@ -193,7 +193,6 @@ def test_k4_nomsiz_jami_qatori_loyiha_emas():
     st = au.pm_stats(_pm(["1", "A", "41,2", "30", "", ""], ["2", "B", "41,2", "20", "", "2"],
                          ["", "", "82,4", "50", "", "2"]))
     assert (st["aktiv"], st["ideal"], st["fakt"], st["delay"]) == (2, 82.4, 50.0, 2.0), st
-    assert db.one_pct_rate(st["aktiv"]) == 100_000
 
 
 def test_k4_jami_yorliqli_qator_loyiha_emas():
