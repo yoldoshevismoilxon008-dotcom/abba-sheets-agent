@@ -306,9 +306,30 @@ def watch_new_note(diff):
     return L
 
 
+def baseline_gap_note(diff):
+    """Solishtirish kechagi emas, bir necha kun oldingi snapshot'ga nisbatan bo'lsa (AUDIT.md
+    P0-2: 09-18/19 hisobotlari yo'q, 09-20 diff'i qaysi kunga nisbatan ekani yozilmagan)."""
+    from datetime import date as _d, timedelta as _td
+
+    prev, day = diff.get("prev_date"), diff.get("date")
+    if not prev or not day or diff.get("baseline"):
+        return []
+    try:
+        d0, d1 = _d.fromisoformat(prev), _d.fromisoformat(day)
+    except ValueError:
+        return []
+    gap = (d1 - d0).days - 1
+    if gap < 1:
+        return []
+    kunlar = [_dm((d0 + _td(days=i)).isoformat()) for i in range(1, gap + 1)]
+    return [f"ℹ️ Solishtirish {_dm(prev)} holatiga nisbatan — oraliqda {gap} kun snapshot yo'q "
+            f"({', '.join(kunlar[:5])}{' …' if gap > 5 else ''}); o'zgarishlar shu davr uchun jamlangan."]
+
+
 def deterministic_notes(diff):
     """AI matniga tayanmaydigan ogohlantirishlar — quiet, AI, fallback va /hisobot yo'llarida."""
-    return watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
+    return (watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
+            + baseline_gap_note(diff))
 
 
 def other_tabs_note(diff):

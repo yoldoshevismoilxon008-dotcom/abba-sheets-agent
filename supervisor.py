@@ -98,6 +98,29 @@ def run_daily():
             log("XATO: hisobot push 10 daqiqada tugamadi")
 
 
+def run_tg_kunlik_watch(today=None):
+    """12:00 — Mac'dagi TG kunlik monitoring bugun kelganmi (AUDIT.md P0-2). Kelmagan
+    bo'lsa egaga kuniga bir marta xabar: Mac uxlasa yoki push yo'qolsa hech kim bilmasdi."""
+    try:
+        import tg_kunlik
+        from datetime import date
+
+        today = today or date.today()
+        h, err = tg_kunlik.tekshir(today)
+        if err:
+            _notify_owner_once_daily(f"⚠️ TG kunlik monitoring holatini tekshirib bo'lmadi: {err}",
+                                     key="tg_kunlik")
+            return
+        if h is None:
+            return
+        msg = tg_kunlik.alert_text(today, h)
+        log(f"tg-kunlik nazorat: {msg or 'bugungi PDF bor'}")
+        if msg:
+            _notify_owner_once_daily(msg, key="tg_kunlik")
+    except Exception as e:                       # noqa: BLE001
+        log(f"XATO: tg-kunlik nazorat — {type(e).__name__}: {e}")
+
+
 def run_pm_push():
     """PM'larga undiruv eslatmalari (09:30 — kunlik pipeline'dan keyin)."""
     log("PM undiruv push boshlandi")
@@ -236,6 +259,10 @@ def main():
         misfire_grace_time=3 * 3600, coalesce=True,
     )
     sched.add_job(
+        run_tg_kunlik_watch, "cron", hour=12, minute=0,
+        misfire_grace_time=3 * 3600, coalesce=True,
+    )
+    sched.add_job(
         run_vault_sync, "interval", minutes=10,
         max_instances=1, coalesce=True,
     )
@@ -244,7 +271,8 @@ def main():
         max_instances=1, coalesce=True,
     )
     sched.start()
-    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + har 10daq vault sinxron + chat push (Asia/Tashkent)")
+    log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + 12:00 TG-kunlik nazorat + "
+        "har 10daq vault sinxron + chat push (Asia/Tashkent)")
 
     import bot_listener
 
