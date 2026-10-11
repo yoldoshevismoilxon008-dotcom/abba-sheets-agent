@@ -20,9 +20,15 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
-from fetch import tab_of_range  # noqa: E402
+from fetch import current_month_name, month_spellings, norm, tab_of_range  # noqa: E402
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
+
+# PM KPI jimlik nazorati (AUDIT.md P0-4: 01.09–09.10 da 37 hisobotda PM KPI diff'i
+# doim «o'zgarish yo'q» degan, hech qanday signal yo'q edi). Joriy oy tabi shuncha
+# ish kunidan (yakshanbasiz) beri bir xil bo'lsa — hisobotga ⚠️ qatori chiqadi.
+STALE_DAYS = 3
+STALE_LOOKBACK = 14
 
 
 def log(msg):
@@ -162,6 +168,71 @@ def diff_range(old_vals, new_vals, key_column):
     return out
 
 
+def stale_info(sid, snap, watch, today, snapshots=None):
+    """PM KPI sheet'ning kuzatilayotgan JORIY OY tabi necha ish kunidan beri o'zgarmagan.
+
+    Faqat pm_kpi sheet'lar va joriy oy tabi (Main/«ishlash muddati» kam o'zgaradi —
+    shovqin bo'lmasin). Faqat joriy oy ichidagi kunlar sanaladi: oldindan ochilgan
+    yangi oy tabi oy boshida «eski» deb belgilanmasin. Yakshanba — dam kuni, sanalmaydi.
+
+    Qaytadi: [{tab, kun, since, other_changed, other_total}] — kun ≥ STALE_DAYS bo'lsa.
+    other_changed — shu davrda o'zgargan BOSHQA tablar: PM boshqa tabni to'ldirayotgan
+    bo'lsa (masalan «Sentyabr (2026)» agregati), diff noto'g'ri tabni kuzatayotgani ko'rinadi."""
+    if not snap.get("pm_kpi", True):
+        return []
+    snapshots = snapshots or SNAPSHOTS
+    d_today = date.fromisoformat(today)
+    spell = month_spellings(current_month_name(d_today))
+    targets = [r for r in watch if norm(tab_of_range(r)) in spell]
+    if not targets or not snapshots.is_dir():
+        return []
+    month_start = d_today.replace(day=1).isoformat()
+    days = sorted(
+        (x.name for x in snapshots.iterdir()
+         if x.is_dir() and len(x.name) == 10 and month_start <= x.name < today),
+        reverse=True,
+    )[:STALE_LOOKBACK]
+    cache = {}
+
+    def load(d):
+        if d not in cache:
+            p = snapshots / d / f"{sid}.json"
+            try:
+                cache[d] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+            except Exception:
+                cache[d] = None
+        return cache[d]
+
+    ranges = snap.get("ranges", {})
+    out = []
+    for rng in targets:
+        cur = (ranges.get(rng) or {}).get("values", [])
+        same = []
+        for d in days:
+            old = load(d)
+            ov = ((old or {}).get("ranges") or {}).get(rng)
+            if ov is None or ov.get("values", []) != cur:
+                break
+            same.append(d)
+        if not same:
+            continue
+        since = same[-1]
+        # o'zgarishsiz o'tgan kunlar: (since, today] oralig'idagi snapshot kunlari
+        tinch = [today] + same[:-1]
+        kun = sum(1 for d in tinch if date.fromisoformat(d).weekday() != 6)
+        if kun < STALE_DAYS:
+            continue
+        base = (load(since) or {}).get("ranges") or {}
+        other = sorted({
+            tab_of_range(r) for r, v in ranges.items()
+            if r not in targets
+            and ((base.get(r) or {}).get("values") if r in base else None) != v.get("values", [])
+        })
+        out.append({"tab": tab_of_range(rng), "kun": kun, "since": since,
+                    "other_changed": other[:8], "other_total": len(other)})
+    return out
+
+
 def baseline_range(vals):
     """Solishtiradigan narsa yo'q: hozirgi holat tavsifi (header + hajm + namuna)."""
     h = detect_header(vals)
@@ -224,6 +295,11 @@ def main():
                     r["new_range"] = True
             else:
                 r = diff_range(old_rng.get("values", []), vals, kc)
+                # Oy almashuvi: tab kecha ham bor edi, lekin kuzatilmagan (masalan
+                # oldindan ochilgan «Oktyabr») — «62 → 62 qator» jim o'tib ketmasin
+                ow = old_snap.get("watch_ranges")
+                if ow and rng not in ow:
+                    r["watch_new"] = True
             entry["ranges"][rng] = r
             st = r["stats"]
             for k in ("added", "removed", "changed"):
@@ -242,6 +318,10 @@ def main():
         # track_other_tabs (masalan SMM): watch'dan tashqari tab'lar uchun faqat
         # "o'zgardi/o'zgarmadi" (values tengligi) — hisobotda soni ko'rsatiladi,
         # batafsil diff YO'Q (spam bo'lmasin). totals'ga ham QO'SHILMAYDI.
+        if prev is not None:
+            stale = stale_info(sid, snap, watch, today)
+            if stale:
+                entry["stale"] = stale
         if snap.get("track_other_tabs") and old_snap is not None:
             changed_tabs = []
             for rng, data in all_ranges.items():

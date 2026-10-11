@@ -92,6 +92,10 @@ def build_context(diff):
         for t in sheet.get("watch_missing") or []:
             L.append(f"DIQQAT: kuzatiladigan «{t}» tabi sheet'da yo'q — bu tab bo'yicha "
                      "o'zgarish yoki pul xulosasi chiqarma (hisobotga ⚠️ qatori avtomatik qo'shiladi).")
+        for s in sheet.get("stale") or []:
+            L.append(f"DIQQAT: «{s['tab']}» tabi {_dm(s['since'])} dan beri o'zgarmagan ({s['kun']} ish kuni) — "
+                     "«o'zgarish yo'q» deb tinch xulosa qilma; bu kuzatuv jimligi, hisobotga ⚠️ qatori "
+                     "avtomatik qo'shiladi.")
         if sheet.get("baseline"):
             L.append("(bu sheet uchun birinchi snapshot — solishtirish yo'q)")
         if sheet.get("removed_ranges"):
@@ -252,6 +256,46 @@ def watch_missing_note(diff):
                 "Yilsiz eski tab arxiv sifatida ataylab o'qilmaydi; joriy oy tabini shu nom bilan oching."
             )
     return L
+
+
+def _dm(iso):
+    """2026-10-01 → 01.10"""
+    return f"{iso[8:10]}.{iso[5:7]}" if len(str(iso)) == 10 else str(iso)
+
+
+def stale_note(diff):
+    """PM KPI joriy oy tabi ≥ diff.STALE_DAYS ish kuni o'zgarmagan — DETERMINISTIK ⚠️.
+    AUDIT.md P0-4: 37 kun «o'zgarish yo'q» deyilgan, jimlik hech qachon signal bermagan."""
+    L = []
+    for sheet in diff["sheets"].values():
+        for s in sheet.get("stale") or []:
+            head = f"⚠️ {sheet['name']}: «{s['tab']}» tabi {_dm(s['since'])} dan beri o'zgarmagan ({s['kun']} ish kuni)"
+            if s.get("other_changed"):
+                more = s.get("other_total", 0) - len(s["other_changed"])
+                tabs = ", ".join(f"«{t}»" for t in s["other_changed"]) + (f" +{more}" if more > 0 else "")
+                L.append(f"{head}, lekin shu davrda {tabs} o'zgargan — kunlik diff noto'g'ri tabni "
+                         "kuzatayotgan bo'lishi mumkin; PM qaysi tabni to'ldirishini tekshiring.")
+            else:
+                L.append(f"{head}, sheet'ning boshqa tablari ham o'zgarmagan — KPI to'ldirilmayapti yoki "
+                         "ma'lumot eskirgan; PM bilan tekshiring.")
+    return L
+
+
+def watch_new_note(diff):
+    """Oy almashuvida kuzatuvga olingan yangi oy tabi (kecha ham bor edi, kuzatilmagan)."""
+    from fetch import tab_of_range
+    L = []
+    for sheet in diff["sheets"].values():
+        for rng, d in sheet.get("ranges", {}).items():
+            if d.get("watch_new"):
+                L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» kuzatuvga yangi oy tabi sifatida olindi "
+                         f"({d['stats'].get('rows_now', 0)} qator) — o'zgarishlar uning kechagi holatiga nisbatan.")
+    return L
+
+
+def deterministic_notes(diff):
+    """AI matniga tayanmaydigan ogohlantirishlar — quiet, AI, fallback va /hisobot yo'llarida."""
+    return watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
 
 
 def other_tabs_note(diff):
@@ -469,7 +513,7 @@ def main():
             f"O'zgarish yo'q. {len(diff['sheets'])} ta sheet ({names}), jami {rows} qator "
             f"tekshirildi — {diff['prev_date']} holatidan farq topilmadi."
         )
-        for note in watch_missing_note(diff) + other_tabs_note(diff):
+        for note in deterministic_notes(diff) + other_tabs_note(diff):
             report += f"\n{note}"
         ub = undiruv_block(args.date)
         if ub:
@@ -518,7 +562,7 @@ def main():
         log("fallback hisobot yozilyapti (quruq raqamlar)")
         report = fallback_report(diff, str(e))
 
-    wm = watch_missing_note(diff)
+    wm = deterministic_notes(diff)
     if wm:
         report += "\n\n" + "\n".join(wm)
     ub = undiruv_block(args.date)

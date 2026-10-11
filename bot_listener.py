@@ -1585,7 +1585,7 @@ def do_hisobot():
             f"📊 O'zgarish yo'q: hozirgi jonli holat {latest} snapshot'idan farq qilmayapti "
             f"({t['sheets']} sheet tekshirildi)."
         )
-        for note in analyze.watch_missing_note(result):
+        for note in analyze.deterministic_notes(result):
             msg += f"\n{note}"
         send_retry(msg)
         remember("/hisobot", msg)
@@ -1613,7 +1613,7 @@ def do_hisobot():
     except Exception as e:
         log(f"claude xato: {e}")
         ans = analyze.fallback_report(result, str(e))
-    wm = analyze.watch_missing_note(result)
+    wm = analyze.deterministic_notes(result)
     if wm:
         ans += "\n\n" + "\n".join(wm)
     # PDF ko'rinishida urinamiz; yiqilsa — matn (hisobot hech qachon yo'qolmasin)
