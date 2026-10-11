@@ -109,8 +109,8 @@ def _always_ignore(rel):
 
 # ---------------------------------------------------------------- git
 
-def _git(*args):
-    r = subprocess.run(["git", *args], capture_output=True, text=True, timeout=GIT_TIMEOUT)
+def _git(*args, env=None):
+    r = subprocess.run(["git", *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
     if r.returncode != 0:
         # stderr token'li URL'ni o'z ichiga olishi mumkin → manbada sanitize
         raise RuntimeError(_sanitize(f"git {' '.join(args[:3])} → {r.stderr.strip()[:200]}"))
@@ -118,29 +118,34 @@ def _git(*args):
 
 
 def _urls(repo, token):
-    """(auth_url, clean_url) — token'li (klon/fetch) va tokensiz (config'da qoladi)."""
-    return (f"https://x-access-token:{token}@github.com/{repo}.git",
-            f"https://github.com/{repo}.git")
+    """(url, clean_url) — ikkalasi ham TOKENSIZ; token git'ga GIT_CONFIG_* env orqali
+    (git_auth.env) beriladi. Ilgari tokenli URL git argv'ida edi — `ps` ko'rardi (P2)."""
+    import git_auth
+
+    return git_auth.url(repo), git_auth.url(repo)
 
 
 def _ensure_clone(repo, token):
-    """Read-only mirror → CLONE. Token .git/config'da SAQLANMAYDI: klondan keyin
-    origin tokensiz URL'ga o'zgartiriladi; yangilash token'li URL bilan `fetch` +
+    """Read-only mirror → CLONE. Token .git/config'da ham, git argv'ida ham YO'Q:
+    URL tokensiz, token GIT_CONFIG_* env'da (git_auth); yangilash `fetch` +
     `reset --hard` (pull --rebase EMAS — shallow read-only mirror uchun to'g'riroq,
     sinmaydi va lokal commit/rebase yaratmaydi)."""
+    import git_auth
+
     auth_url, clean_url = _urls(repo, token)
+    genv = git_auth.env(token)              # token faqat env'da (argv/config'da emas)
     CLONE.parent.mkdir(parents=True, exist_ok=True)
     if not (CLONE / ".git").is_dir():
-        _git("clone", "--depth", "1", auth_url, str(CLONE))
-        _git("-C", str(CLONE), "remote", "set-url", "origin", clean_url)   # tokenni tashla
+        _git("clone", "--depth", "1", auth_url, str(CLONE), env=genv)
+        _git("-C", str(CLONE), "remote", "set-url", "origin", clean_url)   # eski tokenli URL bo'lsa
     else:
         try:
-            _git("-C", str(CLONE), "fetch", "--depth", "1", auth_url, "HEAD")
+            _git("-C", str(CLONE), "fetch", "--depth", "1", auth_url, "HEAD", env=genv)
             _git("-C", str(CLONE), "reset", "--hard", "FETCH_HEAD")
         except RuntimeError as e:
             log(f"fetch yiqildi ({_sanitize(str(e))}) — qayta klon")
             shutil.rmtree(CLONE, ignore_errors=True)
-            _git("clone", "--depth", "1", auth_url, str(CLONE))
+            _git("clone", "--depth", "1", auth_url, str(CLONE), env=genv)
             _git("-C", str(CLONE), "remote", "set-url", "origin", clean_url)
     return CLONE
 

@@ -142,6 +142,8 @@ def load_chats():
         d = {}
     d.setdefault("slots", {})
     d.setdefault("pending", {})
+    # pending: {slot: [so'rov, ...]} — eski format {slot: so'rov} ro'yxatga o'raladi
+    d["pending"] = {k: (v if isinstance(v, list) else [v]) for k, v in d["pending"].items() if v}
     return d
 
 
@@ -192,6 +194,31 @@ def set_contact(slot, contact):
 
 # ---------- onboarding / PM xabarlari (bot_listener chaqiradi) ----------
 
+# Onboarding so'rovlari (P2): slot nomlari ommaviy (config'dan) — istalgan Telegram
+# foydalanuvchisi «/start pm_<slot>» yubora oladi. Ilgari yangi so'rov kutilayotganini
+# ALMASHTIRARDI va /approve_<slot> oxirgisini ulardi: haqiqiy PM so'rovidan keyin
+# begona odam o'zinikini qo'ysa, ega bilmay uni PM o'rniga ulab qo'yardi. Endi so'rovlar
+# chat_id bo'yicha ro'yxat, bir nechta bo'lsa /approve_<slot> <chat_id> shart.
+PENDING_MAX = 5              # bitta slotga kutilayotgan so'rovlar (eskisi tushib qoladi)
+START_RATE_SEC = 600         # bitta chat'dan qayta /start — egaga qayta xabar yo'q
+
+
+def _pending_tanla(lst, chat_id):
+    """(so'rov, xato_matni): chat_id berilsa — o'sha; aks holda yagona so'rov."""
+    if chat_id is not None:
+        p = next((x for x in lst if str(x.get("chat_id")) == str(chat_id).strip()), None)
+        return (p, "") if p else (None, f"chat_id {chat_id} bilan kutilayotgan so'rov yo'q.")
+    if len(lst) == 1:
+        return lst[0], ""
+    return None, "bir nechta"
+
+
+def _pending_royxat(slot, slots, lst, cmd):
+    return (f"{slots.get(slot, slot)} uchun {len(lst)} ta so'rov — qaysi biri? "
+            + "; ".join(f"{x.get('username', '?')} (chat_id {x['chat_id']}, {x.get('asked', '')})"
+                        for x in lst)
+            + f". Yuboring: /{cmd}_{slot} <chat_id>")
+
 def handle_incoming(chat_id, msg):
     """Begona chat'dan kelgan xabar. Qaytadi: holat satri yoki None (bot jim
     ignore qiladi). FAQAT shu yerda begona chat bilan muloqot bo'ladi."""
@@ -210,18 +237,26 @@ def handle_incoming(chat_id, msg):
                 send_to(chat_id, "Havola noto'g'ri yoki eskirgan.")
                 return "pm-start-bad"
             who = _who(msg)
-            chats["pending"][want] = {
-                "chat_id": chat_id, "username": who,
-                "asked": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            }
+            lst = chats["pending"].setdefault(want, [])
+            avval = next((x for x in lst if str(x.get("chat_id")) == str(chat_id)), None)
+            hozir = time.time()
+            if avval and hozir - float(avval.get("ts", 0)) < START_RATE_SEC:
+                return "pm-start-rate"          # takror /start — egaga spam yo'q
+            if avval:
+                lst.remove(avval)
+            lst.append({"chat_id": chat_id, "username": who, "ts": hozir,
+                        "asked": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            del lst[:-PENDING_MAX]
             save_chats(chats)
             send_to(chat_id, "So'rov yuborildi — admin tasdiqlagach, kunlik undiruv "
                              "eslatmalari shu yerga keladi.")
             cur = chats["slots"].get(want)
             cur_s = f" (hozir ulangan: {cur.get('username')})" if cur else ""
+            kop = (f"\n⚠️ Bu slotga {len(lst)} ta so'rov kutilmoqda — chat_id'ni tekshiring."
+                   if len(lst) > 1 else "")
             send_owner(
                 f"🔗 {who} (chat_id {chat_id}) {slots[want]} sifatida ulanmoqchi{cur_s} — "
-                f"/approve_{want} yoki /reject_{want}"
+                f"/approve_{want} {chat_id} yoki /reject_{want} {chat_id}{kop}"
             )
             return "pm-start"
         if slot is None:
@@ -245,15 +280,23 @@ def handle_incoming(chat_id, msg):
     return None
 
 
-def approve(slot):
-    """Egadan /approve_<slot>. Qaytadi: egaga javob matni."""
+def approve(slot, chat_id=None):
+    """Egadan /approve_<slot> [chat_id]. Qaytadi: egaga javob matni. Slotga bir nechta
+    so'rov bo'lsa chat_id SHART — aks holda ro'yxat qaytadi, hech kim ulanmaydi."""
     chats = load_chats()
     slots = slots_from_config()
     if slot not in slots:
         return f"Noma'lum slot: {slot}. Mavjud: {', '.join(slots)}"
-    p = chats["pending"].pop(slot, None)
-    if not p:
+    lst = chats["pending"].get(slot) or []
+    if not lst:
         return f"{slots[slot]} uchun kutilayotgan so'rov yo'q."
+    p, xato = _pending_tanla(lst, chat_id)
+    if p is None:
+        return _pending_royxat(slot, slots, lst, "approve") if xato == "bir nechta" else xato
+    chats["pending"].pop(slot, None)        # slot band bo'ldi — qolgan so'rovlar ham yopiladi
+    for x in lst:
+        if x is not p:
+            send_to(x["chat_id"], "So'rov rad etildi.")
     old = chats["slots"].get(slot)
     chats["slots"][slot] = {
         "chat_id": p["chat_id"], "username": p.get("username", "?"),
@@ -266,12 +309,19 @@ def approve(slot):
     return f"✅ {slots[slot]} ← {p.get('username')} (chat_id {p['chat_id']}) ulandi{extra}."
 
 
-def reject(slot):
+def reject(slot, chat_id=None):
+    """Egadan /reject_<slot> [chat_id] — bir nechta so'rov bo'lsa chat_id shart."""
     chats = load_chats()
     slots = slots_from_config()
-    p = chats["pending"].pop(slot, None)
-    if not p:
+    lst = chats["pending"].get(slot) or []
+    if not lst:
         return f"{slots.get(slot, slot)} uchun kutilayotgan so'rov yo'q."
+    p, xato = _pending_tanla(lst, chat_id)
+    if p is None:
+        return _pending_royxat(slot, slots, lst, "reject") if xato == "bir nechta" else xato
+    lst.remove(p)
+    if not lst:
+        chats["pending"].pop(slot, None)
     save_chats(chats)
     send_to(p["chat_id"], "So'rov rad etildi.")
     return f"❌ {slots.get(slot, slot)} so'rovi rad etildi ({p.get('username')})."

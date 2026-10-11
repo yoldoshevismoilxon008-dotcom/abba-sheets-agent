@@ -276,11 +276,13 @@ def test_supervisor_notifies_on_chat_failstreak():
 
 # ---------------------------------------------------------------- fix#2: token diskda emas
 
-def _rec_git(calls):
+def _rec_git(calls, envs=None):
     from types import SimpleNamespace
 
-    def rec(*cmd, check=True, cwd=None):
+    def rec(*cmd, check=True, cwd=None, env=None):
         calls.append(" ".join(str(c) for c in cmd))
+        if envs is not None:
+            envs.append(env)
         if "clone" in cmd:
             (Path(cmd[-1]) / ".git").mkdir(parents=True, exist_ok=True)
         rc = 1 if "diff" in cmd else 0                   # diff --cached --quiet → o'zgarish bor
@@ -288,13 +290,18 @@ def _rec_git(calls):
     return rec
 
 
-def _assert_token_not_in_config(calls, token):
+def _assert_token_not_in_config(calls, token, envs):
     seturl = [c for c in calls if "set-url" in c]
     assert seturl, "set-url chaqirilmadi"
     assert "https://github.com/owner/repo.git" in seturl[0]      # TOKENSIZ URL config'ga
-    assert not any("set-url" in c and token in c for c in calls)  # set-url'da HECH token yo'q
-    pushes = [c for c in calls if " push " in c]
-    assert any(token in c and c.strip().endswith("HEAD") for c in pushes)  # push token argument bilan
+    # audit P2: token git ARGV'ida ham yo'q (ilgari push/clone URL'ida edi — `ps` ko'rardi)
+    assert not any(token in c for c in calls)
+    pushes = [i for i, c in enumerate(calls) if " push " in c]
+    assert pushes and all(calls[i].strip().endswith("https://github.com/owner/repo.git HEAD")
+                          for i in pushes)
+    import base64
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    assert all(envs[i] and f"AUTHORIZATION: basic {basic}" in envs[i].values() for i in pushes)
 
 
 def test_push_chat_token_not_in_config():
@@ -305,13 +312,13 @@ def test_push_chat_token_not_in_config():
     pc.CHAT_SRC.mkdir()
     (pc.CHAT_SRC / "2026-08-12.md").write_text("x", encoding="utf-8")
     os.environ["REPORTS_REPO"], os.environ["GH_TOKEN_REPORTS"] = "owner/repo", "SECRETTOK"
-    calls, o_sh = [], pc.sh
-    pc.sh = _rec_git(calls)
+    calls, envs, o_sh = [], [], pc.sh
+    pc.sh = _rec_git(calls, envs)
     try:
         pc.main()
     finally:
         pc.sh = o_sh
-    _assert_token_not_in_config(calls, "SECRETTOK")
+    _assert_token_not_in_config(calls, "SECRETTOK", envs)
 
 
 def test_push_reports_token_not_in_config():
@@ -322,13 +329,13 @@ def test_push_reports_token_not_in_config():
     snap.mkdir(parents=True)
     (snap / "report.md").write_text("hisobot matni", encoding="utf-8")
     os.environ["REPORTS_REPO"], os.environ["GH_TOKEN_REPORTS"] = "owner/repo", "SECRETTOK"
-    calls, o_sh = [], pr.sh
-    pr.sh = _rec_git(calls)
+    calls, envs, o_sh = [], [], pr.sh
+    pr.sh = _rec_git(calls, envs)
     try:
         pr.main()
     finally:
         pr.sh = o_sh
-    _assert_token_not_in_config(calls, "SECRETTOK")
+    _assert_token_not_in_config(calls, "SECRETTOK", envs)
 
 
 # ---------------------------------------------------------------- fix#4: chat_log clip

@@ -10,6 +10,9 @@
   C  runtime: restart 09:00 dan keyin bo'lsa boot catch-up; 09:30 PM push pipeline
      tugashini kutadi; recover_inflight watchdog bilan (osilgan xabar pollingni
      bloklamaydi).
+  D  xavfsizlik: PM onboarding so'rovlari chat_id bo'yicha (begona so'rov haqiqiysini
+     almashtirmaydi, bir nechta bo'lsa /approve_<slot> <chat_id>, rate-limit); inbox
+     fayl nomi kengaytmani saqlaydi va tozalanadi; GitHub token git argv'ida yo'q.
 
 pytest tests/test_p2_tuzatishlar.py  yoki  python3 tests/test_p2_tuzatishlar.py
 Tarmoq/kredensial kerak emas.
@@ -468,6 +471,161 @@ def test_recover_inflight_watchdog_bilan():
         assert dt < 2                                # ilgari handle_update tugashini kutardi
         assert not inflight.exists()
     assert any("timeout" in x for x in xabarlar)
+
+
+# ---------------------------------------------------------------- D: xavfsizlik
+
+@contextlib.contextmanager
+def _pm_muhit():
+    import pm_push
+    yub, ega = [], []
+    with tempfile.TemporaryDirectory() as td, \
+            _soxta(pm_push, "CHATS_FILE", Path(td) / "pm_chats.json"), \
+            _soxta(pm_push, "slots_from_config", lambda: {"ali": "Ali", "vali": "Vali"}), \
+            _soxta(pm_push, "send_to", lambda c, t: yub.append((c, t))), \
+            _soxta(pm_push, "send_owner", ega.append):
+        yield pm_push, yub, ega
+
+
+def _start(pm, chat_id, user, slot="ali"):
+    return pm.handle_incoming(chat_id, {"text": f"/start pm_{slot}", "from": {"username": user}})
+
+
+def test_pm_onboarding_begona_sorov_haqiqiysini_almashtirmaydi():
+    with _pm_muhit() as (pm, yub, ega):
+        assert _start(pm, 111, "ali_pm") == "pm-start"
+        assert _start(pm, 666, "hujumchi") == "pm-start"
+        assert "/approve_ali 666" in ega[-1] and "2 ta so'rov" in ega[-1]
+        # ilgari: ikkinchi so'rov birinchisini almashtirar, /approve_ali uni ulardi
+        r = pm.approve("ali")
+        assert "2 ta so'rov" in r and "chat_id 111" in r and "chat_id 666" in r
+        assert pm.load_chats()["slots"] == {}                       # hech kim ulanmadi
+        assert pm.approve("ali", "111").startswith("✅ Ali ← @ali_pm (chat_id 111)")
+        ch = pm.load_chats()
+        assert ch["slots"]["ali"]["chat_id"] == 111 and "ali" not in ch["pending"]
+        assert (666, "So'rov rad etildi.") in yub
+
+
+def test_pm_onboarding_rate_limit_va_cheklov():
+    with _pm_muhit() as (pm, yub, ega):
+        _start(pm, 111, "a")
+        assert _start(pm, 111, "a") == "pm-start-rate" and len(ega) == 1   # egaga spam yo'q
+        for i in range(10):
+            _start(pm, 1000 + i, f"u{i}")
+        lst = pm.load_chats()["pending"]["ali"]
+        assert len(lst) == pm.PENDING_MAX and lst[-1]["chat_id"] == 1009
+
+
+def test_pm_onboarding_yagona_sorov_va_reject():
+    with _pm_muhit() as (pm, yub, ega):
+        _start(pm, 111, "ali_pm")
+        assert pm.approve("ali", "999").startswith("chat_id 999")    # boshqa chat_id — ulanmaydi
+        assert pm.reject("ali").startswith("❌ Ali so'rovi rad etildi (@ali_pm)")
+        assert pm.approve("ali") == "Ali uchun kutilayotgan so'rov yo'q."
+        _start(pm, 222, "v1", slot="vali")
+        _start(pm, 333, "v2", slot="vali")
+        assert "2 ta so'rov" in pm.reject("vali")
+        assert pm.reject("vali", "333").startswith("❌")
+        assert pm.approve("vali").startswith("✅ Vali ← @v1")       # bittasi qoldi — chat_id shart emas
+
+
+def test_pm_eski_pending_formati_oqiladi():
+    import json
+    with _pm_muhit() as (pm, yub, ega):
+        pm.CHATS_FILE.write_text(json.dumps(
+            {"slots": {}, "pending": {"ali": {"chat_id": 5, "username": "@x"}}}), encoding="utf-8")
+        assert pm.approve("ali").startswith("✅ Ali ← @x (chat_id 5)")
+
+
+def test_bot_approve_buyrugi_chat_id_uzatadi():
+    import bot_listener as bl
+    import pm_push
+    chaqiruv = []
+    upd = {"update_id": 1, "message": {"chat": {"id": 4242}, "from": {"id": 4242},
+                                       "text": "/approve_ali 666"}}
+    with _soxta(bl, "CHAT_ID", "4242"), _soxta(bl, "send_retry", lambda *a, **k: True), \
+            _soxta(pm_push, "approve", lambda s, c=None: chaqiruv.append(("a", s, c)) or "ok"), \
+            _soxta(pm_push, "reject", lambda s, c=None: chaqiruv.append(("r", s, c)) or "ok"):
+        assert bl.handle_update(upd) == "pm-approve"
+        upd["message"]["text"] = "/reject_vali@abba_bot"
+        assert bl.handle_update(upd) == "pm-reject"
+    assert chaqiruv == [("a", "ali", "666"), ("r", "vali", None)]
+
+
+def test_inbox_fayl_nomi_kengaytma_va_tozalash():
+    import time
+    import design
+    uzun = "Hisobot " + "x" * 120 + ".pdf"
+    n = design.safe_name(uzun)
+    assert len(n) == 60 and n.endswith(".pdf")                   # ilgari kengaytma kesilardi
+    assert design.safe_name("../../etc/passwd").count("/") == 0
+    assert design.safe_name("") == "fayl" and design.safe_name(".env") == "env"
+    assert design.safe_name("hisobot (yakuniy).docx") == "hisobot__yakuniy_.docx"
+    with tempfile.TemporaryDirectory() as td:
+        inbox = Path(td) / "inbox"
+        inbox.mkdir()
+        eski, yangi = inbox / "eski.pdf", inbox / "yangi.pdf"
+        eski.write_text("x")
+        yangi.write_text("y")
+        t = time.time() - 8 * 86400
+        os.utime(eski, (t, t))
+        with _soxta(design, "INBOX", inbox):
+            assert design.prune_inbox() == 1
+        assert not eski.exists() and yangi.exists()
+
+
+def test_git_token_argv_da_yoq():
+    import subprocess
+    import git_auth
+    e = git_auth.env("TOK123", base={"PATH": os.environ.get("PATH", "")})
+    r = subprocess.run(["git", "config", "--get", git_auth.HEADER_KEY], env=e,
+                       capture_output=True, text=True)
+    assert r.stdout.strip() == "AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46VE9LMTIz"   # git o'qiydi
+    assert git_auth.env("", base={"A": "1"}) == {"A": "1"}
+    # mavjud GIT_CONFIG_* (masalan proxy sozlamasi) saqlanadi, token keyingi indeksga
+    e = git_auth.env("T", base={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b",
+                                "GIT_CONFIG_VALUE_0": "c"})
+    assert e["GIT_CONFIG_COUNT"] == "2" and e["GIT_CONFIG_KEY_0"] == "a.b"
+    assert e["GIT_CONFIG_KEY_1"] == git_auth.HEADER_KEY
+    oldin = os.environ.get("GIT_CONFIG_COUNT")
+    git_auth.env("T")
+    assert os.environ.get("GIT_CONFIG_COUNT") == oldin           # os.environ o'zgarmaydi
+
+
+def _argv_yozgich(log):
+    from types import SimpleNamespace as NS
+
+    def _sh(*cmd, **k):
+        log.append((cmd, k.get("env")))
+        if len(cmd) > 1 and cmd[1] == "clone":
+            (Path(cmd[-1]) / ".git").mkdir(parents=True, exist_ok=True)
+        # «diff --cached --quiet» 1 → commit qilinadigan o'zgarish bor
+        return NS(returncode=1 if "diff" in cmd else 0, stdout="", stderr="")
+    return _sh
+
+
+def test_push_reports_va_push_chat_tokenni_argv_ga_qoymaydi():
+    import push_chat
+    import push_reports
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "snap" / "2026-10-05").mkdir(parents=True)
+        (root / "snap" / "2026-10-05" / "report.md").write_text("hisobot", encoding="utf-8")
+        (root / "chat").mkdir()
+        (root / "chat" / "2026-10-05.md").write_text("suhbat", encoding="utf-8")
+        log = []
+        with _soxta(os, "environ", {**os.environ, "REPORTS_REPO": "o/r", "GH_TOKEN_REPORTS": "SIRTOKEN"}), \
+                _soxta(push_reports, "sh", _argv_yozgich(log)), \
+                _soxta(push_reports, "CLONE", root / "rep"), _soxta(push_reports, "SNAPSHOTS", root / "snap"), \
+                _soxta(push_chat, "sh", _argv_yozgich(log)), _soxta(push_chat, "CLONE", root / "ch"), \
+                _soxta(push_chat, "CHAT_SRC", root / "chat"), _soxta(push_chat, "STATE", root / "st.json"):
+            assert push_reports.main() == 0
+            assert push_chat.main() == 0
+    tarmoq = [(c, e) for c, e in log if any(x in c for x in ("clone", "pull", "push"))]
+    assert len(tarmoq) >= 4
+    assert not any("SIRTOKEN" in " ".join(map(str, c)) for c, _ in log)      # ps ko'rmaydi
+    assert all(e and e.get("GIT_CONFIG_KEY_" + str(int(e["GIT_CONFIG_COUNT"]) - 1))
+               == "http.https://github.com/.extraheader" for _, e in tarmoq)
 
 
 # ---------------------------------------------------------------- skript rejimi
