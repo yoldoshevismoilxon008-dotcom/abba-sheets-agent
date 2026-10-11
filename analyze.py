@@ -92,6 +92,10 @@ def build_context(diff):
         for t in sheet.get("watch_missing") or []:
             L.append(f"DIQQAT: kuzatiladigan «{t}» tabi sheet'da yo'q — bu tab bo'yicha "
                      "o'zgarish yoki pul xulosasi chiqarma (hisobotga ⚠️ qatori avtomatik qo'shiladi).")
+        for s in sheet.get("stale") or []:
+            L.append(f"DIQQAT: «{s['tab']}» tabi {_dm(s['since'])} dan beri o'zgarmagan ({s['kun']} ish kuni) — "
+                     "«o'zgarish yo'q» deb tinch xulosa qilma; bu kuzatuv jimligi, hisobotga ⚠️ qatori "
+                     "avtomatik qo'shiladi.")
         if sheet.get("baseline"):
             L.append("(bu sheet uchun birinchi snapshot — solishtirish yo'q)")
         if sheet.get("removed_ranges"):
@@ -114,10 +118,17 @@ def build_context(diff):
                     L.append(f"  namuna: {fmt_row(row, header)}")
                 continue
 
-            L.append(
-                f"[{rng}] qatorlar {st['rows_prev']} → {st['rows_now']} | "
-                f"yangi: {st['added']}, o'chgan: {st['removed']}, o'zgargan: {st['changed']}"
-            )
+            if d.get("watch_new"):
+                L.append(
+                    f"[{rng}] (kuzatuvga YANGI olingan tab — kecha kuzatilmagan) {st['rows_now']} qator | "
+                    f"kechagi holatiga nisbatan yangi: {st['added']}, o'chgan: {st['removed']}, "
+                    f"o'zgargan: {st['changed']}. DIQQAT: buni «o'zgarish yo'q» yoki «N → N qator» deb yozma."
+                )
+            else:
+                L.append(
+                    f"[{rng}] qatorlar {st['rows_prev']} → {st['rows_now']} | "
+                    f"yangi: {st['added']}, o'chgan: {st['removed']}, o'zgargan: {st['changed']}"
+                )
             if d.get("header_changed"):
                 hc = d["header_changed"]
                 L.append(f"  DIQQAT — sarlavha qatori o'zgargan: {hc['old']} → {hc['new']}")
@@ -213,6 +224,11 @@ def fallback_report(diff, err):
             st = d["stats"]
             if d.get("baseline"):
                 L.append(f"▸ {sheet['name']} [{rng}]: birinchi snapshot, {st['rows_now']} qator")
+            elif d.get("watch_new"):
+                L.append(
+                    f"▸ {sheet['name']} [{rng}]: kuzatuvga yangi olindi — {st['rows_now']} qator "
+                    f"(kechagi holatiga nisbatan +{st['added']} −{st['removed']} ~{st['changed']})"
+                )
             else:
                 L.append(
                     f"▸ {sheet['name']} [{rng}]: +{st['added']} yangi, "
@@ -252,6 +268,47 @@ def watch_missing_note(diff):
                 "Yilsiz eski tab arxiv sifatida ataylab o'qilmaydi; joriy oy tabini shu nom bilan oching."
             )
     return L
+
+
+def _dm(iso):
+    """2026-10-01 → 01.10"""
+    return f"{iso[8:10]}.{iso[5:7]}" if len(str(iso)) == 10 else str(iso)
+
+
+def stale_note(diff):
+    """PM KPI joriy oy tabi ≥ diff.STALE_DAYS ish kuni o'zgarmagan — DETERMINISTIK ⚠️.
+    AUDIT.md P0-4: 37 kun «o'zgarish yo'q» deyilgan, jimlik hech qachon signal bermagan."""
+    L = []
+    for sheet in diff["sheets"].values():
+        for s in sheet.get("stale") or []:
+            head = f"⚠️ {sheet['name']}: «{s['tab']}» tabi {_dm(s['since'])} dan beri o'zgarmagan ({s['kun']} ish kuni)"
+            if s.get("other_changed"):
+                more = s.get("other_total", 0) - len(s["other_changed"])
+                tabs = ", ".join(f"«{t}»" for t in s["other_changed"]) + (f" +{more}" if more > 0 else "")
+                L.append(f"{head}, lekin shu davrda {tabs} o'zgargan — kunlik diff noto'g'ri tabni "
+                         "kuzatayotgan bo'lishi mumkin; PM qaysi tabni to'ldirishini tekshiring.")
+            else:
+                L.append(f"{head}, kuzatuvdan tashqari tablar ham o'zgarmagan — KPI to'ldirilmayapti yoki "
+                         "ma'lumot eskirgan; PM bilan tekshiring.")
+    return L
+
+
+def watch_new_note(diff):
+    """Oy almashuvida kuzatuvga olingan yangi oy tabi (kecha ham bor edi, kuzatilmagan)."""
+    from fetch import tab_of_range
+    L = []
+    for sheet in diff["sheets"].values():
+        for rng, d in sheet.get("ranges", {}).items():
+            if d.get("watch_new"):
+                kind = "yangi oy tabi sifatida " if d.get("watch_new_month") else ""
+                L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» kuzatuvga {kind}olindi "
+                         f"({d['stats'].get('rows_now', 0)} qator) — o'zgarishlar uning kechagi holatiga nisbatan.")
+    return L
+
+
+def deterministic_notes(diff):
+    """AI matniga tayanmaydigan ogohlantirishlar — quiet, AI, fallback va /hisobot yo'llarida."""
+    return watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
 
 
 def other_tabs_note(diff):
@@ -430,6 +487,9 @@ def build_report_json(day, diff_dict, report_text, insights=None, out_name="repo
         ][:6],
         "acknowledged": acked_lines,
         "insights": insights if insights is not None else [],
+        # Deterministik ⚠️/ℹ️ (watch_missing, jimlik, oy almashuvi) — PDF va caption'ga ham
+        # tushsin: Telegram'ga asosan PDF ketadi, report.md emas (AUDIT.md P0-4).
+        "warnings": deterministic_notes(diff_dict),
     }
     try:
         import undiruv as undiruvmod
@@ -469,7 +529,7 @@ def main():
             f"O'zgarish yo'q. {len(diff['sheets'])} ta sheet ({names}), jami {rows} qator "
             f"tekshirildi — {diff['prev_date']} holatidan farq topilmadi."
         )
-        for note in watch_missing_note(diff) + other_tabs_note(diff):
+        for note in deterministic_notes(diff) + other_tabs_note(diff):
             report += f"\n{note}"
         ub = undiruv_block(args.date)
         if ub:
@@ -477,7 +537,9 @@ def main():
         report_path.write_text(report + "\n", encoding="utf-8")
         log("o'zgarish yo'q — Claude chaqirilmadi, qisqa hisobot yozildi")
         try:
-            build_report_json(args.date, diff, report, insights=["O'zgarish yo'q — holat barqaror"])
+            # Jimlik/ogohlantirish bo'lsa «holat barqaror» deyilmaydi — ⚠️ bloki o'zi aytadi
+            ins = [] if deterministic_notes(diff) else ["O'zgarish yo'q — holat barqaror"]
+            build_report_json(args.date, diff, report, insights=ins)
         except Exception as e:
             log(f"report.json yozilmadi (PDF matnsiz qoladi): {e}")
         return 0
@@ -518,7 +580,7 @@ def main():
         log("fallback hisobot yozilyapti (quruq raqamlar)")
         report = fallback_report(diff, str(e))
 
-    wm = watch_missing_note(diff)
+    wm = deterministic_notes(diff)
     if wm:
         report += "\n\n" + "\n".join(wm)
     ub = undiruv_block(args.date)

@@ -181,7 +181,11 @@ def tg_send_document(token, chat_id, path, caption="", filename=None):
 def build_caption(data, title="kunlik KPI hisobot"):
     """report.json dict'idan qisqa caption (≤1024)."""
     t = data.get("totals", {})
-    if t.get("quiet"):
+    warns = [str(w) for w in (data.get("warnings") or [])]
+    bad = [w for w in warns if w.startswith("⚠️")]
+    if t.get("quiet") and bad:
+        holat = f"⚠️ Kuzatuv: {len(bad)} ta ogohlantirish"
+    elif t.get("quiet"):
         holat = "😴 O'zgarish yo'q"
     elif data.get("new_criticals"):
         holat = f"🔴 {len(data['new_criticals'])} yangi kritik topilma"
@@ -206,6 +210,8 @@ def build_caption(data, title="kunlik KPI hisobot"):
         " · ".join(f"{p['name']} {p['pct']}%" for p in data.get("pms", [])),
         f"O'zgarishlar: +{t.get('added', 0)} yangi · −{t.get('removed', 0)} o'chgan · ~{t.get('changed', 0)} o'zgargan",
         u_line,
+        # Birinchi ⚠️ (yo'q bo'lsa ℹ️) qatori — caption 1024 belgidan oshmasin
+        ((bad or warns)[0][:180] + (f" (+{len(warns) - 1})" if len(warns) > 1 else "")) if warns else "",
         "To'liq matn: Obsidian arxivi · /audit · /dashboard",
     ]
     return "\n".join(x for x in lines if x.strip())[:1024]
