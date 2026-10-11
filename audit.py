@@ -193,10 +193,18 @@ def data_rows(vals):
     Marker faqat jadvalning O'Z ustunlarida qidiriladi (audit K5): loyiha qatori bilan
     bir qatorda turgan o'ng tomondagi shablon katagi («May oyligi→ Abdullox», «Limit»)
     jadvalni kesib, qolgan loyihalarni hisobdan tushirib yubormasin. Jadval qismi bo'sh
-    qatorda (jadval tugagan, o'ngda blok davom etadi) marker butun qatorda qidiriladi."""
+    qatorda (jadval tugagan, o'ngda blok davom etadi) marker butun qatorda qidiriladi.
+
+    KPI oy tabida (ideal/«Proekt bali» ustunlari bor) jadval chegarasi — eng o'ngdagi KPI
+    ustuni: yon jadval (Manager / O'rtacha ball / Fakt foizda) sarlavhasi bir qatorda,
+    0–1 bo'sh ustun bilan tursa ham jadvalga qo'shilmaydi. Boshqa tablarda — table_width."""
     h = diffmod.detect_header(vals)
     header = [str(x) for x in (vals[h] if vals else [])]
     w = table_width(header)
+    kpi = [i for i in (find_col(header, "ideal"), find_col(header, "proekt bali"),
+                       find_col(header, "kechga qolgan")) if i is not None]
+    if kpi:
+        w = max(kpi) + 1
     rows = []
     for n, row in enumerate(vals[h + 1:], start=h + 2):
         if not any(str(c).strip() for c in row):
@@ -213,6 +221,14 @@ def data_rows(vals):
 
 # Yig'indi qatorining loyiha nomi katagidagi yorliqlari — loyiha emas (audit K4)
 JAMI_NOMLAR = {"jami", "jami:", "jamlanma", "umumiy", "umumiy jami", "itogo", "итого"}
+
+
+def is_sum_name(name):
+    """Nom katagi yig'indi qatoriniki: bo'sh, «Jami» yorlig'i yoki SON. Real oy tablarida
+    Jami qatorining «Proekt nomi» katagida loyihalar soni yoki Σideal/39 turadi
+    («17», «12», «9,794871795» — 19.08/30.07/22.08 hisobotlari): u loyiha emas."""
+    n = fetchmod.norm(name)
+    return not n or n in JAMI_NOMLAR or _numval(str(name)) is not None
 
 
 def _name_col(header, *skip):
@@ -239,9 +255,9 @@ def pm_stats(vals):
       • ideal bo'sh/0/#REF! qatorning fakti suratga qo'shilib, maxrajga qo'shilmasa foiz
         sun'iy shishadi (16.08: Kanzec ideal bo'sh, fakt 23,2) — bunday qator umuman
         hisoblanmaydi, nomi ideal_bosh'da qaytadi va audit WARN beradi (audit K3);
-      • nomsiz va «Jami»/«jamlanma» qatorlar — yig'indi, loyiha emas: aks holda bo'sh
-        qatorsiz kelgan Jami qatori aktivni +1, ideal/fakt/kechikishni 2 baravar qiladi (K4).
-        Nom ustuni topilmasa — SUM_ROW_MAX'dan katta ball yig'indi qatori deb olinadi."""
+      • yig'indi qatori loyiha emas (K4): nomi bo'sh, «Jami» yoki SON («17», «9,79…» —
+        is_sum_name), yoki bali SUM_ROW_MAX'dan katta. Aks holda bo'sh qatorsiz kelgan
+        Jami qatori aktivni +1, ideal/fakt/kechikishni 2 baravar qiladi."""
     header, rows = data_rows(vals)
     ci = find_col(header, "ideal")
     cf = find_col(header, "proekt bali")
@@ -252,14 +268,14 @@ def pm_stats(vals):
         vi = _numval(cell(row, ci)) or 0.0
         vf = _numval(cell(row, cf)) or 0.0
         vd = _numval(cell(row, ck)) or 0.0
+        if vi >= SUM_ROW_MAX or vf >= SUM_ROW_MAX:
+            continue                       # bitta loyiha bali bunchalik bo'lmaydi — yig'indi
         if cp is not None:
             name = cell(row, cp)
-            if not name or fetchmod.norm(name) in JAMI_NOMLAR:
+            if is_sum_name(name):
                 continue
         else:
             name = f"{n}-qator"
-            if vi >= SUM_ROW_MAX or vf >= SUM_ROW_MAX:
-                continue
         if vi <= 0:
             if vf > 0:
                 bosh.append(name)
@@ -332,8 +348,8 @@ def audit_month_tab(sheet_name, tab, vals, findings):
             if any(nonzero(s) for s in scores) and (not nums or max(nums) < SUM_ROW_MAX):
                 findings.append((sheet_name, tab, CRIT, f"{n}-qator: proekt nomi bo'sh, lekin ballari bor", "nomsiz-qator"))
             continue
-        if fetchmod.norm(name) in JAMI_NOMLAR:
-            continue                       # yig'indi qatori — loyiha emas (Main bilan solishtirilmaydi)
+        if is_sum_name(name):
+            continue                       # yig'indi qatori («Jami», «17») — loyiha emas, Main bilan solishtirilmaydi
         names.add(fetchmod.norm(name))
         for label, idx in (("Kpi ideal bali", c_ideal), ("Proekt bali", c_fact)):
             v = cell(row, idx)

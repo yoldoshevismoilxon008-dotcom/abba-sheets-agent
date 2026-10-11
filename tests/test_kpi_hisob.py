@@ -201,6 +201,23 @@ def test_k4_jami_yorliqli_qator_loyiha_emas():
     assert (st["aktiv"], st["ideal"]) == (1, 41.2), st
 
 
+def test_k4_jami_qatori_nomida_son_loyiha_emas():
+    """Real oy tablari: Jami qatorining «Proekt nomi» katagida loyihalar soni («17») yoki
+    Σideal/39 («9,794871795») turadi — loyiha deb sanalmaydi (review: aktiv 9, ideal 2x)."""
+    for jami_nomi in ("2", "2,112820513"):
+        st = au.pm_stats(_pm(["1", "A", "41,2", "30", "", "1"], ["2", "B", "41,2", "20", "", "0"],
+                             ["", jami_nomi, "82,4", "50", "", "1"]))
+        assert (st["aktiv"], round(st["ideal"], 1), st["fakt"], st["delay"]) == (2, 82.4, 50.0, 1.0), (jami_nomi, st)
+    names = au.audit_month_tab("T", "Avgust", _pm(["1", "A", "41,2", "30", "", ""],
+                                                  ["", "17", "666,2", "234,8", "", ""]), [])
+    assert names == {"a"}, names
+
+
+def test_k4_katta_ballik_qator_nom_bilan_ham_yigindi():
+    st = au.pm_stats(_pm(["1", "A", "41,2", "30", "", ""], ["", "Hammasi", "329,6", "240", "", ""]))
+    assert (st["aktiv"], st["ideal"]) == (1, 41.2), st
+
+
 def test_k4_nom_ustunisiz_jadvalda_katta_yigindi_chetlanadi():
     hdr = ["№", "Kpi ideal bali", "Proekt bali"]
     st = au.pm_stats(_pm(["1", "41,2", "30"], ["2", "41,2", "20"], ["", "164,8", "100"], header=hdr))
@@ -225,6 +242,19 @@ def test_k5_ong_tomondagi_shablon_jadvalni_kesmaydi():
                ["3", "C", "41,2", "40", "", "", "", "", "", ""], header=SHABLON_HDR)
     st = au.pm_stats(vals)
     assert (st["aktiv"], round(st["ideal"], 1)) == (3, 123.6), st    # avval aktiv 1, ideal 41,2
+
+
+def test_k5_yon_jadval_yopishib_tursa_ham_kesmaydi():
+    """Yon jadval (Manager / O'rtacha ball / Fakt foizda) sarlavhasi asosiy jadvaldan 0 yoki
+    1 bo'sh ustun bilan tursa ham loyiha qatoridagi shablon katagi jadvalni kesmaydi."""
+    for gap in (0, 1):
+        hdr = PM_HDR + [""] * gap + ["Manager", "O'rtacha ball", "Fakt foizda"]
+        pad = [""] * gap
+        vals = _pm(["1", "A", "41,2", "30", "", ""] + pad + ["Zubair", "30", "70%"],
+                   ["2", "B", "41,2", "35", "", ""] + pad + ["Avgust oyligi→ Zubair", "", ""],
+                   ["3", "C", "41,2", "40", "", ""] + pad + ["Limit", "Foiz", ""], header=hdr)
+        st = au.pm_stats(vals)
+        assert (st["aktiv"], round(st["ideal"], 1)) == (3, 123.6), (gap, st)
 
 
 def test_k5_jadval_ichidagi_marker_hali_ham_tugatadi():
