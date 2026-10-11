@@ -118,10 +118,17 @@ def build_context(diff):
                     L.append(f"  namuna: {fmt_row(row, header)}")
                 continue
 
-            L.append(
-                f"[{rng}] qatorlar {st['rows_prev']} → {st['rows_now']} | "
-                f"yangi: {st['added']}, o'chgan: {st['removed']}, o'zgargan: {st['changed']}"
-            )
+            if d.get("watch_new"):
+                L.append(
+                    f"[{rng}] (kuzatuvga YANGI olingan tab — kecha kuzatilmagan) {st['rows_now']} qator | "
+                    f"kechagi holatiga nisbatan yangi: {st['added']}, o'chgan: {st['removed']}, "
+                    f"o'zgargan: {st['changed']}. DIQQAT: buni «o'zgarish yo'q» yoki «N → N qator» deb yozma."
+                )
+            else:
+                L.append(
+                    f"[{rng}] qatorlar {st['rows_prev']} → {st['rows_now']} | "
+                    f"yangi: {st['added']}, o'chgan: {st['removed']}, o'zgargan: {st['changed']}"
+                )
             if d.get("header_changed"):
                 hc = d["header_changed"]
                 L.append(f"  DIQQAT — sarlavha qatori o'zgargan: {hc['old']} → {hc['new']}")
@@ -217,6 +224,11 @@ def fallback_report(diff, err):
             st = d["stats"]
             if d.get("baseline"):
                 L.append(f"▸ {sheet['name']} [{rng}]: birinchi snapshot, {st['rows_now']} qator")
+            elif d.get("watch_new"):
+                L.append(
+                    f"▸ {sheet['name']} [{rng}]: kuzatuvga yangi olindi — {st['rows_now']} qator "
+                    f"(kechagi holatiga nisbatan +{st['added']} −{st['removed']} ~{st['changed']})"
+                )
             else:
                 L.append(
                     f"▸ {sheet['name']} [{rng}]: +{st['added']} yangi, "
@@ -276,7 +288,7 @@ def stale_note(diff):
                 L.append(f"{head}, lekin shu davrda {tabs} o'zgargan — kunlik diff noto'g'ri tabni "
                          "kuzatayotgan bo'lishi mumkin; PM qaysi tabni to'ldirishini tekshiring.")
             else:
-                L.append(f"{head}, sheet'ning boshqa tablari ham o'zgarmagan — KPI to'ldirilmayapti yoki "
+                L.append(f"{head}, kuzatuvdan tashqari tablar ham o'zgarmagan — KPI to'ldirilmayapti yoki "
                          "ma'lumot eskirgan; PM bilan tekshiring.")
     return L
 
@@ -288,7 +300,8 @@ def watch_new_note(diff):
     for sheet in diff["sheets"].values():
         for rng, d in sheet.get("ranges", {}).items():
             if d.get("watch_new"):
-                L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» kuzatuvga yangi oy tabi sifatida olindi "
+                kind = "yangi oy tabi sifatida " if d.get("watch_new_month") else ""
+                L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» kuzatuvga {kind}olindi "
                          f"({d['stats'].get('rows_now', 0)} qator) — o'zgarishlar uning kechagi holatiga nisbatan.")
     return L
 
@@ -474,6 +487,9 @@ def build_report_json(day, diff_dict, report_text, insights=None, out_name="repo
         ][:6],
         "acknowledged": acked_lines,
         "insights": insights if insights is not None else [],
+        # Deterministik ⚠️/ℹ️ (watch_missing, jimlik, oy almashuvi) — PDF va caption'ga ham
+        # tushsin: Telegram'ga asosan PDF ketadi, report.md emas (AUDIT.md P0-4).
+        "warnings": deterministic_notes(diff_dict),
     }
     try:
         import undiruv as undiruvmod
@@ -521,7 +537,9 @@ def main():
         report_path.write_text(report + "\n", encoding="utf-8")
         log("o'zgarish yo'q — Claude chaqirilmadi, qisqa hisobot yozildi")
         try:
-            build_report_json(args.date, diff, report, insights=["O'zgarish yo'q — holat barqaror"])
+            # Jimlik/ogohlantirish bo'lsa «holat barqaror» deyilmaydi — ⚠️ bloki o'zi aytadi
+            ins = [] if deterministic_notes(diff) else ["O'zgarish yo'q — holat barqaror"]
+            build_report_json(args.date, diff, report, insights=ins)
         except Exception as e:
             log(f"report.json yozilmadi (PDF matnsiz qoladi): {e}")
         return 0

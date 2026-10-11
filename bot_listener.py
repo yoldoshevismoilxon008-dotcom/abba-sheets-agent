@@ -1564,12 +1564,25 @@ def do_hisobot():
                     r["new_range"] = True
             else:
                 r = diffmod.diff_range(old_rng.get("values", []), vals, kc)
+                diffmod.mark_watch_new(r, rng, old_snap, today)
             entry["ranges"][rng] = r
             st = r["stats"]
             for k in ("added", "removed", "changed"):
                 result["totals"][k] += st.get(k, 0)
             if "header_changed" in r:
                 result["totals"]["header_changed"] += 1
+        if old_snap is not None:
+            # Jimlik — kunlik diff bilan bir qoida. Kuzatilmaydigan tablar oxirgi snapshot'dan,
+            # kuzatiladiganlari jonli: other_changed to'g'ri chiqsin (AUDIT.md P0-4)
+            merged = {"pm_kpi": s.get("pm_kpi", True),
+                      "ranges": {**(old_snap.get("ranges") or {}), **live}}
+            try:
+                st = diffmod.stale_info(s["id"], merged, list(live), today)
+            except Exception as e:  # noqa: BLE001 — /hisobot jimlik hisobi uchun yiqilmasin
+                log(f"/hisobot: jimlik hisoblanmadi ({name}): {e}")
+                st = []
+            if st:
+                entry["stale"] = st
         result["sheets"][s["id"]] = entry
     result["totals"]["sheets"] = len(result["sheets"])
 

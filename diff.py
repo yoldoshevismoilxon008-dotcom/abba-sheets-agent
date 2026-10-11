@@ -11,7 +11,7 @@ Oldingi snapshot umuman bo'lmasa — baseline rejimi (birinchi kun).
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import os
@@ -20,15 +20,26 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
-from fetch import current_month_name, month_spellings, norm, tab_of_range  # noqa: E402
+from fetch import CONFIG, current_month_name, month_spellings, norm, tab_of_range  # noqa: E402
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 
 # PM KPI jimlik nazorati (AUDIT.md P0-4: 01.09–09.10 da 37 hisobotda PM KPI diff'i
 # doim «o'zgarish yo'q» degan, hech qanday signal yo'q edi). Joriy oy tabi shuncha
-# ish kunidan (yakshanbasiz) beri bir xil bo'lsa — hisobotga ⚠️ qatori chiqadi.
+# ish kunidan (yakshanba va config'dagi dam_kunlari'siz) beri bir xil bo'lsa — ⚠️.
 STALE_DAYS = 3
-STALE_LOOKBACK = 14
+
+
+def dam_kunlari():
+    """config.yaml → dam_kunlari: ["YYYY-MM-DD", ...] (bayramlar) — ish kuni sanalmaydi."""
+    try:
+        import yaml
+        with open(CONFIG, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return {str(x) for x in (cfg.get("dam_kunlari") or [])}
+    except Exception as e:
+        log(f"dam_kunlari o'qilmadi: {e}")
+        return set()
 
 
 def log(msg):
@@ -168,19 +179,26 @@ def diff_range(old_vals, new_vals, key_column):
     return out
 
 
-def stale_info(sid, snap, watch, today, snapshots=None):
+def stale_info(sid, snap, watch, today, snapshots=None, dam=None):
     """PM KPI sheet'ning kuzatilayotgan JORIY OY tabi necha ish kunidan beri o'zgarmagan.
 
     Faqat pm_kpi sheet'lar va joriy oy tabi (Main/«ishlash muddati» kam o'zgaradi —
-    shovqin bo'lmasin). Faqat joriy oy ichidagi kunlar sanaladi: oldindan ochilgan
-    yangi oy tabi oy boshida «eski» deb belgilanmasin. Yakshanba — dam kuni, sanalmaydi.
+    shovqin bo'lmasin). Faqat joriy oy ichidagi snapshot kunlari qaraladi: oldindan
+    ochilgan yangi oy tabi oy boshida «eski» deb belgilanmasin. Shu sheet o'qilmagan
+    kun (fetch xatosi) — ma'lumot yo'q, o'zgarish emas: o'tkazib yuboriladi.
+
+    kun — [since, today) oralig'idagi KALENDAR ish kunlari (yakshanba va dam_kunlari
+    sanalmaydi): 09:00 snapshot'i kechagi ish natijasi, shuning uchun since kuni ham
+    «o'zgarishsiz ish kuni» bo'lib, bugun hali sanalmaydi.
 
     Qaytadi: [{tab, kun, since, other_changed, other_total}] — kun ≥ STALE_DAYS bo'lsa.
-    other_changed — shu davrda o'zgargan BOSHQA tablar: PM boshqa tabni to'ldirayotgan
-    bo'lsa (masalan «Sentyabr (2026)» agregati), diff noto'g'ri tabni kuzatayotgani ko'rinadi."""
+    other_changed — shu davrda o'zgargan KUZATILMAYDIGAN tablar: PM boshqa tabni
+    to'ldirayotgan bo'lsa (masalan «Sentyabr (2026)» agregati), diff noto'g'ri tabni
+    kuzatayotgani ko'rinadi."""
     if not snap.get("pm_kpi", True):
         return []
     snapshots = snapshots or SNAPSHOTS
+    dam = dam_kunlari() if dam is None else set(dam)
     d_today = date.fromisoformat(today)
     spell = month_spellings(current_month_name(d_today))
     targets = [r for r in watch if norm(tab_of_range(r)) in spell]
@@ -191,7 +209,7 @@ def stale_info(sid, snap, watch, today, snapshots=None):
         (x.name for x in snapshots.iterdir()
          if x.is_dir() and len(x.name) == 10 and month_start <= x.name < today),
         reverse=True,
-    )[:STALE_LOOKBACK]
+    )
     cache = {}
 
     def load(d):
@@ -210,27 +228,40 @@ def stale_info(sid, snap, watch, today, snapshots=None):
         same = []
         for d in days:
             old = load(d)
-            ov = ((old or {}).get("ranges") or {}).get(rng)
+            if old is None:
+                continue                  # shu kuni sheet o'qilmagan — zanjir uzilmaydi
+            ov = (old.get("ranges") or {}).get(rng)
             if ov is None or ov.get("values", []) != cur:
-                break
+                break                     # tab yo'q edi yoki o'zgargan
             same.append(d)
         if not same:
             continue
         since = same[-1]
-        # o'zgarishsiz o'tgan kunlar: (since, today] oralig'idagi snapshot kunlari
-        tinch = [today] + same[:-1]
-        kun = sum(1 for d in tinch if date.fromisoformat(d).weekday() != 6)
+        d0 = date.fromisoformat(since)
+        kun = sum(
+            1 for k in range((d_today - d0).days)
+            if (d0 + timedelta(days=k)).weekday() != 6 and (d0 + timedelta(days=k)).isoformat() not in dam
+        )
         if kun < STALE_DAYS:
             continue
         base = (load(since) or {}).get("ranges") or {}
         other = sorted({
             tab_of_range(r) for r, v in ranges.items()
-            if r not in targets
+            if r not in watch
             and ((base.get(r) or {}).get("values") if r in base else None) != v.get("values", [])
         })
         out.append({"tab": tab_of_range(rng), "kun": kun, "since": since,
                     "other_changed": other[:8], "other_total": len(other)})
     return out
+
+
+def mark_watch_new(r, rng, old_snap, today):
+    """Kecha ham bor edi, lekin kuzatilmagan (oy almashuvi) — «62 → 62 qator» jim o'tmasin."""
+    ow = (old_snap or {}).get("watch_ranges")
+    if ow and rng not in ow:
+        r["watch_new"] = True
+        r["watch_new_month"] = norm(tab_of_range(rng)) in month_spellings(
+            current_month_name(date.fromisoformat(today)))
 
 
 def baseline_range(vals):
@@ -295,11 +326,7 @@ def main():
                     r["new_range"] = True
             else:
                 r = diff_range(old_rng.get("values", []), vals, kc)
-                # Oy almashuvi: tab kecha ham bor edi, lekin kuzatilmagan (masalan
-                # oldindan ochilgan «Oktyabr») — «62 → 62 qator» jim o'tib ketmasin
-                ow = old_snap.get("watch_ranges")
-                if ow and rng not in ow:
-                    r["watch_new"] = True
+                mark_watch_new(r, rng, old_snap, today)
             entry["ranges"][rng] = r
             st = r["stats"]
             for k in ("added", "removed", "changed"):
