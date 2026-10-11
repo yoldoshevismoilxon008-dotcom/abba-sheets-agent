@@ -175,6 +175,39 @@ def init_env():
     if not TOKEN or not CHAT_ID:
         log("XATO: .env da TELEGRAM_BOT_TOKEN yoki TELEGRAM_CHAT_ID yo'q")
         sys.exit(1)
+    if not owner_ids():
+        log("DIQQAT: TELEGRAM_CHAT_ID guruh, lekin TELEGRAM_OWNER_IDS yo'q — hech kimning "
+            "buyrug'i bajarilmaydi (audit P1-S2). .env/Railway'ga user ID(lar)ni qo'shing.")
+
+
+def owner_ids():
+    """Bot buyruqlarini bera oladigan Telegram user ID'lari (audit P1-S2).
+    TELEGRAM_OWNER_IDS (vergul bilan) bo'lsa — aynan shular. Bo'lmasa va TELEGRAM_CHAT_ID
+    shaxsiy chat (musbat ID) bo'lsa — o'sha ID (shaxsiy chatda yuboruvchi = chat egasi,
+    sozlash shart emas). Guruh chat (manfiy ID) + TELEGRAM_OWNER_IDS yo'q — BO'SH: guruhning
+    istalgan a'zosi (keyin qo'shilganlar ham) /pm_push force (egasining shaxsiy Telegram
+    akkauntidan PM'larga xabar), /pm_set, /approve, KB, maxfiy tab o'qishni ishlata olmasin."""
+    raw = _os.environ.get("TELEGRAM_OWNER_IDS", "")
+    ids = {x.strip() for x in raw.replace(";", ",").split(",") if x.strip()}
+    chat = str(CHAT_ID).strip()
+    if not ids and chat.isdigit():
+        ids = {chat}
+    return ids
+
+
+_RUXSATSIZ_OGOH = {}                # {user_id: sana} — rad xabari kuniga bir marta
+
+
+def _ruxsatsiz(msg, chat):
+    sender = str((msg.get("from") or {}).get("id") or "")
+    matn = (msg.get("text") or msg.get("caption") or "")[:60]
+    log(f"IGNORE: ruxsatsiz yuboruvchi from.id={sender or '?'} chat_id={chat} (matn: {matn!r})")
+    bugun = date.today().isoformat()
+    if sender and _RUXSATSIZ_OGOH.get(sender) != bugun:
+        _RUXSATSIZ_OGOH[sender] = bugun
+        send_retry(f"⛔ Ruxsat yo'q (user id {sender}). Bot egasi TELEGRAM_OWNER_IDS ga "
+                   "qo'shsa, buyruqlar ishlaydi.", attempts=1)
+    return "unauthorized"
 
 
 def api(method, payload=None, timeout=30):
@@ -990,6 +1023,13 @@ def build_data(q, extra_sel=None, force_live=False):
         total += len(text)
         sel["sheets"].append(name)
         sel["tabs"][name] = sel_tabs
+        # Maxfiy tab (exclude_tabs — mijoz kirish ma'lumotlari) shu javob kontekstiga
+        # tushdimi: snapshot + jonli yo'lda ham, to'liq jonli yo'lda ham (audit P1-S3)
+        maxfiy = {fetchmod.norm(t) for t in (s.get("exclude_tabs") or [])}
+        maxfiy |= {fetchmod.norm(t) for t in ((snap or {}).get("excluded_tabs") or [])}
+        oqildi = [t for t in sel_tabs if fetchmod.norm(t) in maxfiy]
+        if oqildi:
+            sel.setdefault("maxfiy", []).extend(oqildi)
     return "\n".join(parts), sel, ("snapshot" if use_snap else "live")
 
 
@@ -1150,9 +1190,10 @@ def _prune_qa_pdfs(days=7):
         pass
 
 
-def send_qa_pdf(qa, q, mid, filename=None):
+def send_qa_pdf(qa, q, mid, filename=None, saqlama=True):
     """QA-JSON → infografik PDF → sendDocument. Muvaffaqiyatda progress xabari
-    o'chiriladi. Xatoda exception — chaqiruvchi matnga fallback qiladi."""
+    o'chiriladi. Xatoda exception — chaqiruvchi matnga fallback qiladi.
+    saqlama=False — maxfiy tab javobi: PDF/HTML yuborilgach diskda qolmaydi (P1-S3)."""
     import render_pdf
 
     QA_PDF_DIR.mkdir(parents=True, exist_ok=True)
@@ -1162,11 +1203,16 @@ def send_qa_pdf(qa, q, mid, filename=None):
     qa.setdefault("question", q)
     qa["asked_at"] = now.strftime("%Y-%m-%d %H:%M")
     pdf = QA_PDF_DIR / f"qa-{now.strftime('%Y%m%d-%H%M%S')}.pdf"
-    render_pdf.render_qa(qa, pdf)
-    sendmod.tg_send_document(
-        TOKEN, CHAT_ID, str(pdf), build_qa_caption(qa),
-        filename=filename or f"KPI-javob-{now.strftime('%Y-%m-%d')}.pdf",
-    )
+    try:
+        render_pdf.render_qa(qa, pdf)
+        sendmod.tg_send_document(
+            TOKEN, CHAT_ID, str(pdf), build_qa_caption(qa),
+            filename=filename or f"KPI-javob-{now.strftime('%Y-%m-%d')}.pdf",
+        )
+    finally:
+        if not saqlama:
+            for p in (pdf, pdf.with_suffix(".html")):
+                p.unlink(missing_ok=True)
     delete_status(mid)
 
 
@@ -1290,6 +1336,26 @@ def handle_voice(msg):
 
 # ---------- savol / buyruqlar ----------
 
+MAXFIY_JAVOB = "(javob maxfiy tab ma'lumotiga asoslangan — xotira va arxivga yozilmadi)"
+
+
+def arxivla(q, ans, sel):
+    """Javobni bot xotirasi (history.jsonl — keyingi promptlarga qaytadi) va chat arxiviga
+    (chat/*.md → hisobot repo'si, Obsidian vault, KB) yozadi. Maxfiy tab o'qilgan javob —
+    faqat belgi bilan: aks holda mijoz kirish ma'lumotlari git'ga va KB'ga tushardi,
+    exclude_tabs va'dasiga zid (audit P1-S3)."""
+    if sel and sel.get("maxfiy"):
+        log(f"maxfiy tab ({', '.join(sel['maxfiy'])}) — javob arxivlanmadi")
+        ans = MAXFIY_JAVOB
+    remember(q, ans, sel)
+    try:                                    # B2.2: suhbatni Obsidian chat arxiviga (best-effort)
+        import chat_log
+
+        chat_log.append_qa(q, ans)          # KB'ga tushmaydi — faqat vault_sync ingest qiladi
+    except Exception as e:
+        log(f"chat_log o'tkazildi: {e}")
+
+
 def do_question(q):
     t0 = time.monotonic()
     typing()
@@ -1368,7 +1434,7 @@ def do_question(q):
             qa["source"] = f"snapshot {latest_day() or ''}".strip()
         edit_status(mid, "📄 PDF tayyorlanmoqda...")
         try:
-            send_qa_pdf(qa, q, mid)
+            send_qa_pdf(qa, q, mid, saqlama=not sel.get("maxfiy"))
             pdf_sent = True
             ans = qa_json_to_text(qa)  # xotira uchun matn ekvivalenti
         except Exception as e:
@@ -1389,13 +1455,7 @@ def do_question(q):
             if mid:
                 edit_status(mid, "📄 Javob:")
             ok = send_retry(html, is_html=True)
-    remember(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
-    try:                                    # B2.2: suhbatni Obsidian chat arxiviga (best-effort)
-        import chat_log
-
-        chat_log.append_qa(q, ans)          # KB'ga tushmaydi — faqat vault_sync ingest qiladi
-    except Exception as e:
-        log(f"chat_log o'tkazildi: {e}")
+    arxivla(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
     log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({'PDF' if pdf_sent else 'matn'}, {len(ans)} belgi)")
     log(
         f"META: mode={mode} ref={int(ref)} src={src} pdf={int(pdf_sent)} "
@@ -1907,6 +1967,10 @@ def handle_update(upd):
         text_preview = (msg.get("text") or msg.get("caption") or "")[:60]
         log(f"IGNORE: begona chat_id={chat} (matn: {text_preview!r})")
         return "ignored"
+    # XAVFSIZLIK (audit P1-S2): egasining chat'ida ham YUBORUVCHI tekshiriladi — guruh
+    # rejimida har bir a'zo buyruq bera olmasin (owner_ids()).
+    if str((msg.get("from") or {}).get("id") or "") not in owner_ids():
+        return _ruxsatsiz(msg, chat)
     if msg.get("voice") or msg.get("audio"):
         return handle_voice(msg)
     if msg.get("document") or msg.get("photo"):

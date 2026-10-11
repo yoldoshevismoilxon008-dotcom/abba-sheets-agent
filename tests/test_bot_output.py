@@ -71,7 +71,8 @@ def _run(text):
     bl.send_status = lambda t: 1
     design.load_pending = lambda: None
     try:
-        bl.handle_update({"message": {"chat": {"id": 1}, "text": text}})
+        # shaxsiy chat: yuboruvchi = chat egasi (haqiqiy update'da «from» doim bor — P1-S2)
+        bl.handle_update({"message": {"chat": {"id": 1}, "from": {"id": 1}, "text": text}})
     finally:
         _restore()      # kb.*/vs.* asllarini tikla — keyingi test fayliga oqmasin
     return cap.sent

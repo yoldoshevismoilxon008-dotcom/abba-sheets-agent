@@ -127,6 +127,7 @@ Buferda — 5-qadamda `GOOGLE_SA_JSON` bo'ladi.
   ```
   TELEGRAM_BOT_TOKEN=...       (Mac .env'dagi bilan bir xil)
   TELEGRAM_CHAT_ID=...
+  TELEGRAM_OWNER_IDS=...       (faqat GURUH chat bo'lsa: buyruq beruvchilar user ID'lari, vergul bilan)
   CLAUDE_CODE_OAUTH_TOKEN=...  (1-qadamdan)
   GOOGLE_SA_JSON=...           (4-qadamdan, bitta uzun qator)
   REPORTS_REPO=SIZNING_USER/abba-hisobotlar
