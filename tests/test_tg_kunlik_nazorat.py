@@ -22,6 +22,10 @@ import tg_kunlik as tk      # noqa: E402
 ARXIV = {f"2026-09-{d:02d}" for d in list(range(10, 23)) + list(range(24, 31))} | \
         {"2026-10-02", "2026-10-03", "2026-10-08"}
 HB = {"kunlar": [{"sana": "2026-10-08", "holat": "ok", "tugadi": "2026-10-08T08:52:44+05:00"}]}
+# tg-kunlik/heartbeat.json dagi haqiqiy «ok» kunlar (11.10 holati) — PDF'lar git'dan olinsa shu qoladi
+HB_ARXIV = {"kunlar": [{"sana": s, "holat": "ok"} for s in
+                       [f"2026-09-{d:02d}" for d in (12, 13, 14, 15, 16, 17, 21, 22, 24, 25, 27, 28, 29, 30)]
+                       + ["2026-10-02", "2026-10-03", "2026-10-08", "2026-10-10", "2026-10-11"]]}
 
 
 def _h(day, pdf=ARXIV, hb=HB):
@@ -62,9 +66,38 @@ def test_bugungi_zanjir_xato_holati():
 
 
 def test_zanjir_boshlanmagan():
-    d = date(2026, 9, 1)
+    d = date(2026, 9, 1)                                   # TG_BOSH (10.09) dan oldin
     h = tk.holat(d, set(), {})
     assert tk.health_part(d, h)[0] == "✓" and tk.alert_text(d, h) is None
+
+
+def test_hech_narsa_yoq_yashil_emas():
+    """Review A: PDF ham, heartbeat ham bo'lmasa «boshlanmagan ✓» emas — ✗ va 12:00 xabari."""
+    d = date(2026, 10, 11)
+    h = tk.holat(d, set(), {})
+    assert tk.health_part(d, h) == ("✗", "10.09 dan beri PDF ham, heartbeat ham yo'q")
+    msg = tk.alert_text(d, h)
+    assert msg and "11.10" in msg and "PDF ham, heartbeat ham topilmadi" in msg, msg
+
+
+def test_pdfsiz_heartbeat_bilan_ishlaydi():
+    """Review A: PDF'lar git'dan olib tashlansa — heartbeat «ok» kunlari hisobga olinadi."""
+    d = date(2026, 10, 5)
+    h = tk.holat(d, set(), HB_ARXIV)
+    assert tk.health_part(d, h) == ("✗", "oxirgi 03.10 — 2 kun oldin · 7 kunda 2 kun yo'q (01.10, 04.10)")
+    assert "Oxirgisi: 03.10 (2 kun oldin)" in tk.alert_text(d, h)
+    d = date(2026, 10, 11)
+    h = tk.holat(d, set(), HB_ARXIV)
+    assert tk.health_part(d, h)[0] == "✓" and tk.alert_text(d, h) is None
+
+
+def test_heartbeat_ok_bolmagan_kun_bor_hisoblanmaydi():
+    hb = {"kunlar": [{"sana": "2026-10-03", "holat": "ok"}, {"sana": "2026-10-04", "holat": "xato"},
+                     {"sana": "yomon", "holat": "ok"}]}
+    d = date(2026, 10, 4)
+    h = tk.holat(d, set(), hb)
+    assert not h["bugun"] and h["oxirgi"] == "2026-10-03" and h["hb_xato"]
+    assert tk.health_part(d, h)[0] == "✗" and "«xato»" in tk.alert_text(d, h)
 
 
 # ------------------------------------------------------- 12:00 xabari
@@ -72,8 +105,8 @@ def test_zanjir_boshlanmagan():
 def test_0410_tushda_xabar():
     d, h = _h("2026-10-04")
     msg = tk.alert_text(d, h)
-    assert msg.startswith("⚠️ TG kunlik monitoring: bugungi (04.10) PDF soat 12:00 gacha kelmadi. "
-                          "Oxirgi PDF: 03.10 (1 kun oldin). Oxirgi 7 kunda yo'q: 01.10."), msg
+    assert msg.startswith("⚠️ TG kunlik monitoring: bugungi (04.10) natija (PDF/heartbeat) soat 12:00 "
+                          "gacha kelmadi. Oxirgisi: 03.10 (1 kun oldin). Oxirgi 7 kunda yo'q: 01.10."), msg
     assert "Mac'ni tekshiring" in msg
 
 
@@ -84,23 +117,72 @@ def test_0810_bugun_bor_xabar_yoq():
 
 # ------------------------------------------------------- GitHub API o'qish (tarmoqsiz)
 
-def test_yukla_faqat_pdf_kunlarini_oladi():
-    asl = tk._get
-    calls = []
-
+def _fake_get(tree=None, truncated=False, hb='{"kunlar": [{"sana": "2026-10-08", "holat": "ok"}]}',
+              dir_bor=True, calls=None):
     def fake(repo, token, path, raw=False):
-        calls.append(path)
-        if path == "tg-kunlik":
-            return [{"name": "2026-10-08.pdf", "type": "file"}, {"name": "heartbeat.json", "type": "file"},
-                    {"name": "state", "type": "dir"}, {"name": "eski.pdf", "type": "file"}]
-        return '{"kunlar": [{"sana": "2026-10-08", "holat": "ok"}]}'
+        (calls if calls is not None else []).append(path)
+        if path == "contents":
+            return [{"name": "hisobotlar", "type": "dir", "sha": "h1"}] + \
+                ([{"name": "tg-kunlik", "type": "dir", "sha": "t1"}] if dir_bor else [])
+        if path == "git/trees/t1":
+            return {"truncated": truncated, "tree": tree or []}
+        if path == "contents/tg-kunlik/heartbeat.json":
+            if isinstance(hb, Exception):
+                raise hb
+            return hb
+        raise AssertionError(path)
+    return fake
+
+
+def _yukla_with(fake):
+    asl = tk._get
     tk._get = fake
     try:
-        pdf, hb = tk.yukla("o/r", "t")
+        return tk.yukla("o/r", "t")
     finally:
         tk._get = asl
+
+
+def test_yukla_faqat_pdf_kunlarini_oladi():
+    calls = []
+    tree = [{"path": "2026-10-08.pdf", "type": "blob"}, {"path": "heartbeat.json", "type": "blob"},
+            {"path": "state", "type": "tree"}, {"path": "eski.pdf", "type": "blob"}]
+    pdf, hb = _yukla_with(_fake_get(tree, calls=calls))
     assert pdf == {"2026-10-08"} and hb["kunlar"][0]["sana"] == "2026-10-08"
-    assert calls == ["tg-kunlik", "tg-kunlik/heartbeat.json"]
+    # contents/ papka ro'yxati 1000 faylda kesiladi — git tree ishlatiladi (review D)
+    assert calls == ["contents", "git/trees/t1", "contents/tg-kunlik/heartbeat.json"]
+
+
+def test_yukla_kesilgan_tree_xato():
+    try:
+        _yukla_with(_fake_get([{"path": "2026-10-08.pdf", "type": "blob"}], truncated=True))
+    except RuntimeError as e:
+        assert "kesilgan" in str(e)
+    else:
+        raise AssertionError("kesilgan tree jim qabul qilindi")
+
+
+def test_yukla_heartbeat_xatosi():
+    """Review A: PDF bor — heartbeat'siz davom etadi; PDF ham yo'q — xato («?»), ✓ emas."""
+    pdf, hb = _yukla_with(_fake_get([{"path": "2026-10-08.pdf", "type": "blob"}], hb=RuntimeError("502")))
+    assert pdf == {"2026-10-08"} and hb == {}
+    for fake in (_fake_get([], hb=RuntimeError("502")), _fake_get(dir_bor=False, hb=RuntimeError("404"))):
+        try:
+            _yukla_with(fake)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("na PDF, na heartbeat — xato ko'tarilmadi")
+
+
+def test_log_stdout_ga_chiqmaydi():
+    """Review B: health.py --line stdout'i report.md ga ketadi — log stderr'da bo'lsin."""
+    import contextlib
+    import io
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        _yukla_with(_fake_get([{"path": "2026-10-08.pdf", "type": "blob"}], hb=RuntimeError("502")))
+    assert out.getvalue() == "" and "heartbeat o'qilmadi" in err.getvalue()
 
 
 def test_tekshir_sozlanmagan_va_xato():

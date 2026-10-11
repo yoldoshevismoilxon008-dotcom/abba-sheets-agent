@@ -114,7 +114,7 @@ def run_tg_kunlik_watch(today=None):
         if h is None:
             return
         msg = tg_kunlik.alert_text(today, h)
-        log(f"tg-kunlik nazorat: {msg or 'bugungi PDF bor'}")
+        log(f"tg-kunlik nazorat: {msg or 'bugungi natija bor'}")
         if msg:
             _notify_owner_once_daily(msg, key="tg_kunlik")
     except Exception as e:                       # noqa: BLE001
