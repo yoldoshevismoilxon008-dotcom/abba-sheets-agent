@@ -154,8 +154,11 @@ HELP = (
 )
 
 
+from maxfiy import redact, safe_exc, xato_xabar  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    line = f"[{datetime.now().strftime('%F %T')}] {msg}"
+    line = f"[{datetime.now().strftime('%F %T')}] {redact(msg)}"
     print(line, flush=True)
     try:
         LOGS.mkdir(parents=True, exist_ok=True)
@@ -178,9 +181,15 @@ def init_env():
 
 
 def api(method, payload=None, timeout=30):
-    return requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/{method}", json=payload or {}, timeout=timeout
-    )
+    """Telegram API. Chiqayotgan matn redakt qilinadi; tarmoq xatosi XUDDI SHU turdagi,
+    lekin tokensiz xato bo'lib qaytadi (asl matnda «/bot<TOKEN>/method» bor — P0-1)."""
+    payload = {k: (redact(v) if k in ("text", "caption") else v) for k, v in (payload or {}).items()}
+    try:
+        return requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/{method}", json=payload, timeout=timeout
+        )
+    except requests.RequestException as e:
+        raise safe_exc(e) from None
 
 
 def send_long(text, is_html=False):
@@ -1237,7 +1246,7 @@ def send_voice_file(path, caption=""):
             return False
         return True
     except Exception as e:
-        log(f"sendVoice xato: {type(e).__name__}: {str(e)[:120]}")
+        log(f"sendVoice xato: {type(e).__name__}: {redact(str(e))[:120]}")
         return False
 
 
@@ -1414,8 +1423,8 @@ def do_audit():
         findings, source = auditmod.run_checks(None)
     except Exception as e:
         log(f"audit xato: {e}")
-        if not edit_status(mid, f"⚠️ Audit ishlamadi: {str(e)[:150]}"):
-            send_retry(f"⚠️ Audit ishlamadi: {str(e)[:150]}")
+        if not edit_status(mid, xato_xabar("⚠️ Audit ishlamadi", e)):
+            send_retry(xato_xabar("⚠️ Audit ishlamadi", e))
         return
     det, crit = auditmod.render(findings, source, today)
     auditmod.save_last(det)
@@ -1713,7 +1722,7 @@ def handle_media(msg):
             design.save_pending({"type": "logo"})
         except Exception as e:
             log(f"logo preview xato: {e}")
-            send_retry(f"⚠️ Preview chiqmadi: {str(e)[:120]}", attempts=2)
+            send_retry(xato_xabar("⚠️ Preview chiqmadi", e), attempts=2)
             design.discard_logo_draft()
         return "logo-draft"
 
@@ -1733,7 +1742,7 @@ def handle_media(msg):
         design.save_pending({"type": "theme"})
     except Exception as e:
         log(f"referens tahlili xato: {type(e).__name__}: {e}")
-        send_retry(f"⚠️ Tahlil bo'lmadi: {str(e)[:150]}", attempts=2)
+        send_retry(xato_xabar("⚠️ Tahlil bo'lmadi", e), attempts=2)
     return "reference"
 
 
@@ -1800,7 +1809,7 @@ def do_dizayn(arg):
             design.save_pending({"type": "switch", "name": name})
         except Exception as e:
             log(f"preview xato: {e}")
-            send_retry(f"⚠️ Preview chiqmadi: {str(e)[:120]}", attempts=2)
+            send_retry(xato_xabar("⚠️ Preview chiqmadi", e), attempts=2)
         return "dizayn-switch"
     # matnli dizayn so'rovi
     send_retry("🎨 So'rov theme'ga tarjima qilinmoqda...", attempts=2)
@@ -1819,7 +1828,7 @@ def do_dizayn(arg):
         design.save_pending({"type": "theme"})
     except Exception as e:
         log(f"dizayn so'rovi xato: {e}")
-        send_retry(f"⚠️ Bo'lmadi: {str(e)[:150]}", attempts=2)
+        send_retry(xato_xabar("⚠️ Bo'lmadi", e), attempts=2)
     return "dizayn-edit"
 
 
@@ -2077,7 +2086,8 @@ def handle_update(upd):
         if url:
             send_retry(f"📊 Dashboard: {url}\nOxirgi yangilanish: {dw.last_updated()}", attempts=2)
         else:
-            send_retry("Dashboard hali ulanmagan — config.yaml ga dashboard_id kiritilishi kerak.", attempts=2)
+            send_retry("Dashboard hali ulanmagan — dashboard_id config.local.yaml yoki "
+                       "CONFIG_LOCAL_B64 da bo'lishi kerak.", attempts=2)
         return "dashboard"
     if low.startswith("/bilim_stat"):
         try:

@@ -185,8 +185,11 @@ def logo_data_uri(variant=None):
 WEEKDAYS = ["dushanba", "seshanba", "chorshanba", "payshanba", "juma", "shanba", "yakshanba"]
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[render_pdf] {msg}", flush=True)
+    print(f"[render_pdf] {redact(msg)}", flush=True)
 
 
 def find_chrome():

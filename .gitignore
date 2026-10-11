@@ -15,3 +15,8 @@ data/brand/pending.json
 data/brand/logo-draft.*
 *.session
 *.session-journal
+
+# Maxfiy biznes ma'lumoti — public repo'da EMAS (audit P0-2)
+config.local.yaml
+undiruv_qaror.json
+seed/bot-memory/

@@ -94,8 +94,8 @@ Chiqqan `sk-ant-oat...` tokenni nusxalab oling — 5-qadamda Railway'ga qo'yilad
 ### 2. GitHub — ikkita PRIVATE repo
 [github.com/new](https://github.com/new) da:
 - `abba-sheets-agent` — **Private**, bo'sh (README'siz).
-- `abba-hisobotlar` — **Private**, bo'sh. (Diqqat: kod repo'sida `seed/` ichida
-  bot suhbat xotirasi bor — repo'lar albatta private bo'lsin.)
+- `abba-hisobotlar` — **Private**, bo'sh. (Repo'lar albatta private bo'lsin. Bot suhbat
+  xotirasi, ega qarorlari va Sheet ID'lar endi git'da EMAS — Variables orqali beriladi.)
 
 Keyin menga ayting — men push qilaman. (Yoki o'zingiz:
 ```bash
@@ -131,7 +131,14 @@ Buferda — 5-qadamda `GOOGLE_SA_JSON` bo'ladi.
   GOOGLE_SA_JSON=...           (4-qadamdan, bitta uzun qator)
   REPORTS_REPO=SIZNING_USER/abba-hisobotlar
   GH_TOKEN_REPORTS=...         (3-qadamdan)
+  CONFIG_LOCAL_B64=...         (Sheet ID'lar + dashboard_id — pastga qarang)
+  UNDIRUV_QAROR_B64=...        (ega qarorlari — pastga qarang)
   ```
+  `CONFIG_LOCAL_B64` va `UNDIRUV_QAROR_B64` — maxfiy biznes ma'lumoti (audit P0-2), public
+  repo'da emas. Mac'da bir marta: `python3 scripts/maxfiy_migratsiya.py` — `config.local.yaml`,
+  `undiruv_qaror.json` yasaydi va ikkala qatorni chiqaradi. Qaror o'zgarsa: `undiruv_qaror.json`
+  ni tahrirlang → `base64 -i undiruv_qaror.json | tr -d '\n'` → Variables'da yangilang
+  (Railway redeploy qiladi). `CONFIG_LOCAL_B64` bo'lmasa bot boot'da egaga ⚠️ yuboradi.
   (`DATA_DIR=/data`, `CHROME_*`, `TZ` — Dockerfile'da, qo'yish shart emas.)
 
 **Hali deploy tugashini kutmang / bot ishga tushsa ham xavotir yo'q** — pastdagi

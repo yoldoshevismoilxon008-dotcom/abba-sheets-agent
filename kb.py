@@ -57,8 +57,11 @@ def _canon_apos(s):
     return _APOS_RE.sub("'", s or "")
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[kb] {msg}", flush=True)
+    print(f"[kb] {redact(msg)}", flush=True)
 
 
 def _now():

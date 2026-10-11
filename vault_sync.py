@@ -43,8 +43,11 @@ UNCONFIGURED = "__UNCONFIGURED__"
 CHAT_INDEX_DAYS = 90        # faqat oxirgi 90 kunlik chat bazaga tushadi (eskisi vault'da qoladi)
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[vault_sync] {msg}", flush=True)
+    print(f"[vault_sync] {redact(msg)}", flush=True)
 
 
 # qo'lda /vault_sync (daemon thread) va scheduler jobi bir vaqtda run() chaqirmasin

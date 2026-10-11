@@ -12,6 +12,7 @@ Har sheet uchun: data/snapshots/YYYY-MM-DD/<SHEET_ID>.json
 Auth/quota xatosida sheet skip qilinadi (log bilan), qolganlari davom etadi.
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -57,8 +58,11 @@ MONTH_ALIASES = {
 }
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[fetch] {msg}", flush=True)
+    print(f"[fetch] {redact(msg)}", flush=True)
 
 
 def norm(s):
@@ -200,16 +204,82 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
     return out
 
 
+CONFIG_LOCAL = "config.local.yaml"
+
+
+def _overlay():
+    """Maxfiy qism — Google Sheet ID'lar va dashboard_id. Ular PUBLIC repo'dagi config.yaml'da
+    EMAS (audit P0-2: ID bilan «link orqali ochiq» sheet to'g'ridan-to'g'ri ochiladi,
+    dashboard'ga esa SA yoza oladi). Manba tartibi:
+      1) env CONFIG_LOCAL_B64 — config.local.yaml'ning base64'i (Railway Variables);
+      2) DATA_DIR/config.local.yaml (volume);
+      3) loyiha papkasidagi config.local.yaml (Mac; .gitignore'da).
+    Format: {dashboard_id: "...", sheet_ids: {"<sheet name>": "<id>", ...}}.
+    scripts/maxfiy_migratsiya.py eski config.yaml'dan shu faylni yasaydi."""
+    b64 = os.environ.get("CONFIG_LOCAL_B64", "").strip()
+    if b64:
+        try:
+            return yaml.safe_load(base64.b64decode(b64).decode("utf-8")) or {}
+        except Exception as e:                         # noqa: BLE001
+            log(f"XATO: CONFIG_LOCAL_B64 o'qilmadi ({type(e).__name__}) — fayldan qidiriladi")
+    for p in (DATA / CONFIG_LOCAL, BASE / CONFIG_LOCAL):
+        if p.exists():
+            try:
+                return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            except Exception as e:                     # noqa: BLE001
+                log(f"XATO: {p} o'qilmadi ({type(e).__name__})")
+    return {}
+
+
+_APOS = str.maketrans({c: "'" for c in "’‘ʻʼ`´"})
+
+
+def _nom_kalit(name):
+    """Overlay'da sheet nomi solishtirish kaliti: registr/bo'shliq/apostrof variantlariga
+    chidamli («Azizxo’ja» = «Azizxo'ja»)."""
+    return norm(str(name)).translate(_APOS)
+
+
+def _apply_overlay(cfg):
+    ov = _overlay()
+    if not isinstance(ov, dict) or not ov:
+        return cfg
+    if ov.get("dashboard_id"):
+        cfg["dashboard_id"] = str(ov["dashboard_id"])
+    ids = {_nom_kalit(k): v for k, v in (ov.get("sheet_ids") or {}).items() if v}
+    for s in cfg.get("sheets") or []:
+        k = _nom_kalit(s.get("name", ""))
+        if k in ids:
+            s["id"] = str(ids[k])
+    return cfg
+
+
+def overlay_holati():
+    """Egaga ogohlantirish uchun: (ID'siz sheet nomlari, hech qaysi sheet'ga mos kelmagan
+    overlay kalitlari, dashboard_id bormi). Sheet nomi config.yaml'da o'zgartirilsa yoki
+    yangi sheet qo'shilsa, u jimgina tushib qolmasin (review P0-2)."""
+    with open(CONFIG, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    names = [s.get("name", "?") for s in raw.get("sheets") or []]
+    ov = _overlay()
+    ov = ov if isinstance(ov, dict) else {}
+    keys = {_nom_kalit(k): k for k, v in (ov.get("sheet_ids") or {}).items() if v}
+    idsiz = [n for n in names if _nom_kalit(n) not in keys]
+    ortiqcha = [k for nk, k in keys.items() if nk not in {_nom_kalit(n) for n in names}]
+    return idsiz, ortiqcha, bool(ov.get("dashboard_id"))
+
+
 def load_config(include_qa_only=False):
     """Sheets ro'yxati. qa_only sheet'lar faqat include_qa_only=True bo'lganda
-    qaytadi (Q&A bot) — kunlik pipeline/diff/audit ularni ko'rmaydi."""
+    qaytadi (Q&A bot) — kunlik pipeline/diff/audit ularni ko'rmaydi.
+    Sheet ID'lar config.local.yaml / CONFIG_LOCAL_B64 dan qo'shiladi (_overlay)."""
     with open(CONFIG, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
+        cfg = _apply_overlay(yaml.safe_load(f) or {})
     valid = []
     for s in cfg.get("sheets") or []:
         sheet_id = str(s.get("id") or "")
         if not sheet_id or "SHU_YERGA" in sheet_id or "SHEET_ID" in sheet_id:
-            log(f"skip: '{s.get('name', '?')}' — id hali to'ldirilmagan")
+            log(f"skip: '{s.get('name', '?')}' — id yo'q (config.local.yaml / CONFIG_LOCAL_B64)")
             continue
         if s.get("qa_only") and not include_qa_only:
             continue
@@ -219,7 +289,7 @@ def load_config(include_qa_only=False):
 
 def load_full_config():
     with open(CONFIG, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        return _apply_overlay(yaml.safe_load(f) or {})
 
 
 def status_of(exc):
@@ -346,7 +416,8 @@ def main():
 
     sheets = load_config()
     if not sheets:
-        log("XATO: config.yaml da birorta ham to'ldirilgan sheet yo'q")
+        log("XATO: birorta ham sheet ID yo'q — config.local.yaml yoki CONFIG_LOCAL_B64 "
+            "(scripts/maxfiy_migratsiya.py) o'rnatilmagan")
         return 1
     if not CREDS.exists():
         log(f"XATO: {CREDS} topilmadi — README'dagi Google Cloud qadamiga qarang")

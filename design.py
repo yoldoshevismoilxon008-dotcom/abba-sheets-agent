@@ -83,8 +83,11 @@ JORIY THEME:
 SO'ROV: {instruction}"""
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[design] {msg}", flush=True)
+    print(f"[design] {redact(msg)}", flush=True)
 
 
 # ---------- pending ----------
@@ -214,16 +217,21 @@ def git_commit_brand(msg):
 def download(token, file_id, name):
     import requests
 
-    r = requests.get(
-        f"https://api.telegram.org/bot{token}/getFile",
-        params={"file_id": file_id}, timeout=30,
-    ).json()
-    fp = r.get("result", {}).get("file_path")
-    if not fp:
-        raise RuntimeError(f"getFile xato: {str(r)[:150]}")
-    data = requests.get(
-        f"https://api.telegram.org/file/bot{token}/{fp}", timeout=120
-    ).content
+    from maxfiy import safe_exc
+
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{token}/getFile",
+            params={"file_id": file_id}, timeout=30,
+        ).json()
+        fp = r.get("result", {}).get("file_path")
+        if not fp:
+            raise RuntimeError(f"getFile xato: {redact(str(r)[:150])}")
+        data = requests.get(
+            f"https://api.telegram.org/file/bot{token}/{fp}", timeout=120
+        ).content
+    except requests.RequestException as e:
+        raise safe_exc(e) from None            # xato matnida URL — ya'ni bot tokeni (P0-1)
     INBOX.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^\w.-]", "_", name)[:60]
     path = INBOX / f"{time.strftime('%Y%m%d-%H%M%S')}-{safe}"

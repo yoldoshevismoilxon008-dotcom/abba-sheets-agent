@@ -26,8 +26,11 @@ MAX_SENDS = 4          # kuniga maksimal chiqish xabari (4 PM)
 SLEEP_RANGE = (4, 6)   # xabarlar orasidagi pauza, soniya
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[userbot] {msg}", flush=True)
+    print(f"[userbot] {redact(msg)}", flush=True)
 
 
 class SessionInvalid(RuntimeError):
