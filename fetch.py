@@ -205,9 +205,12 @@ def pm_month_tabs(tab_titles, today=None):
     «Oktyabr(2026)» kuzatilmay, PM dashboard va PDF'dan jimgina yo'qolardi (P2).
       • imlo aliasi (MONTH_ALIASES) va yil suffiksi «(2026)» / « 2026»;
       • boshqa yil suffiksli tab — arxiv, olinmaydi;
-      • joriy yil suffiksli tab yilsizdan ustun; bir xil darajada tartibda OXIRGISI
-        birinchi (eski konvensiya: bo'shliq bilan farqlanuvchi dublikatda oxirgisi
-        joriy yilniki). Bittadan ko'p bo'lsa — month_tab_dup_note ogohlantiradi."""
+      • TARTIB — eski xulq saqlanadi: aniq «oktyabr» yozilishi birinchi, keyin imlo
+        aliasi («Oktabr»), keyin joriy yil suffiksli tab — variant faqat aniq tab
+        yo'q bo'lsa kuzatiladi (mavjud sheet'larda kuzatilayotgan tab almashmaydi);
+        bir xil darajada tartibda OXIRGISI (eski konvensiya: bo'shliq bilan
+        farqlanuvchi dublikatda oxirgisi joriy yilniki). Bittadan ko'p bo'lsa —
+        month_tab_dup_note ogohlantiradi."""
     today = today or date.today()
     month, yr = current_month_name(today), str(today.year)
     scored = []
@@ -217,9 +220,9 @@ def pm_month_tabs(tab_titles, today=None):
         years = _YEAR_RE.findall(norm(t))
         if years and yr not in years:
             continue
-        scored.append((0 if years else 1, -i, t))
+        scored.append((bool(years), norm(t) != month, -i, t))
     scored.sort()
-    return [x[2] for x in scored]
+    return [x[3] for x in scored]
 
 
 def month_tab_dup_note(tab_titles, today=None):

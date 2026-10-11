@@ -167,8 +167,11 @@ def test_oy_tabi_imlo_yil_suffiksi_va_dublikat():
     # ilgari faqat aniq «Oktyabr» kuzatilardi — bular PM dashboarddan yo'qolardi
     assert fm.detect_watch_tabs(["Main", "Sentyabr", "Oktabr"], OKT) == ["Main", "Oktabr"]
     assert fm.detect_watch_tabs(["Main", "Oktyabr(2026)"], OKT) == ["Main", "Oktyabr(2026)"]
-    # boshqa yil arxivi olinmaydi; joriy yil suffiksi yilsizdan ustun
-    assert fm.pm_month_tabs(["Oktyabr(2025)", "Oktyabr", "Oktabr(2026)"], OKT) == ["Oktabr(2026)", "Oktyabr"]
+    # boshqa yil arxivi olinmaydi; aniq yozilish birinchi (kuzatilayotgan tab almashmaydi),
+    # variantlar — faqat aniq tab yo'q bo'lsa
+    assert fm.pm_month_tabs(["Oktyabr(2025)", "Oktabr(2026)", "Oktabr", "Oktyabr"], OKT) == \
+        ["Oktyabr", "Oktabr", "Oktabr(2026)"]
+    assert fm.detect_watch_tabs(["Main", "Oktyabr", "Oktyabr (2026)"], OKT)[1] == "Oktyabr"
     # eski konvensiya saqlanadi: bo'shliq bilan farqlanuvchi dublikatda OXIRGISI
     assert fm.detect_watch_tabs(["Main", "Oktyabr", "Oktyabr "], OKT)[1] == "Oktyabr "
     assert fm.month_tab_dup_note(["Main", "Oktyabr"], OKT) == ""
