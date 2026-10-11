@@ -175,9 +175,13 @@ def init_env():
     if not TOKEN or not CHAT_ID:
         log("XATO: .env da TELEGRAM_BOT_TOKEN yoki TELEGRAM_CHAT_ID yo'q")
         sys.exit(1)
+    _ok, yaroqsiz = _owner_ids_parse(os.environ.get("TELEGRAM_OWNER_IDS", ""))
+    if yaroqsiz:
+        log(f"DIQQAT: TELEGRAM_OWNER_IDS dagi yaroqsiz qiymat(lar) tashlandi: {yaroqsiz} — "
+            "faqat raqamli user ID (anonim admin/kanal ID'lari qabul qilinmaydi)")
     if not owner_ids():
-        log("DIQQAT: TELEGRAM_CHAT_ID guruh, lekin TELEGRAM_OWNER_IDS yo'q — hech kimning "
-            "buyrug'i bajarilmaydi (audit P1-S2). .env/Railway'ga user ID(lar)ni qo'shing.")
+        log("DIQQAT: TELEGRAM_CHAT_ID guruh, lekin TELEGRAM_OWNER_IDS da yaroqli user ID yo'q — "
+            "hech kimning buyrug'i bajarilmaydi (audit P1-S2). .env/Railway'ga qo'shing.")
 
 
 def owner_ids():
@@ -187,26 +191,49 @@ def owner_ids():
     sozlash shart emas). Guruh chat (manfiy ID) + TELEGRAM_OWNER_IDS yo'q — BO'SH: guruhning
     istalgan a'zosi (keyin qo'shilganlar ham) /pm_push force (egasining shaxsiy Telegram
     akkauntidan PM'larga xabar), /pm_set, /approve, KB, maxfiy tab o'qishni ishlata olmasin."""
-    raw = _os.environ.get("TELEGRAM_OWNER_IDS", "")
-    ids = {x.strip() for x in raw.replace(";", ",").split(",") if x.strip()}
+    ids, _yaroqsiz = _owner_ids_parse(_os.environ.get("TELEGRAM_OWNER_IDS", ""))
     chat = str(CHAT_ID).strip()
-    if not ids and chat.isdigit():
+    if not ids and chat.isdigit() and chat not in PSEUDO_USERS:
         ids = {chat}
     return ids
 
 
+# Telegram'ning ko'p odamga UMUMIY «foydalanuvchi»lari: anonim admin (GroupAnonymousBot),
+# «kanal nomidan» yozish (Channel_Bot), bog'langan kanal avto-forwardi. Ular egalar
+# ro'yxatiga hech qachon kirmaydi — aks holda istalgan anonim admin buyruq bera olardi.
+PSEUDO_USERS = {"1087968824", "136817688", "777000"}
+
+
+def _owner_ids_parse(raw):
+    """«111, 222», «111 222», «"111;222"», ko'p qatorli — hammasi. Faqat musbat raqamli
+    user ID'lar; qolgani (va pseudo-user'lar) yaroqsiz deb qaytadi (init_env log qiladi)."""
+    tokens = [t for t in re.split(r"[\s,;]+", str(raw).strip().strip("\"'")) if t]
+    ok = {t.strip("\"'") for t in tokens if t.strip("\"'").isdigit()} - PSEUDO_USERS
+    return ok, [t for t in tokens if t.strip("\"'") not in ok]
+
+
 _RUXSATSIZ_OGOH = {}                # {user_id: sana} — rad xabari kuniga bir marta
+_RUXSATSIZ_MAX = 500                # xotira o'smasin (spam bilan)
 
 
 def _ruxsatsiz(msg, chat):
     sender = str((msg.get("from") or {}).get("id") or "")
+    anonim = bool(msg.get("sender_chat")) or sender in PSEUDO_USERS
     matn = (msg.get("text") or msg.get("caption") or "")[:60]
-    log(f"IGNORE: ruxsatsiz yuboruvchi from.id={sender or '?'} chat_id={chat} (matn: {matn!r})")
+    log(f"IGNORE: ruxsatsiz yuboruvchi from.id={sender or '?'}"
+        f"{' (anonim/kanal nomidan)' if anonim else ''} chat_id={chat} (matn: {matn!r})")
     bugun = date.today().isoformat()
-    if sender and _RUXSATSIZ_OGOH.get(sender) != bugun:
-        _RUXSATSIZ_OGOH[sender] = bugun
-        send_retry(f"⛔ Ruxsat yo'q (user id {sender}). Bot egasi TELEGRAM_OWNER_IDS ga "
-                   "qo'shsa, buyruqlar ishlaydi.", attempts=1)
+    kalit = "anonim" if anonim else sender
+    if kalit and _RUXSATSIZ_OGOH.get(kalit) != bugun:
+        if len(_RUXSATSIZ_OGOH) >= _RUXSATSIZ_MAX:
+            _RUXSATSIZ_OGOH.clear()
+        _RUXSATSIZ_OGOH[kalit] = bugun
+        if anonim:
+            send_retry("⛔ Anonim admin yoki kanal nomidan yozilgan buyruqlar qabul qilinmaydi — "
+                       "shaxsiy akkauntingizdan yozing.", attempts=1)
+        else:
+            send_retry(f"⛔ Ruxsat yo'q (user id {sender}). Bot egasi TELEGRAM_OWNER_IDS ga "
+                       "qo'shsa, buyruqlar ishlaydi.", attempts=1)
     return "unauthorized"
 
 
@@ -225,10 +252,11 @@ def send_long(text, is_html=False):
             time.sleep(0.4)
 
 
-def send_retry(md_text, attempts=4, is_html=False):
+def send_retry(md_text, attempts=4, is_html=False, outbox=True):
     """Javobni retry bilan yuboradi (uyqudan keyin tarmoq kech tiklanadi).
     is_html=True → matn allaqachon Telegram HTML (md_to_html o'tkazilmaydi).
-    Umuman yuborilmasa — outbox'ga saqlaydi. True = yetkazildi."""
+    Umuman yuborilmasa — outbox'ga saqlaydi (outbox=False — maxfiy javob: faqat belgi,
+    P1-S3). True = yetkazildi."""
     for i in range(attempts):
         try:
             send_long(md_text, is_html=is_html)
@@ -238,7 +266,7 @@ def send_retry(md_text, attempts=4, is_html=False):
             if i < attempts - 1:
                 time.sleep(20 * (i + 1))
     try:
-        OUTBOX.write_text(md_text + "\n", encoding="utf-8")
+        OUTBOX.write_text((md_text if outbox else MAXFIY_JAVOB) + "\n", encoding="utf-8")
         log(f"XATO: javob yuborilmadi — {OUTBOX} ga saqlandi")
     except OSError:
         pass
@@ -1325,18 +1353,27 @@ def handle_voice(msg):
     send_retry(f"🎤 Eshitdim: «{text}»", attempts=2)
     log(f"VOICE→SAVOL: {text[:200]!r} ({dur}s)")
     ans = do_question(text)
+    if ans and _OXIRGI_MAXFIY.get("q") == text:
+        # Maxfiy tab javobi tashqi TTS xizmatiga (edge-tts) yuborilmaydi va audio
+        # diskda qolmaydi (review P1-S3) — javob faqat matnda
+        log("maxfiy tab javobi — ovozli javob o'tkazildi")
+        ans = None
     if ans and stt.tts_enabled():
+        ogg = DATA / "qa-pdf" / "voice-javob.ogg"
         try:
-            ogg = stt.tts(ans, DATA / "qa-pdf" / "voice-javob.ogg")
+            ogg = stt.tts(ans, ogg)
             send_voice_file(ogg)
         except Exception as e:
             log(f"TTS xato (javob matnda qoldi): {type(e).__name__}: {str(e)[:150]}")
+        finally:
+            Path(ogg).unlink(missing_ok=True)        # ovozli javob diskda qolmasin
     return "voice"
 
 
 # ---------- savol / buyruqlar ----------
 
 MAXFIY_JAVOB = "(javob maxfiy tab ma'lumotiga asoslangan — xotira va arxivga yozilmadi)"
+_OXIRGI_MAXFIY = {}                 # {"q": savol} — oxirgi javob maxfiy tabdan bo'lsa (ovoz yo'li)
 
 
 def arxivla(q, ans, sel):
@@ -1373,6 +1410,9 @@ def do_question(q):
 
     extra_sel = prev_selection() if ref else None
     data_text, sel, src = build_data(q, extra_sel, force_live=needs_live(q))
+    _OXIRGI_MAXFIY.clear()
+    if sel.get("maxfiy"):
+        _OXIRGI_MAXFIY["q"] = q
     t_fetch = time.monotonic()
     # --- Bilim bazasi (KB) — Q&A prompt'iga qo'shimcha kontekst.
     # KB yiqilsa Q&A ISHLASHDA DAVOM ETADI (try/except). Budjet MAX_DATA_CHARS'dan ayiriladi.
@@ -1454,7 +1494,7 @@ def do_question(q):
         else:
             if mid:
                 edit_status(mid, "📄 Javob:")
-            ok = send_retry(html, is_html=True)
+            ok = send_retry(html, is_html=True, outbox=not sel.get("maxfiy"))
     arxivla(q, ans if ok else "(javob yuborilmadi — tarmoq xatosi)", sel)
     log(f"javob {'yuborildi' if ok else 'YUBORILMADI'} ({'PDF' if pdf_sent else 'matn'}, {len(ans)} belgi)")
     log(
@@ -1969,7 +2009,7 @@ def handle_update(upd):
         return "ignored"
     # XAVFSIZLIK (audit P1-S2): egasining chat'ida ham YUBORUVCHI tekshiriladi — guruh
     # rejimida har bir a'zo buyruq bera olmasin (owner_ids()).
-    if str((msg.get("from") or {}).get("id") or "") not in owner_ids():
+    if msg.get("sender_chat") or str((msg.get("from") or {}).get("id") or "") not in owner_ids():
         return _ruxsatsiz(msg, chat)
     if msg.get("voice") or msg.get("audio"):
         return handle_voice(msg)

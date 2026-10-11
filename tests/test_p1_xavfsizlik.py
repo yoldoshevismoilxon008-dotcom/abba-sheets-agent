@@ -26,6 +26,7 @@ import pm_push             # noqa: E402
 import send as sendmod     # noqa: E402
 
 MAXFIY_TAB = "Mijozlarning ma'lumot bazasi"
+_SEND_RETRY = bl.send_retry         # asl (boshqa test fayllari bl.send_retry'ni almashtiradi)
 
 
 @contextlib.contextmanager
@@ -110,6 +111,26 @@ def test_s2_owner_ids_shaxsiy_chatda_ham_ustun():
         assert bl.handle_update(_upd(555, 555)) == "unauthorized"
 
 
+def test_s2_anonim_admin_va_kanal_nomidan_rad():
+    """Review: anonim admin (GroupAnonymousBot) / kanal nomidan yozish — ko'p odamga umumiy
+    from.id. U egalar ro'yxatiga qo'shilsa ham qabul qilinmaydi, rad xabari ID taklif qilmaydi."""
+    with _bot(-100123, owners="777,1087968824") as sent:
+        assert bl.owner_ids() == {"777"}
+        anon = _upd(-100123, 1087968824, "/pm_push force", sender_chat={"id": -100123})
+        assert bl.handle_update(anon) == "unauthorized"
+        egasi_kanal = _upd(-100123, 777, "/pm_push force", sender_chat={"id": -100999})
+        assert bl.handle_update(egasi_kanal) == "unauthorized"
+    assert len(sent) == 1 and "1087968824" not in sent[0] and "shaxsiy akkaunt" in sent[0], sent
+
+
+def test_s2_owner_ids_formatlari():
+    for raw, kutil in (("111 222", {"111", "222"}), ('"111;222"', {"111", "222"}),
+                       ("111\n222", {"111", "222"}), ("@user, 333", {"333"}), ("", set())):
+        ok, _yaroqsiz = bl._owner_ids_parse(raw)
+        assert ok == kutil, (raw, ok)
+    assert bl._owner_ids_parse("@user, 333")[1] == ["@user"]
+
+
 # ------------------------------------------------------------------ S3
 
 def test_s3_maxfiy_javob_arxivlanmaydi():
@@ -172,6 +193,56 @@ def test_s3_maxfiy_pdf_diskda_qolmaydi():
         assert len(list(Path(d).glob("*.pdf"))) == 1
 
 
+def _ovoz(maxfiy, tmp):
+    """handle_voice: STT/yuklash/TTS soxta; do_question maxfiy belgisini qo'yadi."""
+    import design
+    import stt
+
+    tts_chaqirildi = []
+
+    def soxta_savol(q):
+        bl._OXIRGI_MAXFIY.clear()
+        if maxfiy:
+            bl._OXIRGI_MAXFIY["q"] = q
+        return "A mijoz: LOGIN a@x PAROL p1"
+
+    def soxta_tts(ans, out):
+        tts_chaqirildi.append(ans)
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_bytes(b"OggS")
+        return out
+
+    with _soxta(bl, "DATA", Path(tmp)), _soxta(stt, "stt_ready", lambda: (True, "")), \
+            _soxta(stt, "transcribe", lambda p: "smm parollar"), _soxta(stt, "tts_enabled", lambda: True), \
+            _soxta(stt, "tts", soxta_tts), _soxta(design, "download", lambda *a: str(Path(tmp) / "v.ogg")), \
+            _soxta(bl, "send_status", lambda t: 1), _soxta(bl, "delete_status", lambda m: None), \
+            _soxta(bl, "send_retry", lambda *a, **k: True), _soxta(bl, "typing", lambda: None), \
+            _soxta(bl, "send_voice_file", lambda p: True), _soxta(bl, "do_question", soxta_savol):
+        assert bl.handle_voice({"voice": {"file_id": "f", "duration": 3}}) == "voice"
+    return tts_chaqirildi, list(Path(tmp).rglob("*.ogg"))
+
+
+def test_s3_maxfiy_javob_tts_ga_ketmaydi_va_ovoz_diskda_qolmaydi():
+    """Review: maxfiy javob edge-tts (tashqi xizmat) ga yuborilmasin; har qanday ovozli
+    javob fayli yuborilgach o'chirilsin."""
+    with tempfile.TemporaryDirectory() as d:
+        tts, qolgan = _ovoz(True, d)
+        assert tts == [] and qolgan == [], (tts, qolgan)
+    with tempfile.TemporaryDirectory() as d:
+        tts, qolgan = _ovoz(False, d)
+        assert len(tts) == 1 and qolgan == [], (tts, qolgan)
+
+
+def test_s3_maxfiy_javob_outbox_ga_yozilmaydi():
+    with tempfile.TemporaryDirectory() as d, _soxta(bl, "OUTBOX", Path(d) / "outbox.md"), \
+            _soxta(bl, "send_long", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("tarmoq"))), \
+            _soxta(bl.time, "sleep", lambda *_: None):
+        assert _SEND_RETRY("PAROL p1", attempts=1, outbox=False) is False
+        assert (Path(d) / "outbox.md").read_text(encoding="utf-8").strip() == bl.MAXFIY_JAVOB
+        _SEND_RETRY("oddiy javob", attempts=1)
+        assert "oddiy javob" in (Path(d) / "outbox.md").read_text(encoding="utf-8")
+
+
 # ------------------------------------------------------------------ S4
 
 def _claude_chaqiruvi(**kw):
@@ -182,8 +253,12 @@ def _claude_chaqiruvi(**kw):
         seen.update(cmd=cmd, cwd=cwd, bosh=(cwd is not None and os.listdir(cwd) == []))
         return type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
 
-    with _soxta(analyze, "find_claude", lambda: "claude"), _soxta(analyze.subprocess, "run", run):
-        assert analyze.run_claude("prompt", **kw) == "ok"
+    analyze._CLI_YORDAM["txt"] = "--no-session-persistence"     # o'rnatilgan CLI qo'llaydi
+    try:
+        with _soxta(analyze, "find_claude", lambda: "claude"), _soxta(analyze.subprocess, "run", run):
+            assert analyze.run_claude("prompt", **kw) == "ok"
+    finally:
+        analyze._CLI_YORDAM.clear()
     return seen
 
 
@@ -193,7 +268,27 @@ def test_s4_claude_toollarsiz_va_bosh_papkada():
     taqiq = cmd[cmd.index("--disallowedTools") + 1].split(",")
     assert {"Read", "Glob", "Grep", "Bash", "WebFetch", "Write"} <= set(taqiq), taqiq
     assert "--allowedTools" not in cmd
+    assert "--no-session-persistence" in cmd                    # prompt transkripti diskka yozilmaydi
     assert s["bosh"] and Path(s["cwd"]).resolve() != ROOT and not Path(s["cwd"]).exists(), s
+
+
+def test_s4_eski_cli_noma_lum_flagsiz():
+    """Eski CLI (--no-session-persistence yo'q) — flag qo'shilmaydi, chaqiruv yiqilmaydi."""
+    seen = {}
+
+    def run(cmd, **k):
+        if cmd[-1] == "--help":
+            return type("R", (), {"returncode": 0, "stdout": "--disallowedTools", "stderr": ""})()
+        seen["cmd"] = cmd
+        return type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    analyze._CLI_YORDAM.clear()
+    try:
+        with _soxta(analyze, "find_claude", lambda: "claude"), _soxta(analyze.subprocess, "run", run):
+            assert analyze.run_claude("p") == "ok"
+    finally:
+        analyze._CLI_YORDAM.clear()
+    assert "--no-session-persistence" not in seen["cmd"] and "--disallowedTools" in seen["cmd"]
 
 
 def test_s4_vision_faqat_read():

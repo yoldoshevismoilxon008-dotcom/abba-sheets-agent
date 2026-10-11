@@ -190,6 +190,22 @@ CLAUDE_TOOLS = (
 )
 
 
+_CLI_YORDAM = {}
+
+
+def _cli_qollaydi(flag):
+    """O'rnatilgan claude CLI shu flag'ni qo'llaydimi («--help» bir marta, keshlanadi).
+    Eski CLI'da noma'lum flag butun chaqiruvni yiqitmasin (Mac'dagi versiya boshqa bo'lishi
+    mumkin)."""
+    if "txt" not in _CLI_YORDAM:
+        try:
+            r = subprocess.run([find_claude(), "--help"], capture_output=True, text=True, timeout=20)
+            _CLI_YORDAM["txt"] = (r.stdout or "") + (r.stderr or "")
+        except Exception:                            # noqa: BLE001
+            _CLI_YORDAM["txt"] = ""
+    return flag in _CLI_YORDAM["txt"]
+
+
 def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
     """effort: None (default — settings'dagi max) yoki 'low'..'max'.
     --effort FLAG ishlatiladi — settings.json'dagi global env'ni ham yengadi
@@ -207,6 +223,9 @@ def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
         cmd += ["--effort", effort]
     if allowed_tools:
         cmd += ["--allowedTools", ",".join(allowed_tools)]
+    # Prompt (sheet qatorlari, maxfiy tab ham) ~/.claude/projects transkriptiga yozilmasin
+    if _cli_qollaydi("--no-session-persistence"):
+        cmd += ["--no-session-persistence"]
     taqiq = [t for t in CLAUDE_TOOLS if t not in (allowed_tools or ())]
     cmd += ["--disallowedTools", ",".join(taqiq)]
     with tempfile.TemporaryDirectory(prefix="claude-p-") as bosh:
