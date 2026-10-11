@@ -339,7 +339,11 @@ def recover_inflight():
     log(f"restart paytida uzilgan so'rov tiklanmoqda (urinish {att + 1}): {preview!r}")
     _write_inflight(upd, attempts=att + 1)
     try:
-        handle_update(upd)
+        # Watchdog bilan (polling loop'dagi kabi): restartdan keyin ham osilgan xabar
+        # pollingni boshlanmasdan BLOKLAB qo'ymasin — chek tugasa tashlab ketiladi (P2)
+        holat = handle_with_watchdog(upd)
+        if holat != "ok":
+            log(f"recover_inflight: tiklangan so'rov holati — {holat}")
     except Exception as e:
         log(f"XATO recover_inflight: {e}")
     finally:

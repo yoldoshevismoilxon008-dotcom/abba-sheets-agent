@@ -7,6 +7,9 @@
      1% stavka qoida oralig'idan tashqarida «qoida yo'q» va son; rang yaxlitlanmagan
      %dan; yangi oy tabi kuni «o'zgarish yo'q» emas; diff har sheet'ning oxirgi
      snapshot'i bilan; Claude yiqilsa qayta urinish va diagnostika.
+  C  runtime: restart 09:00 dan keyin bo'lsa boot catch-up; 09:30 PM push pipeline
+     tugashini kutadi; recover_inflight watchdog bilan (osilgan xabar pollingni
+     bloklamaydi).
 
 pytest tests/test_p2_tuzatishlar.py  yoki  python3 tests/test_p2_tuzatishlar.py
 Tarmoq/kredensial kerak emas.
@@ -366,6 +369,105 @@ def test_claude_yiqilsa_qayta_urinadi():
         raise subprocess.TimeoutExpired("claude", 600)
     c = _analyze_main(_timeout)
     assert c["claude"] == 1 and "TimeoutExpired" in c["report"]   # timeout qayta kutilmaydi
+
+
+# ---------------------------------------------------------------- C: runtime
+
+def _tk(h, m, d=5):
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    return datetime(2026, 10, d, h, m, tzinfo=ZoneInfo("Asia/Tashkent"))
+
+
+def test_catchup_oynasi():
+    import supervisor as sv
+    assert sv.catchup_kerak(_tk(10, 15), sv.DAILY_AT, "")
+    assert sv.catchup_kerak(_tk(10, 15), sv.DAILY_AT, "2026-10-04")          # kechagi marker
+    assert not sv.catchup_kerak(_tk(10, 15), sv.DAILY_AT, "2026-10-05")      # bugun bajarilgan
+    assert not sv.catchup_kerak(_tk(8, 50), sv.DAILY_AT, "")                 # vaqti kelmagan
+    assert not sv.catchup_kerak(_tk(12, 0), sv.DAILY_AT, "")                 # 3 soatlik oynadan tashqari
+    assert sv.catchup_kerak(_tk(12, 20), sv.PM_PUSH_AT) and not sv.catchup_kerak(_tk(9, 20), sv.PM_PUSH_AT)
+
+
+def test_boot_catchup_pipeline_keyin_pm_push():
+    import supervisor as sv
+    tartib = []
+    with tempfile.TemporaryDirectory() as td:
+        marker = Path(td) / "daily_last_run.txt"
+        with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(9, 40)), \
+                _soxta(sv, "daily_job", lambda: tartib.append("daily")), \
+                _soxta(sv, "pm_push_job", lambda: tartib.append("pm")):
+            sv.boot_catchup()()
+            assert tartib == ["daily", "pm"]
+            marker.write_text("2026-10-05", encoding="utf-8")       # pipeline bugun bo'lgan
+            tartib.clear()
+            sv.boot_catchup()()
+            assert tartib == ["pm"]
+        with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(8, 30)):
+            assert sv.boot_catchup() is None                          # hali 09:00 emas
+        with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(15, 0)):
+            assert sv.boot_catchup() is None                          # oyna o'tgan
+
+
+def test_daily_job_marker_yozadi():
+    import supervisor as sv
+    with tempfile.TemporaryDirectory() as td:
+        marker = Path(td) / "sub" / "daily_last_run.txt"
+        with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(9, 5)), \
+                _soxta(sv, "run_daily", lambda: None):
+            sv.daily_job()
+        assert marker.read_text(encoding="utf-8") == "2026-10-05"
+
+
+def test_pm_push_pipeline_tugashini_kutadi():
+    import threading
+    import supervisor as sv
+    ketdi = threading.Event()
+    with _soxta(sv, "run_pm_push", ketdi.set):
+        sv._PIPELINE_LOCK.acquire()                  # pipeline ishlayapti
+        try:
+            th = threading.Thread(target=sv.pm_push_job, daemon=True)
+            th.start()
+            assert not ketdi.wait(0.3)               # push kutyapti
+        finally:
+            sv._PIPELINE_LOCK.release()
+        assert ketdi.wait(3)                         # pipeline tugadi — push ketdi
+        th.join(3)
+    ketdi.clear()
+    with _soxta(sv, "run_pm_push", ketdi.set), _soxta(sv, "PM_WAIT_SEC", 0.05):
+        sv._PIPELINE_LOCK.acquire()
+        try:
+            sv.pm_push_job()                         # chek tugadi — baribir yuboriladi
+        finally:
+            sv._PIPELINE_LOCK.release()
+    assert ketdi.is_set()
+
+
+def test_recover_inflight_watchdog_bilan():
+    import json
+    import threading
+    import time
+    import bot_listener as bl
+    qoyib_yubor = threading.Event()
+    xabarlar = []
+
+    def _osilgan(upd):
+        qoyib_yubor.wait(5)
+
+    upd = {"update_id": 7, "message": {"chat": {"id": 1}, "text": "savol"}}
+    with tempfile.TemporaryDirectory() as td:
+        inflight = Path(td) / "bot-inflight.json"
+        inflight.write_text(json.dumps({"update": upd, "attempts": 1}), encoding="utf-8")
+        with _soxta(bl, "INFLIGHT", inflight), _soxta(bl, "handle_update", _osilgan), \
+                _soxta(bl, "HANDLE_TIMEOUT", 0.2), \
+                _soxta(bl, "send_retry", lambda t, **k: xabarlar.append(t)):
+            t0 = time.monotonic()
+            bl.recover_inflight()
+            dt = time.monotonic() - t0
+        qoyib_yubor.set()
+        assert dt < 2                                # ilgari handle_update tugashini kutardi
+        assert not inflight.exists()
+    assert any("timeout" in x for x in xabarlar)
 
 
 # ---------------------------------------------------------------- skript rejimi
