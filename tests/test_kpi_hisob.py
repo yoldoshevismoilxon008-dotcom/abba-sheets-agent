@@ -22,6 +22,7 @@ import audit as au         # noqa: E402
 import dashboard as db     # noqa: E402
 import diff as df          # noqa: E402
 import fetch as fm         # noqa: E402
+import pm_push as pp       # noqa: E402
 import undiruv as u        # noqa: E402
 
 # ------------------------------------------------------------------ yordamchilar
@@ -86,6 +87,40 @@ def test_k1_summa_teng_qisman_tolov_kochirilgan():
     prev = _tab(["1", "Levelmax", "Islom", "", "$1 500", "", "", "", "20.09", "", ""])
     t = u.month_transition(prev, _tab(["1", "Levelmax", "Islom", "", "$1 500", "$500", "", "", "20.10", "", ""]))
     assert _names(t["moved"]) == ["Levelmax"] and not t["real"] and not t["closed"], t
+
+
+def _korinish(today, tabs, qlar=()):
+    """undiruv.korinish — oy tablari soxta (tarmoqsiz)."""
+    orig = u._oy_oqi
+    u._VIEW_KESH.clear()
+
+    def soxta(month, year, ref, today_, day, prefer_live, qat_iy, notes):
+        t = tabs.get((month, year))
+        return (t[0], [dict(r) for r in t[1]], "live") if t else (None, [], "none")
+    u._oy_oqi = soxta
+    try:
+        return u.korinish(today, day=today.isoformat(), prefer_live=True, qlar=list(qlar))
+    finally:
+        u._oy_oqi = orig
+
+
+def test_k1_egaga_kelishilgan_summa_korsatiladi():
+    """Qisman to'lovli «Summa farqli» qatori egaga KELISHILGAN summani beradi (ega qarori
+    yangi_summa shu bilan solishtiriladi), qolgan qarz alohida. Qatordan ko'chirilgan qaror
+    qo'llanadi va qarz ikki marta so'ralmaydi (review: avval qoldiq $2 000 ko'rsatilardi)."""
+    kun = date(2026, 10, 12)
+    sen = _tab(["1", "Levelmax", "Islom", "", "$1 500", "", "", "", "20.09", "", ""], ref=date(2026, 9, 1), today=kun)
+    okt = _tab(["1", "Levelmax", "Islom", "", "$2 000", "$500", "", "", "10.10", "", ""], ref=date(2026, 10, 1), today=kun)
+    tabs = {("sentyabr", 2026): ("Undiruv sentabr(2026)", sen), ("oktyabr", 2026): ("Undiruv oktabr(2026)", okt)}
+    v = _korinish(kun, tabs)
+    _per, st = pp.build_push(kun, v["rows"], v["prev"]["rows"], "sentyabr", view=v)
+    fq = [i for i in st["farqli"] if i["loyiha"] == "Levelmax"]
+    assert fq and (fq[0]["otgan"], fq[0]["yangi"], fq[0]["qoldiq"]) == (1500, 2500, 2000), st["farqli"]
+    qaror = [{"loyiha": "Levelmax", "yangi_tab": "Undiruv oktabr(2026)", "qaror": "yangi_toliq",
+              "otgan_qoldiq": fq[0]["otgan"], "yangi_summa": fq[0]["yangi"], "sabab": "test"}]
+    v = _korinish(kun, tabs, qaror)
+    assert "Levelmax" not in _names(v["prev"]["real"]), v["prev"]
+    assert not any("eskirgan" in i for i in v["prev"]["izoh"]), v["prev"]["izoh"]
 
 
 # ------------------------------------------------------------------ K2
@@ -273,6 +308,43 @@ def test_k6_raqam_ustuni_kalit_bolsa_sonlar_haqiqiy_kalit():
     assert [x["key"] for x in r["removed"]] == ["2"] and not r["added"] and not r["changed"], r
 
 
+SMM_HDR = ["№", "Proektlar nomi", "Ma'sul shaxs", "Ball system", "Proek price"]
+SMM_TAIL = [["", "3", "", "", ""], ["", "$83 765", "66,69%", "", ""]]
+
+
+def test_k6_pastga_loyiha_qoshilsa_yigindi_qatorlari_barqaror():
+    """Smm main: yig'indi qatorlari («58», «$83 765») Jami yorlig'isiz — pastga loyiha
+    qo'shilsa ular «o'chgan + yangi» bo'lib chiqmaydi (review: avval +3 −2)."""
+    rows = [["1", "Aventos", "Islom", "41,2", "$2 000"], ["2", "Sino clinic", "Zubair", "35", "$1 500"]]
+    old = [SMM_HDR] + rows + SMM_TAIL
+    new = [SMM_HDR] + rows + [["3", "Petrochem(potensial)", "Islom", "", "$2 000"],
+                              ["", "4", "", "", ""], ["", "$85 765", "66,69%", "", ""]]
+    r = df.diff_range(old, new, "Proektlar nomi")
+    assert [a["key"] for a in r["added"]] == ["Petrochem(potensial)"] and not r["removed"], r
+    assert {c["key"] for c in r["changed"]} == {"(jadval ostida #1)", "(jadval ostida #2)"}, r["changed"]
+
+
+def test_k6_tartib_almashsa_soxta_ozgarish_yoq():
+    rows = [["1", "Aventos", "Islom", "41,2", "$2 000"], ["2", "Sino clinic", "Zubair", "35", "$1 500"]]
+    old = [SMM_HDR] + rows + SMM_TAIL
+    new = [SMM_HDR] + rows[::-1] + SMM_TAIL
+    r = df.diff_range(old, new, "Proektlar nomi")
+    assert not r["added"] and not r["removed"] and not r["changed"], r
+
+
+def test_k6_loyiha_nomi_ochirilsa_ostidagi_nomsiz_qatorlar_qolmaydi():
+    """Bazarway nomi o'chirildi (faqat № qoldi): ostidagi o'zgarmagan nomsiz qatorlar
+    o'chgan+yangi bo'lib chiqmaydi — eski xulq kabi 1 o'chgan, 1 yangi."""
+    hdr = ["№", "Loyihalar", "Manager", "Ball"]
+    old = [hdr, ["13", "Biboo", "Islom", "41,2"], ["14", "Bazarway", "Islom", "30"],
+           ["15", "", "Asadbek", "30,0"], ["16", "", "Nilufar", "35,0"], ["", "Aktive", "", "136,2"]]
+    new = [hdr, ["13", "Biboo", "Islom", "41,2"], ["14", "", "", ""],
+           ["15", "", "Asadbek", "30,0"], ["16", "", "Nilufar", "35,0"], ["", "Aktive", "", "106,2"]]
+    r = df.diff_range(old, new, "Loyihalar")
+    assert [x["key"] for x in r["removed"]] == ["Bazarway"] and len(r["added"]) == 1, r
+    assert [c["key"] for c in r["changed"]] == ["Aktive"], r["changed"]
+
+
 def test_k6_row_map_orqaga_moslik():
     m = df.row_map([["1", "X"], ["2", "X"], ["3", "Y"]], 1)
     assert list(m) == ["X", "X #2", "Y"]
@@ -290,6 +362,36 @@ def test_k7_ustun_qoshilsa_qatorlar_siljimaydi():
     assert not r["added"] and not r["removed"], r
     assert r["changed"] == [{"key": "Geely", "changes": {"Ball": {"old": "35", "new": "36"}}}], r["changed"]
     assert "header_changed" in r
+
+
+def test_k7_sarlavha_katagi_boshatilsa_ozgarishlar_yoqolmaydi():
+    """08.10: Smm main'da «Ishlar nomi» sarlavhasi bo'shatildi — o'sha kunning hamma
+    o'zgarishi shu ustunda edi; ular hisobotdan tushib qolmasin (review)."""
+    old = [["№", "Proektlar nomi", "Ishlar nomi"], ["1", "A", "eski"], ["2", "B", "x"]]
+    new = [["№", "Proektlar nomi", ""], ["1", "A", "YANGI"], ["2", "B", "x"]]
+    r = df.diff_range(old, new, "Proektlar nomi")
+    assert r["changed"] == [{"key": "A", "changes": {"C-ustun": {"old": "eski", "new": "YANGI"}}}], r
+
+
+def test_k7_ustun_qoshilsa_nomsiz_ustunlar_ham_solishtiriladi():
+    """Ustun qo'shilgan kuni nomsiz pul ustunlari (T/U) o'zgarishi yashirinmasin."""
+    old = [["№", "Proektlar nomi", "Narx", ""], ["1", "A", "$1", "$603"]]
+    new = [["№", "Ma'sul shaxs", "Proektlar nomi", "Narx", ""], ["1", "Islom", "A", "$1", "$442"]]
+    r = df.diff_range(old, new, "Proektlar nomi")
+    assert not r["added"] and not r["removed"], r
+    assert r["changed"] == [{"key": "A", "changes": {"E-ustun": {"old": "$603", "new": "$442"}}}], r
+
+
+def test_k7_kalit_sarlavhasi_qayta_nomlansa_qatorlar_almashmaydi():
+    """Kalit ustuni sarlavhasi «Proektlar nomi» → «Proektlar» (yoki bo'sh): hamma qator
+    o'chgan+yangi bo'lib, haqiqiy o'zgarish yashirinmasin (review: +7 −7)."""
+    rows = [["1", "Tanho", "$1 500"], ["2", "Remax", "$5 000"]]
+    old = [["№", "Proektlar nomi", "Tasdiq"]] + rows
+    for nom in ("Proektlar", ""):
+        new = [["№", nom, "Tasdiq"], ["1", "Tanho", "$4 500"], ["2", "Remax", "$5 000"]]
+        for a, b in ((old, new), (new, old)):
+            r = df.diff_range(a, b, "Proektlar nomi")
+            assert not r["added"] and not r["removed"] and [c["key"] for c in r["changed"]] == ["Tanho"], (nom, r)
 
 
 def test_k7_joyida_qayta_nomlangan_ustun_solishtiriladi():

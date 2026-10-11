@@ -100,7 +100,8 @@ def prev_day(today):
     return max(days) if days else None
 
 
-def key_index(header, key_column, warn=True):
+def _find_key(header, key_column):
+    """Kalit ustuni indeksi; nomli kalit sarlavhada bo'lmasa None."""
     if isinstance(key_column, int):
         return max(0, key_column - 1)
     if isinstance(key_column, str) and key_column.strip():
@@ -108,21 +109,35 @@ def key_index(header, key_column, warn=True):
         for i, h in enumerate(header):
             if str(h).strip().lower() == want:
                 return i
+        return None
+    return 0
+
+
+def key_index(header, key_column, warn=True):
+    i = _find_key(header, key_column)
+    if i is None:
         if warn:
             log(f"ogohlantirish: key_column '{key_column}' sarlavhada topilmadi — 1-ustun olindi")
-    return 0
+        return 0
+    return i
+
+
+def _key_row(vals, key_column, scan=6):
+    """Kalit ustuni NOMI turgan birinchi qator indeksi (topilmasa None)."""
+    if isinstance(key_column, str) and key_column.strip():
+        want = norm(key_column)
+        for i, row in enumerate(vals[:scan]):
+            if any(norm(c) == want for c in row):
+                return i
+    return None
 
 
 def header_index(vals, key_column=None, scan=6):
     """Sarlavha qatori: kalit ustuni NOMI turgan birinchi qator (bor bo'lsa), aks holda
     detect_header. Sarlavhada bitta katak bo'sh qolsa (08.10: «Ishlar nomi» bo'sh) ko'p
     to'ldirilgan ma'lumot qatori sarlavha bo'lib, butun tab siljimasin (audit K7)."""
-    if isinstance(key_column, str) and key_column.strip():
-        want = norm(key_column)
-        for i, row in enumerate(vals[:scan]):
-            if any(norm(c) == want for c in row):
-                return i
-    return detect_header(vals, scan)
+    i = _key_row(vals, key_column, scan)
+    return detect_header(vals, scan) if i is None else i
 
 
 def _is_jami_row(row, kidx):
@@ -148,26 +163,41 @@ def row_entries(values, kidx, start_row=2, son_kalit_ok=False):
         yerdagi «Nomi» katagida summa/son turadi («$121 610», «58»), u kalit bo'lolmaydi;
       • bo'sh yoki harfsiz (son/summa) kalit — oldingi NOMLI qatorga bog'langan kalit
         «(nomsiz qator: «X» dan keyin #k)» — yuqoriga qator qo'shilsa hammasi qayta
-        kalitlanmaydi (avval «(bo'sh kalit, 67-qator)» edi).
+        kalitlanmaydi (avval «(bo'sh kalit, 67-qator)» edi);
+      • oxirgi nomli qatordan KEYINGI nomsiz qatorlar (Jami yorlig'isiz yig'indi qatorlari:
+        Smm main «58», «$83 765») — «(jadval ostida #k)»: pastga loyiha qo'shilsa yoki
+        tartib o'zgarsa kaliti o'zgarmaydi.
     son_kalit_ok=True — kalit ustuni tartib raqami («№»): sonlar haqiqiy kalit."""
-    out = []
-    jami_n, last, k = None, None, 0
+    items = []                                   # (tur, qiymat, qator): tur 'jami'|'nom'|'nomsiz'
+    jami_n = None
     for n, row in enumerate(values, start=start_row):
         if not any(str(c).strip() for c in row):
             continue
         if jami_n is None and _is_jami_row(row, kidx):
             jami_n = n
         if jami_n is not None:
-            out.append((f"(jami bloki +{n - jami_n})", row))
+            items.append(("jami", n - jami_n, row))
             continue
         key = str(row[kidx]).strip() if kidx < len(row) else ""
         if key and (son_kalit_ok or not _son_kalit(key)):
-            last, k = key, 0
-            out.append((key, row))
-            continue
-        k += 1
-        joy = f"«{last}» dan keyin" if last else "boshida"
-        out.append((f"(nomsiz qator: {joy} #{k})", row))
+            items.append(("nom", key, row))
+        else:
+            items.append(("nomsiz", None, row))
+    oxirgi_nom = max((i for i, it in enumerate(items) if it[0] == "nom"), default=-1)
+    out, last, k, ost = [], None, 0, 0
+    for i, (tur, val, row) in enumerate(items):
+        if tur == "jami":
+            out.append((f"(jami bloki +{val})", row))
+        elif tur == "nom":
+            last, k = val, 0
+            out.append((val, row))
+        elif i > oxirgi_nom and last is not None:
+            ost += 1
+            out.append((f"(jadval ostida #{ost})", row))
+        else:
+            k += 1
+            joy = f"«{last}» dan keyin" if last else "boshida"
+            out.append((f"(nomsiz qator: {joy} #{k})", row))
     return out
 
 
@@ -195,12 +225,14 @@ def row_map(values, kidx, start_row=2):
 
 
 def _col_pairs(header_old, header_new):
-    """Sarlavha o'zgarmagan bo'lsa None — kataklar pozitsiya bo'yicha solishtiriladi.
-    O'zgargan bo'lsa ustunlar SARLAVHA NOMI bo'yicha juftlanadi (audit K7): ustun qo'shilsa
-    yoki o'chsa qolgan kataklar siljib, deyarli har qator «o'zgardi» deb chiqmasin
-    (11.08: 72 yangi + 72 o'chgan; 27.08: «Ma'sul shaxs» qo'shildi). Qaytadi:
-    [(nom, old_i, new_i)]. Faqat bir tomonda bor ustun qiyoslanmaydi (header_changed'da
-    aytiladi); joyida qayta nomlangan ustun — pozitsiyasi bo'yicha (yangi nom bilan)."""
+    """Ustunlar xaritasi. None — kataklar pozitsiya bo'yicha solishtiriladi: sarlavha
+    o'zgarmagan YOKI o'zgargan, lekin nomli ustunlar joyidan siljimagan (katak bo'shatilgan
+    yoki ustun qayta nomlangan — 08.10 «Ishlar nomi» bo'sh qolgan kunning 18 o'zgarishi
+    shu ustunda edi). Ustun qo'shilib/o'chib siljigan bo'lsa (audit K7: 11.08 — 72 yangi +
+    72 o'chgan; 27.08 — «Ma'sul shaxs» qo'shildi) ustunlar SARLAVHA NOMI bo'yicha
+    juftlanadi: [(nom, old_i, new_i)]. Faqat bir tomonda bor nomli ustun qiyoslanmaydi
+    (header_changed'da aytiladi); nomsiz ustunlar _row_changes'da eng yaqin chapdagi nomli
+    ustunning siljishi bilan juftlanadi."""
     if not header_old or not header_new or header_old == header_new:
         return None
 
@@ -216,6 +248,8 @@ def _col_pairs(header_old, header_new):
 
     lo, ln = labels(header_old), labels(header_new)
     pairs = [(nm, lo[nm], i) for nm, i in ln.items() if nm in lo]
+    if all(io == i for _, io, i in pairs):
+        return None                                  # hech narsa siljimagan — pozitsion
     used_o = {io for _, io, _ in pairs}
     used_n = {i for _, _, i in pairs}
     free_o = set(lo.values()) - used_o
@@ -223,6 +257,21 @@ def _col_pairs(header_old, header_new):
         if i not in used_n and i in free_o:
             pairs.append((nm, i, i))
     return pairs
+
+
+def _shift(pairs, idx, to_new=True):
+    """Nomsiz ustun indeksini boshqa tomonga o'tkazadi: eng yaqin chapdagi nomli juftning
+    siljishi bilan (pairs None — o'zgarishsiz)."""
+    if pairs is None:
+        return idx
+    best = None
+    for _nm, io, i in pairs:
+        a, b = (io, i) if to_new else (i, io)
+        if a == idx:
+            return b
+        if a < idx and (best is None or a > best[0]):
+            best = (a, b)
+    return idx + (best[1] - best[0]) if best else idx
 
 
 def _row_changes(old_row, new_row, header, pairs):
@@ -234,11 +283,25 @@ def _row_changes(old_row, new_row, header, pairs):
             if va != vb:
                 ch[colname(header, i)] = {"old": va, "new": vb}
         return ch
+    used_o = {io for _, io, _ in pairs}
+    used_n = {i for _, _, i in pairs}
     for nm, io, i in pairs:
         va = str(old_row[io]) if io < len(old_row) else ""
         vb = str(new_row[i]) if i < len(new_row) else ""
         if va != vb:
             ch[nm] = {"old": va, "new": vb}
+    # nomsiz ustunlar va sarlavhadan o'ngdagi kataklar — siljish bilan (yo'qolib qolmasin)
+    for io in range(max(len(old_row), len(new_row))):
+        if io in used_o:
+            continue
+        i = _shift(pairs, io)
+        if i < 0 or i in used_n:
+            continue
+        used_n.add(i)
+        va = str(old_row[io]) if io < len(old_row) else ""
+        vb = str(new_row[i]) if i < len(new_row) else ""
+        if va != vb:
+            ch[colname(header, i)] = {"old": va, "new": vb}
     return ch
 
 
@@ -276,19 +339,51 @@ def _match_rows(old_entries, new_entries, header, pairs):
             else:
                 _put(nm, _sfx(b, nxt), r)
                 nxt += 1
-    return om, nm
+    return om, _nomsiz_qayta_juftla(om, nm, header, pairs)
+
+
+def _nomsiz_qayta_juftla(om, nm, header, pairs, max_farq=1):
+    """Kaliti siljigan nomsiz qatorlar MAZMUNI bo'yicha qayta juftlanadi: yuqoridagi loyiha
+    nomi o'chirilsa ostidagi o'zgarmagan nomsiz qatorlar boshqa «dan keyin» zanjiriga o'tib,
+    «o'chgan + yangi» bo'lib chiqmasin. Faqat aynan teng yoki ≤max_farq katak farqli
+    qatorlar (aks holda boshqa qatorni «o'zgardi» deb to'qib qo'ymaslik uchun)."""
+    rem = [k for k in om if k not in nm and k.startswith("(nomsiz qator")]
+    add = [k for k in nm if k not in om and k.startswith("(nomsiz qator")]
+    if not rem or not add:
+        return nm
+    cand = sorted((len(_row_changes(om[a], nm[b], header, pairs)), ia, ib, a, b)
+                  for ia, a in enumerate(rem) for ib, b in enumerate(add))
+    ren, used = {}, set()
+    for farq, _ia, _ib, a, b in cand:
+        if farq > max_farq or a in used or b in ren:
+            continue
+        used.add(a)
+        ren[b] = a
+    return {ren.get(k, k): v for k, v in nm.items()}
 
 
 def diff_range(old_vals, new_vals, key_column):
-    ho, hn = header_index(old_vals, key_column), header_index(new_vals, key_column)
+    # Sarlavha qatori kalit ustuni nomi bo'yicha; nom faqat bir tomonda bo'lsa (sarlavha
+    # tahrirlangan) ikkinchi tomon ham o'sha qatordan olinadi
+    ko, kn = _key_row(old_vals, key_column), _key_row(new_vals, key_column)
+    ho = ko if ko is not None else (kn if kn is not None and kn < len(old_vals) else detect_header(old_vals))
+    hn = kn if kn is not None else (ko if ko is not None and ko < len(new_vals) else detect_header(new_vals))
     header_old = [str(x) for x in (old_vals[ho] if old_vals else [])]
     header_new = [str(x) for x in (new_vals[hn] if new_vals else [])]
     header = header_new or header_old
-    # Kalit ustuni HAR TOMONNING O'Z sarlavhasidan (audit K7): ustun qo'shilsa eski
-    # qatorlar boshqa ustun bilan kalitlanib, hammasi «o'chgan + yangi» bo'lib chiqardi
-    kidx_new = key_index(header, key_column)
-    kidx_old = key_index(header_old or header, key_column, warn=False)
     pairs = _col_pairs(header_old, header_new)
+    # Kalit ustuni HAR TOMONNING O'Z sarlavhasidan (audit K7): ustun qo'shilsa eski
+    # qatorlar boshqa ustun bilan kalitlanib, hammasi «o'chgan + yangi» bo'lib chiqardi.
+    # Kalit sarlavhasi faqat bir tomonda bo'lsa (qayta nomlangan/bo'shatilgan) — ikkinchi
+    # tomonga ustunlar xaritasi orqali o'tkaziladi, 1-ustunga (№) qaytmaydi.
+    kidx_new = _find_key(header, key_column)
+    kidx_old = _find_key(header_old or header, key_column)
+    if kidx_new is None and kidx_old is None:
+        kidx_new = kidx_old = key_index(header, key_column)
+    elif kidx_new is None:
+        kidx_new = _shift(pairs, kidx_old, to_new=True)
+    elif kidx_old is None:
+        kidx_old = _shift(pairs, kidx_new, to_new=False)
 
     def raqam(h, k):
         return k < len(h) and norm(h[k]) in RAQAM_USTUN
