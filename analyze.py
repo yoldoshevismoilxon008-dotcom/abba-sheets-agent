@@ -237,8 +237,6 @@ def fallback_report(diff, err):
     L.append(f"⚠️ AI tahlil ishlamadi ({trunc(err, 240)}). Claude CLI holatini (login/limit) "
              "tekshiring. Quruq raqamlar:")
     for sheet in diff["sheets"].values():
-        if sheet.get("prev_date"):
-            L.append(f"▸ {sheet['name']}: kechagi snapshot yo'q — {sheet['prev_date']} bilan solishtirildi")
         for rng, d in sheet["ranges"].items():
             st = d["stats"]
             if d.get("baseline"):
@@ -272,11 +270,17 @@ def is_quiet(diff):
         and not diff.get("fetch_errors")
         and not diff.get("missing_today")
         and not any(s.get("baseline") or s.get("removed_ranges") for s in diff["sheets"].values())
-        # Range darajasi: yangi oy tabi (new_range) yoki baseline range — 01.10 da
-        # «Oktyabr» tabi paydo bo'lgan kun «o'zgarish yo'q» deb chiqardi (P2)
-        and not any(r.get("baseline") or r.get("new_range")
-                    for s in diff["sheets"].values() for r in s.get("ranges", {}).values())
+        and not yangi_range_bor(diff)
     )
+
+
+def yangi_range_bor(diff):
+    """Range darajasida baseline yoki yangi oy tabi (new_range) bormi — 01.10 da «Oktyabr»
+    tabi paydo bo'lgan kun «o'zgarish yo'q» deb chiqardi (P2). is_quiet va report.json
+    (PDF badge/caption) bir xil qoidadan foydalanadi."""
+    return any(r.get("baseline") or r.get("new_range")
+               for s in (diff.get("sheets") or {}).values()
+               for r in (s.get("ranges") or {}).values())
 
 
 def watch_missing_note(diff):
@@ -351,10 +355,21 @@ def baseline_gap_note(diff):
             f"({', '.join(kunlar[:5])}{' …' if gap > 5 else ''}); o'zgarishlar shu davr uchun jamlangan."]
 
 
+def sheet_gap_note(diff):
+    """Kecha o'qilmagan sheet o'zining oxirgi snapshot'i bilan solishtirilgan (diff.prev_snapshot,
+    P2) — umumiy «kechagi holatga nisbatan» shu sheet uchun noto'g'ri bo'lmasin."""
+    L = []
+    for sheet in diff["sheets"].values():
+        if sheet.get("prev_date"):
+            L.append(f"ℹ️ {sheet['name']}: {_dm(str(diff.get('prev_date') or ''))} da o'qilmagan — "
+                     f"o'zgarishlar {_dm(sheet['prev_date'])} holatiga nisbatan.")
+    return L
+
+
 def deterministic_notes(diff):
     """AI matniga tayanmaydigan ogohlantirishlar — quiet, AI, fallback va /hisobot yo'llarida."""
     return (watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
-            + baseline_gap_note(diff))
+            + baseline_gap_note(diff) + sheet_gap_note(diff))
 
 
 def other_tabs_note(diff):
@@ -518,7 +533,8 @@ def build_report_json(day, diff_dict, report_text, insights=None, out_name="repo
         })
 
     t = diff_dict.get("totals", {})
-    quiet = not (t.get("added") or t.get("removed") or t.get("changed"))
+    quiet = not (t.get("added") or t.get("removed") or t.get("changed")) \
+        and not yangi_range_bor(diff_dict)
     data = {
         "date": day,
         "generated_at": time.strftime("%Y-%m-%d %H:%M"),

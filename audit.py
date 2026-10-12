@@ -272,7 +272,7 @@ def audit_sheet(snap, findings, today=None):
     month_tab = month_tabs[0] if month_tabs else None
     dup = fetchmod.month_tab_dup_note(tabs, today)
     if dup:
-        findings.append((name, month_tab, WARN, dup.capitalize(), "oy-tab-dublikat"))
+        findings.append((name, month_tab, WARN, dup[:1].upper() + dup[1:], "oy-tab-dublikat"))
 
     main_names = None
     if main_tab is None:

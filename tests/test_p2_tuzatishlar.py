@@ -128,6 +128,22 @@ def test_snapshot_yolida_sarlavha_izohi_notes_ga_tushadi():
     assert not any("«Undirildi»" in n for n in notes)   # sarlavha qatori to'g'ri topildi
 
 
+def test_sarlavha_izohi_kpi_bloki_va_dashboardga_chiqadi():
+    izoh = "⚠️ «Undiruv Oktyabr(2026)» tabi sarlavhasida «Undirildi» ustuni topilmadi — qatorlar o'qilmadi"
+    view = {"tab": "Undiruv Oktyabr(2026)", "rows": [], "source": "live", "oy": "oktyabr",
+            "notes": [izoh], "prev": {"rows": [], "real": []}, "keyingi": None}
+    with _soxta(u, "korinish", lambda *a, **k: view):
+        s = u.summary("2026-10-05")
+        assert s["topilmadi"] and s["tab"] == "Undiruv Oktyabr(2026)" and s["notes"] == [izoh]
+        assert izoh in u.report_block("2026-10-05")                    # ilgari: "" (jim)
+        rows = dashboard.build_undiruv("2026-10-05", "2026-10-05 09:00")
+        assert rows and "sarlavhasi o'qilmadi" in rows[0][0] and any(izoh in r[0] for r in rows)
+    bosh = dict(view, notes=["ℹ️ boshqa izoh"])                          # oddiy bo'sh tab — o'zgarmagan
+    with _soxta(u, "korinish", lambda *a, **k: bosh):
+        assert u.summary("2026-10-05") is None
+        assert dashboard.build_undiruv("2026-10-05", "x") is None
+
+
 def _row(name, status="", qoldiq=500.0):
     return {"loyiha": name, "pm": "Ali", "pm_missing": False, "pm_col_present": True,
             "qoldiq": qoldiq, "qoldiq_raw": str(qoldiq), "undirildi": 0.0, "aktiv": 0.0,
@@ -205,15 +221,25 @@ def test_kpi_oy_tabi_variantida_ham_hisoblanadi():
     assert not [x for x in f if x[4] == "oy-tab-yoq"]
 
 
+class _Oktyabr(date):
+    """Devor soati — 2026-10-05 (test qaysi oyda ishga tushmasin, natija bir xil)."""
+    @classmethod
+    def today(cls):
+        return cls(2026, 10, 5)
+
+
 def test_audit_joriy_oy_snapshot_sanasidan():
     snap = _pm_snap(tab="Sentabr")
     f = []
     auditmod.audit_sheet(snap, f, date(2026, 9, 20))
     assert not [x for x in f if x[4] == "oy-tab-yoq"]
     # eski (sentyabr) snapshot qayta tekshirilsa devor soati (oktyabr) ishlatilmaydi
-    with _soxta(diffmod, "load_day", lambda d: ({"pm1": snap}, {})):
+    with _soxta(diffmod, "load_day", lambda d: ({"pm1": snap}, {})), _soxta(fm, "date", _Oktyabr):
         f, _src = auditmod.run_checks(from_snapshot="2026-09-20")
-    assert not [x for x in f if x[4] == "oy-tab-yoq"]
+        assert not [x for x in f if x[4] == "oy-tab-yoq"]
+        f = []
+        auditmod.audit_sheet(snap, f)                       # sana berilmasa — devor soati
+        assert [x for x in f if x[4] == "oy-tab-yoq"]
     f = []
     auditmod.audit_sheet(snap, f, OKT)
     assert [x for x in f if x[4] == "oy-tab-yoq"]
@@ -225,6 +251,7 @@ def test_audit_oy_tabi_dublikati_ogohlantiradi():
     auditmod.audit_sheet(snap, f, OKT)
     dup = [x for x in f if x[4] == "oy-tab-dublikat"]
     assert len(dup) == 1 and dup[0][2] == auditmod.WARN and dup[0][1] == "Oktyabr "
+    assert dup[0][3].startswith("Joriy oyga 2 tab bor — «Oktyabr » o'qildi")   # tab nomi harfi saqlanadi
     assert "oy-tab-dublikat" in auditmod.KEY_LABELS
 
 
@@ -244,6 +271,13 @@ def test_bir_foiz_stavka_qoida_oraligi_va_son():
 
     r = _kpi(18)
     assert r[2] == "qoida yo'q (n=18)" and r[4] == "—" and r[6] == "—" and r[8] == "—"
+    st = {"tab": "Oktyabr", "aktiv": 10, "ideal": 100.0, "fakt": 89.96, "delay": 0.0}
+    with _soxta(diffmod, "load_day", lambda d: ({"pm1": _pm_snap()}, {})), \
+            _soxta(auditmod, "run_checks", lambda from_snapshot=None: ([], "x")), \
+            _soxta(dashboard, "build_undiruv", lambda d, n: None), \
+            _soxta(dashboard, "sheet_stats", lambda s: st):
+        tabs = dashboard.build("2026-10-05")
+    assert tabs["umumiy"][1][4] == 89.96 and tabs["trend"][0][5] == 89.96   # rang qoidasi <90 — sariq
     r = _kpi(10)
     assert r[2] == 200_000 and isinstance(r[2], int)          # matn emas — #,##0 formati ishlaydi
     assert r[8] == round(25 * 200_000 + 10 * 200_000 + 5_000_000)
@@ -277,6 +311,33 @@ def test_yangi_oy_tabi_kuni_ozgarish_yoq_emas():
     assert analyze.is_quiet(_diff())
     assert not analyze.is_quiet(_diff(baseline=True, new_range=True))   # 01.10: «Oktyabr» paydo bo'ldi
     assert not analyze.is_quiet(_diff(baseline=True))
+    # report.json (PDF badge / caption) ham xuddi shu qoida bilan
+    for d, kutilgan in ((_diff(), True), (_diff(baseline=True, new_range=True), False)):
+        with tempfile.TemporaryDirectory() as td:
+            with _soxta(analyze, "SNAPSHOTS", Path(td)), _soxta(analyze, "_day_stats", lambda day: {}), \
+                    _soxta(auditmod, "run_checks", lambda from_snapshot=None: ([], "")), \
+                    _soxta(u, "summary", lambda day: None):
+                data = analyze.build_report_json("2026-10-05", d, "matn", insights=[])
+        assert data["totals"]["quiet"] is kutilgan
+
+
+def test_jim_tab_va_yangi_oy_tabi_yil_suffiksli_nomda_ham():
+    """P2 «Oktyabr (2026)» ni kuzatadi (aniq «Oktyabr» yo'q kuni) — PR #5 ning jimlik ⚠️ si
+    va «yangi oy tabi» yozuvi ham shu nomni tanisin."""
+    import json
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for tab in ("Oktyabr (2026)", "Oktabr(2026)", "Oktyabr"):
+            snap = _pm_snap(tab=tab)
+            for d in ("2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"):
+                (root / d).mkdir(exist_ok=True)
+                (root / d / "pm1.json").write_text(json.dumps(snap), encoding="utf-8")
+            st = diffmod.stale_info("pm1", snap, snap["watch_ranges"], "2026-10-09",
+                                    snapshots=root, dam=set())
+            assert [x["tab"] for x in st] == [tab] and st[0]["kun"] >= diffmod.STALE_DAYS, (tab, st)
+            r = {}
+            diffmod.mark_watch_new(r, fm.tab_range(tab), {"watch_ranges": ["x"]}, "2026-10-01")
+            assert r == {"watch_new": True, "watch_new_month": True}, tab
 
 
 def _yoz_snap(root, day, snap):
@@ -307,7 +368,9 @@ def test_diff_bir_sheet_kecha_oqilmasa_oxirgi_snapshot_bilan():
     assert not e.get("baseline") and e["prev_date"] == "2026-10-03"     # ilgari baseline edi
     assert res["totals"]["changed"] == 1                                 # Gamma 5 → 7 yo'qolmadi
     assert "prev_date" not in res["sheets"]["pm1"]
-    assert "2026-10-03 bilan solishtirildi" in analyze.fallback_report(res, "x")
+    izoh = "ℹ️ Ali PM: 04.10 da o'qilmagan — o'zgarishlar 03.10 holatiga nisbatan."
+    assert analyze.sheet_gap_note(res) == [izoh]
+    assert izoh in analyze.deterministic_notes(res)          # PDF/caption/fallback — bitta manba
 
 
 def test_diff_dublikat_izohi_hisobotga_tushadi():
@@ -409,6 +472,28 @@ def test_boot_catchup_pipeline_keyin_pm_push():
             assert tartib == ["daily", "pm"]
             marker.write_text("2026-10-05", encoding="utf-8")       # pipeline bugun bo'lgan
             tartib.clear()
+            sv.boot_catchup()()
+            assert tartib == ["pm"]
+        # marker yo'q (birinchi deploy kuni / restart send'dan keyin), lekin run.sh log'ida
+        # hisobot ketgani bor — pipeline QAYTA ishga tushmaydi (hisobot ikki marta ketmasin)
+        marker.unlink()
+        logs = Path(td) / "logs"
+        logs.mkdir()
+        tartib.clear()
+        with _soxta(sv, "DATA", Path(td)), _soxta(sv, "DAILY_MARKER", marker), \
+                _soxta(sv, "_hozir", lambda: _tk(9, 40)), \
+                _soxta(sv, "daily_job", lambda: tartib.append("daily")), \
+                _soxta(sv, "pm_push_job", lambda: tartib.append("pm")):
+            (logs / "2026-10-05.log").write_text("[fetch] ...\n[send] yuborildi: 1/1\n", encoding="utf-8")
+            sv.boot_catchup()()
+            assert tartib == ["daily", "pm"]                     # faqat alert/matn — hisobot emas
+            tartib.clear()
+            (logs / "2026-10-05.log").write_text("[send] PDF hisobot yuborildi\n", encoding="utf-8")
+            sv.boot_catchup()()
+            assert tartib == ["pm"]
+            tartib.clear()
+            (logs / "2026-10-05.log").write_text("===== tugadi: 2026-10-05 09:12:00 =====\n",
+                                                 encoding="utf-8")
             sv.boot_catchup()()
             assert tartib == ["pm"]
         with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(8, 30)):

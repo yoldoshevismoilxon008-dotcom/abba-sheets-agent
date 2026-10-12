@@ -222,9 +222,11 @@ def stale_info(sid, snap, watch, today, snapshots=None, dam=None):
         return []
     snapshots = snapshots or SNAPSHOTS
     dam = dam_kunlari() if dam is None else set(dam)
+    from fetch import month_tab_of     # P2: oy tabi variantlari («Oktyabr (2026)») ham
+
     d_today = date.fromisoformat(today)
-    spell = month_spellings(current_month_name(d_today))
-    targets = [r for r in watch if norm(tab_of_range(r)) in spell]
+    cur = current_month_name(d_today)
+    targets = [r for r in watch if month_tab_of(tab_of_range(r)) == cur]
     if not targets or not snapshots.is_dir():
         return []
     month_start = d_today.replace(day=1).isoformat()
@@ -282,9 +284,11 @@ def mark_watch_new(r, rng, old_snap, today):
     """Kecha ham bor edi, lekin kuzatilmagan (oy almashuvi) — «62 → 62 qator» jim o'tmasin."""
     ow = (old_snap or {}).get("watch_ranges")
     if ow and rng not in ow:
+        from fetch import month_tab_of     # P2: oy tabi variantlari («Oktyabr (2026)») ham
+
         r["watch_new"] = True
-        r["watch_new_month"] = norm(tab_of_range(rng)) in month_spellings(
-            current_month_name(date.fromisoformat(today)))
+        r["watch_new_month"] = month_tab_of(tab_of_range(rng)) == current_month_name(
+            date.fromisoformat(today))
 
 
 def baseline_range(vals):

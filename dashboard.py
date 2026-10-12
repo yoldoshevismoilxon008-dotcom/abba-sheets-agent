@@ -104,10 +104,12 @@ def build(day):
             umumiy.append([name, "—", "—", "—", "—", "—", crit, now])
             continue
         pct = st["fakt"] / st["ideal"] * 100 if st["ideal"] else 0.0
+        # Bajarilish % — 2 xona: sheet'dagi rang qoidasi (≥90 yashil) PDF bilan bir xil
+        # qiymatga qarasin (1 xonada 89,96 → 90,0 yashil bo'lardi, PDF'da sariq) (P2)
         umumiy.append([name, st["aktiv"], num(st["ideal"]), num(st["fakt"]),
-                       num(pct), num(st["delay"]), crit, now])
+                       num(pct, 2), num(st["delay"]), crit, now])
         trend_rows.append([day, name, st["aktiv"], num(st["ideal"]), num(st["fakt"]),
-                           num(pct), num(st["delay"]), crit])
+                           num(pct, 2), num(st["delay"]), crit])
         rate = one_pct_rate(st["aktiv"])
         delay_pct = (st["delay"] * 3.33 / st["aktiv"]) if st["aktiv"] else 0.0
         if rate is None:
@@ -174,7 +176,14 @@ def build_undiruv(day, now):
         out.append(["Yangilangan", now, "", "", "", "", ""])
         return out
     if not rows:
-        return None
+        sx = undiruvmod.sarlavha_izohlari(view.get("notes"))
+        if not sx:
+            return None
+        # Tab bor, sarlavha o'qilmadi — kechagi jadval jim qolib ketmasin (yuqoridagi kabi)
+        out = [[f"UNDIRUV — ⚠️ «{tab}» sarlavhasi o'qilmadi", "", "", "", "", "", ""]]
+        out += [[n, "", "", "", "", "", ""] for n in undiruvmod.izoh_satrlari(view.get("notes") or [])]
+        out.append(["Yangilangan", now, "", "", "", "", ""])
+        return out
     today = date.fromisoformat(day)
 
     def status_label(r):

@@ -15,6 +15,7 @@ Kunlik pipeline'dan keyin hisobotlar repo'ga push (push_reports.py, env bo'lsa).
 """
 import base64
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -93,6 +94,10 @@ DAILY_AT, PM_PUSH_AT = (9, 0), (9, 30)
 CATCHUP_GRACE_H = 3
 PM_WAIT_SEC = 50 * 60
 DAILY_MARKER = DATA / "daily_last_run.txt"
+# run.sh log'idagi «hisobot ketdi / pipeline tugadi» belgilari — marker yo'q bo'lsa ham
+# (birinchi deploy kuni eski kod yuborgan, yoki restart send'dan keyin marker'dan oldin)
+# bugungi hisobot qayta yuborilmasin (review: catch-up ikki marta yuborardi)
+_DAILY_DONE_RE = re.compile(r"\[send\] PDF hisobot yuborildi|===== tugadi")
 _PIPELINE_LOCK = threading.Lock()
 _PM_LOCK = threading.Lock()
 
@@ -133,6 +138,18 @@ def catchup_kerak(hozir, at, marker_kun=""):
         and marker_kun != hozir.date().isoformat()
 
 
+def bugun_bajarilganmi(kun, marker_kun=""):
+    """Bugungi pipeline hisobotni yuborib bo'lganmi: marker YOKI run.sh log'ida
+    PDF yuborilgani / pipeline tugagani (DATA/logs/<kun>.log)."""
+    if marker_kun == kun:
+        return True
+    try:
+        return bool(_DAILY_DONE_RE.search(
+            (DATA / "logs" / f"{kun}.log").read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return False
+
+
 def boot_catchup():
     """Boot: bugungi pipeline / PM push restart sababli o'tib ketgan bo'lsa — bajaradigan
     funksiya (yoki None). PM push «bugun yuborilgan»ni o'zi tekshiradi (pm_push state)."""
@@ -141,7 +158,8 @@ def boot_catchup():
         marker = DAILY_MARKER.read_text(encoding="utf-8").strip()
     except Exception:
         marker = ""
-    daily = catchup_kerak(hozir, DAILY_AT, marker)
+    daily = catchup_kerak(hozir, DAILY_AT, marker) \
+        and not bugun_bajarilganmi(hozir.date().isoformat(), marker)
     pm = catchup_kerak(hozir, PM_PUSH_AT)
     if not (daily or pm):
         return None

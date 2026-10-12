@@ -643,8 +643,15 @@ def header_row(vals, scan=6):
 
 # parse_rows sarlavhada «nomi»/«undirildi» ustunini topa olmagan tablar — egaga izoh.
 # Ilgari [] jim qaytardi: Undiruv bloki, PM push va dashboard izsiz yo'qolardi (P2).
-# consume_tab_note() _TAB_NOTE bilan birga qaytaradi.
+# consume_tab_note() _TAB_NOTE bilan birga qaytaradi; summary()/dashboard qatorsiz tabda
+# shu izohni (SARLAVHA_BELGI bo'yicha) ko'rsatadi.
 _SARLAVHA_IZOH = []
+SARLAVHA_BELGI = "tabi sarlavhasida"
+
+
+def sarlavha_izohlari(notes):
+    """notes ichidan sarlavha topilmagani haqidagi izohlar (qatorsiz tab sababi)."""
+    return [n for n in (notes or []) if SARLAVHA_BELGI in n]
 
 
 def parse_rows(vals, today, ref=None, tab=""):
@@ -670,7 +677,7 @@ def parse_rows(vals, today, ref=None, tab=""):
         if vals:
             yoq = " va ".join(n for n, c in (("«Ishlar nomi»", c_name), ("«Undirildi»", c_paid))
                               if c is None)
-            note = (f"⚠️ «{tab or 'Undiruv'}» tabi sarlavhasida {yoq} ustuni topilmadi — "
+            note = (f"⚠️ «{tab or 'Undiruv'}» {SARLAVHA_BELGI} {yoq} ustuni topilmadi — "
                     f"qatorlar o'qilmadi (blok bo'sh). Sheet sarlavhasini tekshiring.")
             log(note)
             _SARLAVHA_IZOH.append(note)
@@ -1437,6 +1444,10 @@ def summary(day, today=None, prefer_live=True):
         return {"topilmadi": True, "oy": v["oy"], "tab": None, "source": source, "day": day,
                 "notes": list(v.get("notes") or [])}
     if not rows:
+        if sarlavha_izohlari(v.get("notes")):
+            # Tab bor, lekin sarlavha o'qilmadi — 09:00 hisobotida jim bo'sh qolmasin
+            return {"topilmadi": True, "oy": v["oy"], "tab": tab, "source": source, "day": day,
+                    "notes": list(v.get("notes") or [])}
         return None
     t = totals(rows)
 
