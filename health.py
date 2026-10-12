@@ -74,8 +74,24 @@ def scheduler_status():
 
 
 def _mark(ok, note):
-    s = "✓" if ok else "✗"
+    """ok: True → ✓, False → ✗, yoki tayyor belgi satri ('⏳', '?')."""
+    s = ok if isinstance(ok, str) else ("✓" if ok else "✗")
     return f"{s} ({note})" if note else s
+
+
+def tg_kunlik_status(now=None):
+    """Mac'dagi TG kunlik monitoring zanjiri (AUDIT.md P0-2). Avval «PDF ✓» faqat
+    Railway Chrome'ini tekshirardi va Mac 6 kun ishlamaganda ham yashil turardi.
+    Sozlanmagan bo'lsa (REPORTS_REPO/GH_TOKEN_REPORTS yo'q) — None: komponent chiqmaydi."""
+    import tg_kunlik
+
+    today = (now or datetime.now()).date()
+    h, err = tg_kunlik.tekshir(today)
+    if err:
+        return "?", f"tekshirib bo'lmadi: {err[:40]}"
+    if h is None:
+        return None
+    return tg_kunlik.health_part(today, h)
 
 
 def health_line(now=None):
@@ -83,9 +99,14 @@ def health_line(now=None):
     for name, fn in (("bot listener", lambda: listener_status(now)),
                      ("scheduler", scheduler_status),
                      ("userbot", userbot_status),
-                     ("PDF", pdf_status)):
+                     # Railway'ning o'z hisobot PDF'i uchun Chrome (Mac PDF'i emas — u TG-kunlik'da)
+                     ("PDF-render", pdf_status),
+                     ("TG-kunlik", lambda: tg_kunlik_status(now))):
         try:
-            ok, note = fn()
+            res = fn()
+            if res is None:
+                continue
+            ok, note = res
         except Exception as e:                   # noqa: BLE001
             ok, note = False, f"tekshirilmadi ({type(e).__name__})"
         parts.append(f"{name} {_mark(ok, note)}")
