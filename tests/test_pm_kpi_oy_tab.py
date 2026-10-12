@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import analyze as an          # noqa: E402
 import audit                  # noqa: E402
 import bot_listener as bl     # noqa: E402
+import dashboard             # noqa: E402
 import diff as dmod           # noqa: E402
 import fetch as fmod          # noqa: E402
 from fetch import tab_range   # noqa: E402
@@ -86,11 +87,11 @@ def test_key_column_yillik_tabga_boglanadi():
 
 # ------------------------------------------------------- jimlik nazorati va oy almashuvi
 
-HDR = ["Proekt nomi", "Proekt bali"]
+HDR = ["Proekt nomi", "Kpi ideal bali", "Proekt bali", "Kechga qolgan kunlar"]
 
 
 def _vals(ball):
-    return [HDR, ["Kanzec", str(ball)], ["Mix Mobile", "43,0"]]
+    return [HDR, ["Kanzec", "41,2", str(ball), "2"], ["Mix Mobile", "50,0", "43,0", "0"]]
 
 
 def _yoz(root, day, tabs, watch):
@@ -101,7 +102,18 @@ def _yoz(root, day, tabs, watch):
             "watch_ranges": [tab_range(t) for t in watch],
             "ranges": {tab_range(t): {"values": v} for t, v in tabs.items()}}
     (d / "zub.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    (d / "_meta.json").write_text(json.dumps({"date": day, "ok": 1, "errors": {}}), encoding="utf-8")
     return snap
+
+
+def _diff(root, day):
+    asl = dmod.SNAPSHOTS, sys.argv, dmod.dam_kunlari
+    dmod.SNAPSHOTS, sys.argv, dmod.dam_kunlari = Path(root), ["diff.py", "--date", day], lambda: set()
+    try:
+        assert dmod.main() == 0
+    finally:
+        dmod.SNAPSHOTS, sys.argv, dmod.dam_kunlari = asl
+    return json.loads((Path(root) / day / "diff.json").read_text(encoding="utf-8"))
 
 
 def test_jimlik_yillik_tabni_taniydi():
@@ -123,6 +135,53 @@ def test_otish_kuni_yangi_oy_tabi_deb_elon_qilinadi():
     assert r == {"watch_new": True, "watch_new_month": True}, r
 
 
+def test_statistika_yillik_tabdan_olinadi():
+    """Review: PDF PM kartalari, caption %, dashboard va Q&A agregati yilsiz nomni kutib
+    yangi tabni tashlab yuborardi (_day_stats → {}). Eski snapshot'lar ham ishlashi kerak."""
+    root = tempfile.mkdtemp(prefix="pm-oy-")
+    asl = dmod.SNAPSHOTS
+    try:
+        dmod.SNAPSHOTS = Path(root)
+        yangi = _yoz(root, "2026-10-13", {"Oktyabr (2026) ": _vals("29,0"), "Oktyabr": _vals("1,0")},
+                     ["Oktyabr (2026) "])
+        eski = _yoz(root, "2026-10-12", {"Oktyabr": _vals("29,0")}, ["Oktyabr"])
+        for snap in (yangi, eski):
+            assert dashboard.sheet_stats(snap)["fakt"] == 72.0, snap["watch_ranges"]
+            assert bl.month_aggregate(snap)[1:] == (91.2, 72.0)
+        st = an._day_stats("2026-10-13")["Zubair PM KPI"]
+        assert st["pct"] == 78.9 and st["aktiv"] == 2, st
+        assert an._day_stats("2026-10-12")["Zubair PM KPI"]["pct"] == 78.9
+    finally:
+        dmod.SNAPSHOTS = asl
+        shutil.rmtree(root)
+
+
+def test_oy_ortasida_paydo_bolgan_tab_elon_qilinadi():
+    root = tempfile.mkdtemp(prefix="pm-oy-")
+    try:
+        _yoz(root, "2026-10-14", {"Oktyabr": _vals("29,0")}, [])
+        _yoz(root, "2026-10-15", {"Oktyabr": _vals("29,0"), "Oktyabr (2026)": _vals("30,0")}, ["Oktyabr (2026)"])
+        notes = an.deterministic_notes(_diff(root, "2026-10-15"))
+        assert "ℹ️ Zubair PM KPI: «Oktyabr (2026)» tabi paydo bo'ldi va kuzatuvga olindi (2 qator) — " \
+               "o'zgarishlar ertadan ko'rinadi." in notes, notes
+    finally:
+        shutil.rmtree(root)
+
+
+def test_bosh_watch_hamma_tabni_diff_qilmaydi():
+    """Kuzatiladigan tab topilmagan kun (watch_ranges=[]) — hamma tab diff'ga tushmasin, yilsiz
+    «Oktyabr» jimlik ⚠️ bermasin; faqat «topilmadi» ⚠️ qoladi."""
+    root = tempfile.mkdtemp(prefix="pm-oy-")
+    try:
+        for i in range(1, 9):
+            _yoz(root, f"2026-10-{i:02d}", {"Oktyabr": _vals("29,0"), "Sentyabr": _vals(f"{i},0")}, [])
+        d = _diff(root, "2026-10-08")
+        assert d["sheets"]["zub"]["ranges"] == {}, d["sheets"]["zub"]["ranges"].keys()
+        assert not any("o'zgarmagan" in n for n in an.deterministic_notes(d))
+    finally:
+        shutil.rmtree(root)
+
+
 # ------------------------------------------------------- audit va Q&A
 
 def test_audit_yillik_tabni_tekshiradi():
@@ -137,7 +196,22 @@ def test_qa_rasmiy_oy_tabini_yuklaydi():
     tabs, _ = bl.tabs_for_question(ZUBAIR, "Zubairning loyihalari qanday?", today=OKT12)
     assert "Oktyabr (2026) " in tabs and "Oktyabr" not in tabs, tabs
     tabs, _ = bl.tabs_for_question(ZUBAIR, "sentyabr kpi ballari", today=OKT12)
+    assert "Sentyabr (2026)" in tabs and "Sentyabr" not in tabs, tabs
+    # guruh prefiksi («managerlar … kpi») mos kelgan yo'l — `other` qo'shilmaydi, rasmiy tab baribir bor
+    tabs, _ = bl.tabs_for_question(ZUBAIR, "managerlar sentyabr kpi", today=OKT12)
     assert "Sentyabr (2026)" in tabs, tabs
+    tabs, _ = bl.tabs_for_question(ABDUFATTOH, "managerlar avgust kpi", today=OKT12)
+    assert "Avgust (2026)" in tabs, tabs
+    tabs, _ = bl.tabs_for_question(ZUBAIR, "oktyabr ballari", today=OKT12)
+    assert "Oktyabr (2026) " in tabs and "Oktyabr" not in tabs, tabs
+
+
+def test_qa_rasmiy_tab_yoq_bolsa_izoh_beradi():
+    tabs, notes = bl.tabs_for_question(ISLOM, "Islomning oktyabr ballari", today=OKT12)
+    assert "Oktyabr" in tabs and any("«Oktyabr (2026)» tabi yo'q" in n and "rasmiy" in n for n in notes), notes
+    tabs, notes = bl.tabs_for_question(ZUBAIR, "oktyabr arxiv ballari", today=OKT12)
+    assert "Oktyabr" in tabs, tabs                                     # «arxiv» so'ralsa yilsiz ham ochiq
+    assert bl.savol_oyi("dekabr", date(2027, 1, 5)) == date(2026, 12, 1)
 
 
 # ---------------------------------------------------------------- skript rejimi

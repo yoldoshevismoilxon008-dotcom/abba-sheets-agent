@@ -46,7 +46,7 @@ def sheet_stats(snap):
     """Snapshot'dagi joriy oy watch tabidan PM statistikasi."""
     for rng in snap.get("watch_ranges", []):
         tab = fetchmod.tab_of_range(rng)
-        if fetchmod.norm(tab) not in fetchmod.MONTHS:
+        if not fetchmod.is_month_watch_tab(tab):         # «Oktyabr» yoki «Oktyabr (2026)»
             continue
         vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
         header, rows = auditmod.data_rows(vals)

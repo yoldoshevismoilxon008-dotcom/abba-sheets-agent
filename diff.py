@@ -310,7 +310,9 @@ def main():
         all_ranges = snap.get("ranges", {})
         # Kunlik diff faqat watch range'lar bo'yicha (Main + joriy oy) — shovqin bo'lmasin.
         # Eski (watch_ranges'siz) snapshotlarda hammasi olinadi.
-        watch = [r for r in (snap.get("watch_ranges") or all_ranges.keys()) if r in all_ranges]
+        # Bo'sh ro'yxat — «hech narsa topilmadi» (watch_missing ⚠️), hamma tab EMAS
+        watch = [r for r in (snap["watch_ranges"] if "watch_ranges" in snap else all_ranges.keys())
+                 if r in all_ranges]
         for rng in watch:
             vals = all_ranges[rng].get("values", [])
             old_rng = (old_snap or {}).get("ranges", {}).get(rng)
@@ -334,7 +336,8 @@ def main():
         if old_snap is not None:
             # Faqat sheet'dan chindan yo'qolgan watch range'lar (oy almashishi emas)
             old_watch = [
-                r for r in (old_snap.get("watch_ranges") or old_snap.get("ranges", {}).keys())
+                r for r in (old_snap["watch_ranges"] if "watch_ranges" in old_snap
+                            else old_snap.get("ranges", {}).keys())
                 if r in old_snap.get("ranges", {})
             ]
             gone = [r for r in old_watch if r not in all_ranges]

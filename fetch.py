@@ -233,6 +233,17 @@ def expected_pm_month_tab(today=None):
     return f"{month} ({today.year})" if pm_qatiy(today) else month
 
 
+def is_month_watch_tab(title):
+    """Sanasiz: kuzatuvdagi tab PM KPI oy tabimi — yilsiz «Oktyabr» (2026-09 gacha) yoki
+    «Oktyabr (2026)». Statistika (PDF kartalari, dashboard, Q&A agregati) eski va yangi
+    snapshot'larda bir xil ishlashi uchun."""
+    n = norm(title)
+    if n in MONTH_ALIASES:
+        return True
+    m = _PM_YILLIK_RE.match(n)
+    return bool(m and m.group(1) in MONTH_ALIASES)
+
+
 def is_pm_month_tab(title, today=None):
     """Tab joriy oyning PM KPI tabimi (diff jimlik nazorati uchun): aynan oy nomi
     yoki «<oy> (<joriy yil>)» — kuzatuvdagi qaysi biri bo'lsa ham tanilsin."""
