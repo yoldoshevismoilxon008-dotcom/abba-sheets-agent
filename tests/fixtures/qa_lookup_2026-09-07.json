@@ -43,12 +43,13 @@
    "tabs": [
     "Loyihalarning ishlash muddati",
     "Avgust",
-    "Sentyabr"
+    "Sentyabr",
+    "Sentyabr (2026)"
    ],
    "excluded_tabs": [],
    "watch_ranges": [
     "'Loyihalarning ishlash muddati'!A1:BZ1000",
-    "'Sentyabr'!A1:BZ1000"
+    "'Sentyabr (2026)'!A1:BZ1000"
    ],
    "fetched_at": "2026-09-07 09:00:00",
    "ranges": {
@@ -113,6 +114,31 @@
        "1"
       ]
      ]
+    },
+    "'Sentyabr (2026)'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Proekt nomi",
+       "Ideal",
+       "Proekt bali",
+       "Kechga qolgan kun"
+      ],
+      [
+       "1",
+       "Alfa Market",
+       "10",
+       "9",
+       "0"
+      ],
+      [
+       "2",
+       "Beta Studio",
+       "10",
+       "9",
+       "0"
+      ]
+     ]
     }
    }
   },
@@ -122,12 +148,12 @@
    "pm_kpi": true,
    "tabs": [
     "Main",
-    "Sentyabr"
+    "Sentyabr (2026)"
    ],
    "excluded_tabs": [],
    "watch_ranges": [
     "'Main'!A1:BZ1000",
-    "'Sentyabr'!A1:BZ1000"
+    "'Sentyabr (2026)'!A1:BZ1000"
    ],
    "fetched_at": "2026-09-07 09:00:00",
    "ranges": {
@@ -141,7 +167,7 @@
       ]
      ]
     },
-    "'Sentyabr'!A1:BZ1000": {
+    "'Sentyabr (2026)'!A1:BZ1000": {
      "values": [
       [
        "№",

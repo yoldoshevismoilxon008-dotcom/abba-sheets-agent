@@ -189,55 +189,85 @@ def resolve_month_template(tpl, tab_titles, today=None):
     return [x[4] for x in scored]
 
 
-_YEAR_SUFFIX_RE = re.compile(r"\s*\(?\s*20\d{2}\s*\)?$")
+# PM KPI oy tabi (AUDIT.md P0-4): 2026-09 dan PM'lar «<Oy> (<yil>)» tabini to'ldiradi
+# («Oktyabr (2026) », «Sentyabr(2026)»), yilsiz «Oktyabr» esa 01.10 dan beri o'zgarmagan —
+# diff 40 kun «o'zgarish yo'q» degan. Ega qarori (2026-10-12): rasmiy tab «<Oy> (<yil>)».
+# Shu oydan boshlab yilsiz oy tabi PM KPI uchun kuzatilmaydi; undan oldingi oylar — eski qoida.
+PM_QATIY_DAN = date(2026, 9, 1)
+_PM_YILLIK_RE = re.compile(r"^(\w+)\s*\(\s*(20\d{2})\s*\)$")
 
 
-def month_tab_of(tab):
-    """PM oy tabi nomi → kanonik oy («Oktabr», «Oktyabr(2026)», «oktyabr 2026» →
-    «oktyabr»), oy tabi bo'lmasa None. dashboard/analyze/audit oy tabini shu bilan
-    taniydi — ilgari faqat aniq «oktyabr» yozilishi tanilardi (P2)."""
-    return MONTH_ALIASES.get(_YEAR_SUFFIX_RE.sub("", norm(tab)).strip())
-
-
-def pm_month_tabs(tab_titles, today=None):
-    """Joriy oy PM tablari, ENG MOSI birinchi — detect_watch_tabs, resolve_key_columns
-    va audit uchun YAGONA qoida. Ilgari faqat aniq «Oktyabr» topilardi: «Oktabr» yoki
-    «Oktyabr(2026)» kuzatilmay, PM dashboard va PDF'dan jimgina yo'qolardi (P2).
-      • imlo aliasi (MONTH_ALIASES) va yil suffiksi «(2026)» / « 2026»;
-      • boshqa yil suffiksli tab — arxiv, olinmaydi;
-      • TARTIB — eski xulq saqlanadi: aniq «oktyabr» yozilishi birinchi, keyin imlo
-        aliasi («Oktabr»), keyin joriy yil suffiksli tab — variant faqat aniq tab
-        yo'q bo'lsa kuzatiladi (mavjud sheet'larda kuzatilayotgan tab almashmaydi);
-        bir xil darajada tartibda OXIRGISI (eski konvensiya: bo'shliq bilan
-        farqlanuvchi dublikatda oxirgisi joriy yilniki). Bittadan ko'p bo'lsa —
-        month_tab_dup_note ogohlantiradi."""
+def pm_qatiy(today=None):
     today = today or date.today()
-    month, yr = current_month_name(today), str(today.year)
-    scored = []
-    for i, t in enumerate(tab_titles):
-        if month_tab_of(t) != month:
-            continue
-        years = _YEAR_RE.findall(norm(t))
-        if years and yr not in years:
-            continue
-        scored.append((bool(years), norm(t) != month, -i, t))
-    scored.sort()
-    return [x[3] for x in scored]
+    return date(today.year, today.month, 1) >= PM_QATIY_DAN
+
+
+def pm_yillik_tablar(tab_titles, month, year=None):
+    """«<oy> (<yil>)» shaklidagi tablar (imlo varianti va bo'shliq farqi qabul), yil
+    o'sish tartibida. «Managerlar oktyabr kpi (2026)», «Oktyabr (2026) nusxa» kirmaydi."""
+    spell = month_spellings(month)
+    out = []
+    for t in tab_titles:
+        m = _PM_YILLIK_RE.match(norm(t))
+        if m and m.group(1) in spell and (year is None or m.group(2) == str(year)):
+            out.append((m.group(2), t))
+    return [t for _y, t in sorted(out, key=lambda x: x[0])]
+
+
+def pm_month_tab(tab_titles, today=None):
+    """PM KPI joriy oy tabi yoki None. PM_QATIY_DAN dan: faqat «<Oy> (<joriy yil>)»;
+    undan oldin — aynan oy nomi. Bir nechta mos bo'lsa tartibda OXIRGISI."""
+    today = today or date.today()
+    month = current_month_name(today)
+    if pm_qatiy(today):
+        c = pm_yillik_tablar(tab_titles, month, today.year)
+    else:
+        c = [t for t in tab_titles if norm(t) == month]
+    return c[-1] if c else None
+
+
+def expected_pm_month_tab(today=None):
+    """Ogohlantirish matni uchun: 01.11.2026 → «Noyabr (2026)»."""
+    today = today or date.today()
+    month = current_month_name(today).capitalize()
+    return f"{month} ({today.year})" if pm_qatiy(today) else month
+
+
+def is_month_watch_tab(title):
+    """Sanasiz: kuzatuvdagi tab PM KPI oy tabimi — yilsiz «Oktyabr» (2026-09 gacha) yoki
+    «Oktyabr (2026)». Statistika (PDF kartalari, dashboard, Q&A agregati) eski va yangi
+    snapshot'larda bir xil ishlashi uchun."""
+    n = norm(title)
+    if n in MONTH_ALIASES:
+        return True
+    m = _PM_YILLIK_RE.match(n)
+    return bool(m and m.group(1) in MONTH_ALIASES)
+
+
+def is_pm_month_tab(title, today=None):
+    """Tab joriy oyning PM KPI tabimi (diff jimlik nazorati uchun): aynan oy nomi
+    yoki «<oy> (<joriy yil>)» — kuzatuvdagi qaysi biri bo'lsa ham tanilsin."""
+    today = today or date.today()
+    month = current_month_name(today)
+    return norm(title) in month_spellings(month) or bool(pm_yillik_tablar([title], month, today.year))
 
 
 def month_tab_dup_note(tab_titles, today=None):
-    """Joriy oyga >1 PM tab bo'lsa egaga izoh ("" — bitta yoki yo'q). Ilgari jim
-    oxirgisi olinardi (Zubair: ikki sentyabr tabi, 62,88% va 94,4%)."""
-    tabs = pm_month_tabs(tab_titles, today)
-    if len(tabs) < 2:
+    """Joriy oyga bittadan ko'p PM KPI tabi (pm_month_tab qoidasi bo'yicha) bo'lsa egaga
+    izoh, aks holda "". Ilgari jim tartibda oxirgisi olinardi (P2). 2026-09 dan faqat
+    «<Oy> (<yil>)» tablari sanaladi — yilsiz eski «Oktyabr» yonida turishi normal."""
+    today = today or date.today()
+    month = current_month_name(today)
+    c = (pm_yillik_tablar(tab_titles, month, today.year) if pm_qatiy(today)
+         else [t for t in tab_titles if norm(t) == month])
+    if len(c) < 2:
         return ""
-    return (f"joriy oyga {len(tabs)} tab bor — «{tabs[0]}» o'qildi; boshqalari e'tiborsiz: "
-            + ", ".join(f"«{t}»" for t in tabs[1:]) + " (nusxa bo'lsa o'chiring/nomini o'zgartiring)")
+    return (f"joriy oyga {len(c)} tab bor — «{c[-1]}» o'qildi; boshqalari e'tiborsiz: "
+            + ", ".join(f"«{t}»" for t in c[:-1]) + " (nusxa bo'lsa o'chiring/nomini o'zgartiring)")
 
 
 def detect_watch_tabs(tab_titles, today=None):
-    """Main + joriy oy tabini topadi (oy tabi — pm_month_tabs: imlo/yil suffiksi,
-    dublikatda tartibda OXIRGISI — u joriy yilniki).
+    """Main + joriy oy tabini (pm_month_tab) topadi.
     Main yo'q bo'lsa — vaqtinchalik manba sifatida "...ishlash muddati" tabi
     olinadi (deadline/muddat ma'lumotlari uchun); Main qaytsa avtomatik tiklanadi."""
     watch = []
@@ -248,9 +278,9 @@ def detect_watch_tabs(tab_titles, today=None):
         fb = next((t for t in tab_titles if "ishlash muddati" in norm(t)), None)
         if fb:
             watch.append(fb)
-    candidates = pm_month_tabs(tab_titles, today)
-    if candidates:
-        watch.append(candidates[0])
+    month_tab = pm_month_tab(tab_titles, today)
+    if month_tab:
+        watch.append(month_tab)
     return watch
 
 
@@ -263,7 +293,10 @@ def resolve_watch_tabs(watch_cfg, tab_titles, today=None):
     faqat ENG MOS bitta tabga bog'lanadi; topilmasa kutilgan nomi (expected_month_tab)
     ikkinchi ro'yxatga tushadi — hisobotda ⚠️ qatori shundan chiqadi."""
     if watch_cfg in (None, "auto"):
-        return detect_watch_tabs(tab_titles, today), []
+        # PM KPI oy tabi yo'q bo'lsa yilsiz tabga qaytilmaydi — ⚠️ qatori chiqadi
+        missing = ([expected_pm_month_tab(today)]
+                   if pm_qatiy(today) and not pm_month_tab(tab_titles, today) else [])
+        return detect_watch_tabs(tab_titles, today), missing
     resolved, missing = [], []
     for w in watch_cfg:
         hits = resolve_month_template(w, tab_titles, today)
@@ -282,8 +315,7 @@ def resolve_key_columns(tab_titles, key_cfg, today=None):
     skalyar) ni real range kalitlariga yoyadi: {range_key: kalit}."""
     if not isinstance(key_cfg, dict):
         return key_cfg or 1
-    month_tabs = pm_month_tabs(tab_titles, today)
-    cur_month_tab = month_tabs[0] if month_tabs else None
+    cur_month_tab = pm_month_tab(tab_titles, today)
     main_exists = any(norm(t) == "main" for t in tab_titles)
     fallback_tab = (
         None if main_exists

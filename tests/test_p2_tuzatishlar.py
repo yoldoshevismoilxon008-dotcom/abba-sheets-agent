@@ -3,7 +3,8 @@
   A  undiruv: money() vergul-minglik/manfiy/xato katak; sarlavhada bo'sh katak bo'lsa
      ham sarlavha topiladi, topilmasa egaga izoh; «Status bo'sh» konvensiya bo'lsa
      shovqin emas.
-  B  KPI hisobot: oy tabi imlo/yil suffiksi va dublikat; audit oyi snapshot sanasidan;
+  B  KPI hisobot: oy tabi dublikati ogohlantirishi (tanlash — main'dagi rasmiy «<Oy> (<yil>)»
+     qoidasi); audit oyi snapshot sanasidan;
      1% stavka qoida oralig'idan tashqarida «qoida yo'q» va son; rang yaxlitlanmagan
      %dan; yangi oy tabi kuni «o'zgarish yo'q» emas; diff har sheet'ning oxirgi
      snapshot'i bilan; Claude yiqilsa qayta urinish va diagnostika.
@@ -177,25 +178,20 @@ def test_status_bosh_konvensiya_bolsa_shovqin_emas():
 OKT = date(2026, 10, 5)
 
 
-def test_oy_tabi_imlo_yil_suffiksi_va_dublikat():
-    assert fm.month_tab_of("Oktabr") == "oktyabr" and fm.month_tab_of("Oktyabr(2026)") == "oktyabr"
-    assert fm.month_tab_of("oktyabr 2026") == "oktyabr" and fm.month_tab_of("Sentabr (2026)") == "sentyabr"
-    assert fm.month_tab_of("Undiruv oktabr(2026)") is None and fm.month_tab_of("Main") is None
-    # ilgari faqat aniq «Oktyabr» kuzatilardi — bular PM dashboarddan yo'qolardi
-    assert fm.detect_watch_tabs(["Main", "Sentyabr", "Oktabr"], OKT) == ["Main", "Oktabr"]
-    assert fm.detect_watch_tabs(["Main", "Oktyabr(2026)"], OKT) == ["Main", "Oktyabr(2026)"]
-    # boshqa yil arxivi olinmaydi; aniq yozilish birinchi (kuzatilayotgan tab almashmaydi),
-    # variantlar — faqat aniq tab yo'q bo'lsa
-    assert fm.pm_month_tabs(["Oktyabr(2025)", "Oktabr(2026)", "Oktabr", "Oktyabr"], OKT) == \
-        ["Oktyabr", "Oktabr", "Oktabr(2026)"]
-    assert fm.detect_watch_tabs(["Main", "Oktyabr", "Oktyabr (2026)"], OKT)[1] == "Oktyabr"
-    # eski konvensiya saqlanadi: bo'shliq bilan farqlanuvchi dublikatda OXIRGISI
-    assert fm.detect_watch_tabs(["Main", "Oktyabr", "Oktyabr "], OKT)[1] == "Oktyabr "
-    assert fm.month_tab_dup_note(["Main", "Oktyabr"], OKT) == ""
-    n = fm.month_tab_dup_note(["Oktyabr", "Oktyabr "], OKT)
-    assert n.startswith("joriy oyga 2 tab bor — «Oktyabr » o'qildi") and "«Oktyabr»" in n
-    kc = fm.resolve_key_columns(["Main", "Oktabr"], {"main": "Loyihalar", "month": "Proekt nomi"}, OKT)
-    assert kc[fm.tab_range("Oktabr")] == "Proekt nomi"
+def test_oy_tabi_dublikati_izohi():
+    """Oy tabini tanlash — main'dagi rasmiy qoida (fetch.pm_month_tab, #7: 2026-09 dan
+    «<Oy> (<yil>)»). P2: bir oyga bir nechta rasmiy tab bo'lsa jim oxirgisi olinmaydi."""
+    tabs = ["Main", "Oktyabr", "Oktyabr (2026)", "Oktabr(2026)"]
+    assert fm.pm_month_tab(tabs, OKT) == "Oktabr(2026)"
+    n = fm.month_tab_dup_note(tabs, OKT)
+    assert n.startswith("joriy oyga 2 tab bor — «Oktabr(2026)» o'qildi; boshqalari e'tiborsiz: "
+                        "«Oktyabr (2026)»"), n                 # tanlangan tab — pm_month_tab bilan bir xil
+    # yilsiz eski «Oktyabr» rasmiy tab yonida turishi normal — dublikat emas
+    assert fm.month_tab_dup_note(["Main", "Oktyabr", "Oktyabr (2026)"], OKT) == ""
+    assert fm.month_tab_dup_note(["Main", "Oktyabr (2025)", "Oktyabr (2026)"], OKT) == ""
+    # PM_QATIY_DAN dan oldingi oy — eski qoida (aniq nom), bo'shliq bilan farqlanuvchi nusxa
+    avg = date(2026, 8, 5)
+    assert fm.month_tab_dup_note(["Avgust", "Avgust "], avg).startswith("joriy oyga 2 tab bor — «Avgust »")
 
 
 KPI_HDR = ["№", "Proekt nomi", "Ideal", "Proekt bali", "Kechga qolgan kun"]
@@ -230,7 +226,7 @@ class _Oktyabr(date):
 
 
 def test_audit_joriy_oy_snapshot_sanasidan():
-    snap = _pm_snap(tab="Sentabr")
+    snap = _pm_snap(tab="Sentabr (2026)")
     f = []
     auditmod.audit_sheet(snap, f, date(2026, 9, 20))
     assert not [x for x in f if x[4] == "oy-tab-yoq"]
@@ -247,12 +243,13 @@ def test_audit_joriy_oy_snapshot_sanasidan():
 
 
 def test_audit_oy_tabi_dublikati_ogohlantiradi():
-    snap = _pm_snap(tab="Oktyabr ", tabs=["Main", "Oktyabr", "Oktyabr "])
+    snap = _pm_snap(tab="Oktabr(2026)", tabs=["Main", "Oktyabr", "Oktyabr (2026)", "Oktabr(2026)"])
     f = []
     auditmod.audit_sheet(snap, f, OKT)
     dup = [x for x in f if x[4] == "oy-tab-dublikat"]
-    assert len(dup) == 1 and dup[0][2] == auditmod.WARN and dup[0][1] == "Oktyabr "
-    assert dup[0][3].startswith("Joriy oyga 2 tab bor — «Oktyabr » o'qildi")   # tab nomi harfi saqlanadi
+    assert len(dup) == 1 and dup[0][2] == auditmod.WARN and dup[0][1] == "Oktabr(2026)"
+    assert dup[0][3].startswith("Joriy oyga 2 tab bor — «Oktabr(2026)» o'qildi")   # tab nomi harfi saqlanadi
+    assert not [x for x in f if x[4] == "oy-tab-yoq"]
     assert "oy-tab-dublikat" in auditmod.KEY_LABELS
 
 

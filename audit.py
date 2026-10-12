@@ -264,12 +264,10 @@ def audit_sheet(snap, findings, today=None):
     tabs = snap.get("tabs") or list(by_tab.keys())
 
     main_tab = next((t for t in tabs if fetchmod.norm(t) == "main"), None)
-    # Joriy oy SNAPSHOT sanasidan: eski snapshot qayta tekshirilsa devor soati boshqa oyni
-    # berib soxta «oy tabi topilmadi» CRIT chiqardi; oy tabi — fetch bilan yagona qoida
-    # (imlo/yil suffiksi; dublikatda ogohlantirish) (P2)
-    month = fetchmod.current_month_name(today)
-    month_tabs = fetchmod.pm_month_tabs(tabs, today)
-    month_tab = month_tabs[0] if month_tabs else None
+    # Joriy oy SNAPSHOT sanasidan (run_checks beradi): eski snapshot qayta tekshirilsa devor
+    # soati boshqa oyni berib soxta «oy tabi topilmadi» CRIT chiqardi (P2). Oy tabi — kunlik
+    # diff bilan YAGONA qoida: 2026-09 dan «<Oy> (<yil>)» (fetch.pm_month_tab).
+    month_tab = fetchmod.pm_month_tab(tabs, today)
     dup = fetchmod.month_tab_dup_note(tabs, today)
     if dup:
         findings.append((name, month_tab, WARN, dup[:1].upper() + dup[1:], "oy-tab-dublikat"))
@@ -282,7 +280,7 @@ def audit_sheet(snap, findings, today=None):
 
     month_names = None
     if month_tab is None:
-        findings.append((name, "—", CRIT, f"Joriy oy ({month.capitalize()}) tabi topilmadi", "oy-tab-yoq"))
+        findings.append((name, "—", CRIT, f"Joriy oy tabi «{fetchmod.expected_pm_month_tab(today)}» topilmadi", "oy-tab-yoq"))
     elif month_tab in by_tab:
         month_names = audit_month_tab(name, month_tab, ranges[by_tab[month_tab]].get("values", []), findings)
 

@@ -20,7 +20,7 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
-from fetch import CONFIG, current_month_name, month_spellings, norm, tab_of_range  # noqa: E402
+from fetch import CONFIG, is_pm_month_tab, norm, tab_of_range  # noqa: E402
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 
@@ -222,11 +222,8 @@ def stale_info(sid, snap, watch, today, snapshots=None, dam=None):
         return []
     snapshots = snapshots or SNAPSHOTS
     dam = dam_kunlari() if dam is None else set(dam)
-    from fetch import month_tab_of     # P2: oy tabi variantlari («Oktyabr (2026)») ham
-
     d_today = date.fromisoformat(today)
-    cur = current_month_name(d_today)
-    targets = [r for r in watch if month_tab_of(tab_of_range(r)) == cur]
+    targets = [r for r in watch if is_pm_month_tab(tab_of_range(r), d_today)]
     if not targets or not snapshots.is_dir():
         return []
     month_start = d_today.replace(day=1).isoformat()
@@ -284,11 +281,8 @@ def mark_watch_new(r, rng, old_snap, today):
     """Kecha ham bor edi, lekin kuzatilmagan (oy almashuvi) — «62 → 62 qator» jim o'tmasin."""
     ow = (old_snap or {}).get("watch_ranges")
     if ow and rng not in ow:
-        from fetch import month_tab_of     # P2: oy tabi variantlari («Oktyabr (2026)») ham
-
         r["watch_new"] = True
-        r["watch_new_month"] = month_tab_of(tab_of_range(rng)) == current_month_name(
-            date.fromisoformat(today))
+        r["watch_new_month"] = is_pm_month_tab(tab_of_range(rng), date.fromisoformat(today))
 
 
 def baseline_range(vals):
@@ -347,7 +341,9 @@ def main():
         all_ranges = snap.get("ranges", {})
         # Kunlik diff faqat watch range'lar bo'yicha (Main + joriy oy) — shovqin bo'lmasin.
         # Eski (watch_ranges'siz) snapshotlarda hammasi olinadi.
-        watch = [r for r in (snap.get("watch_ranges") or all_ranges.keys()) if r in all_ranges]
+        # Bo'sh ro'yxat — «hech narsa topilmadi» (watch_missing ⚠️), hamma tab EMAS
+        watch = [r for r in (snap["watch_ranges"] if "watch_ranges" in snap else all_ranges.keys())
+                 if r in all_ranges]
         for rng in watch:
             vals = all_ranges[rng].get("values", [])
             old_rng = (old_snap or {}).get("ranges", {}).get(rng)
@@ -371,7 +367,8 @@ def main():
         if old_snap is not None:
             # Faqat sheet'dan chindan yo'qolgan watch range'lar (oy almashishi emas)
             old_watch = [
-                r for r in (old_snap.get("watch_ranges") or old_snap.get("ranges", {}).keys())
+                r for r in (old_snap["watch_ranges"] if "watch_ranges" in old_snap
+                            else old_snap.get("ranges", {}).keys())
                 if r in old_snap.get("ranges", {})
             ]
             gone = [r for r in old_watch if r not in all_ranges]
