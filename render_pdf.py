@@ -237,6 +237,22 @@ def sparkline_points(trend, pm_full, w=300, h=92, pad=6):
     return " ".join(pts)
 
 
+WARN_MAX_LINES = 3      # eng yomon kunda ham (6 kritik + 8 muddati o'tgan) PDF 1 sahifa qolsin
+WARN_MAX_CHARS = 125    # bitta qator: PM, tab, sana, kun soni va o'zgargan tab nomi sig'adi
+
+
+def _warn_lines(warnings):
+    """⚠️/ℹ️ qatorlari PDF uchun: ko'pi bilan WARN_MAX_LINES ta, har biri qisqartirilgan —
+    bir sahifalik A4 joylashuvi buzilmasin. Ortgani «+N» qatori bilan."""
+    out = []
+    for w in warnings[:WARN_MAX_LINES]:
+        w = str(w)
+        out.append(w if len(w) <= WARN_MAX_CHARS else w[:WARN_MAX_CHARS - 1] + "…")
+    if len(warnings) > WARN_MAX_LINES:
+        out.append(f"+{len(warnings) - WARN_MAX_LINES} ta ogohlantirish — to'liq matn: Obsidian arxivi")
+    return out
+
+
 def build_html(data, theme=None, logo_uri=None):
     from jinja2 import Environment, FileSystemLoader
 
@@ -283,6 +299,8 @@ def build_html(data, theme=None, logo_uri=None):
         new_criticals=data.get("new_criticals", []),
         acknowledged=data.get("acknowledged", []),
         insights=data.get("insights", []),
+        warnings=_warn_lines(data.get("warnings") or []),
+        warn_bad=any(str(w).startswith("⚠️") for w in (data.get("warnings") or [])),
         undiruv=undiruv,
         date_human=human_date(data.get("date", "")),
         prev_date_human=human_date(data.get("prev_date") or "").split(" ")[0],
@@ -761,7 +779,8 @@ def validate_report_data(data):
             "report ma'lumoti bo'sh — analyze.py report.json yozmagan bo'lishi mumkin"
         )
     for key, typ in (("pms", list), ("trend", list), ("insights", list),
-                     ("new_criticals", list), ("totals", dict), ("undiruv", dict)):
+                     ("new_criticals", list), ("totals", dict), ("undiruv", dict),
+                     ("warnings", list)):
         if key in data and data[key] is not None and not isinstance(data[key], typ):
             raise ValueError(
                 f"report['{key}'] {typ.__name__} bo'lishi kerak, "

@@ -79,6 +79,7 @@
             box-shadow: {{ theme.card_shadow }}; border: {{ theme.card_border }}; margin-bottom: 4mm; }
   .bottom h3 { font-size: 11px; font-weight: 700; margin-bottom: 2mm; color: {{ theme.badge_bad }}; }
   .crit { font-size: 10.5px; color: {{ theme.kpi_red }}; line-height: 1.55; }
+  .crit.warnings { font-size: 9.5px; line-height: 1.45; margin-bottom: 1.5mm; white-space: nowrap; overflow: hidden; }
   .okline { font-size: 11px; color: {{ theme.kpi_green }}; font-weight: 600; }
   .ackline { font-size: 10px; color: {{ theme.muted }}; margin-top: 2mm; }
   .insights { margin-top: 2.5mm; padding-top: 2.5mm; border-top: 0.3mm solid {{ theme.bar_track }}; }
@@ -96,7 +97,8 @@
       <div class="sub muted">{{ prev_date_human }} holatiga nisbatan · {{ pms|length }} PM sheet{% if undiruv %} + SMM{% endif %} kuzatuvda</div>
     </div>
   </div>
-  {% if totals.quiet %}<div class="badge quiet">😴 O'zgarish yo'q</div>
+  {% if totals.quiet and warn_bad %}<div class="badge bad">⚠️ Kuzatuv ogohlantirishi</div>
+  {% elif totals.quiet %}<div class="badge quiet">😴 O'zgarish yo'q</div>
   {% elif new_criticals %}<div class="badge bad">🔴 {{ new_criticals|length }} yangi kritik</div>
   {% else %}<div class="badge ok">✅ Yangi kritik yo'q</div>{% endif %}
 </div>
@@ -234,6 +236,10 @@
 {% endif %}
 
 <div class="bottom">
+  {% if warnings %}
+  <h3>⚠️ Kuzatuv ogohlantirishlari</h3>
+  <div class="crit warnings">{% for w in warnings %}{{ w }}<br>{% endfor %}</div>
+  {% endif %}
   {% if new_criticals %}
   <h3>🔴 Yangi kritik topilmalar</h3>
   <div class="crit">{% for c in new_criticals %}• {{ c }}<br>{% endfor %}</div>

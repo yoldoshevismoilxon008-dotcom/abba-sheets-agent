@@ -590,12 +590,17 @@ def tab_month(t):
     return tab_month_split(t)[0]
 
 
-def project_lookup_tabs(tabs, q):
+def project_lookup_tabs(tabs, q, today=None):
     """Loyiha qidiruvida MAJBURIY qaraladigan undiruv tab'lari: joriy + oldingi oy.
 
     Carryover loyiha o'tgan oy tabida qolgan bo'lishi mumkin (Livardi avgustdan
     ko'chgan), joriy oy tabida esa hali paydo bo'lmagan bo'lishi ham mumkin —
     shuning uchun ikkalasi ham qaraladi.
+
+    Tab tanlash 💰 blok bilan AYNAN bir qoida (undiruv.rank_month_tabs + QATIY_DAN):
+    joriy yil suffiksi ustun, boshqa yil arxivi hech qachon, QATIY_DAN dan keyin yilsiz
+    tab ham yo'q. Aks holda 01.11 da «noyabr(2026)» hali ochilmagan kuni Q&A 2025 yilgi
+    «Undiruv noyabr» arxividan javob berardi (AUDIT.md P0-1).
 
     Chaqiruvchida watch-tab fallback'idan KEYIN qo'shiladi: aks holda bu ro'yxat
     tabs_for_question'ni "bo'sh emas" qilib, sheet'ning asosiy tab'larini
@@ -603,31 +608,28 @@ def project_lookup_tabs(tabs, q):
     """
     if not is_project_lookup(q):
         return []
-    cur_month = fetchmod.current_month_name()
-    prev_month = fetchmod.MONTHS[(fetchmod.MONTHS.index(cur_month) - 1) % 12]
+    import undiruv as undiruvmod
+    today = today or date.today()
     out = []
-    for prefix, pairs in month_tab_groups(tabs).items():
-        if "undiruv" not in prefix:
-            continue
-        for m in (cur_month, prev_month):
-            t = _month_tab_variant(pairs, m)
-            if t and t not in out:
-                out.append(t)
+    for k in (0, -1):                       # joriy oy, keyin oldingi oy (yil almashuvi bilan)
+        t, _y = undiruvmod.month_tab(tabs, undiruvmod.oy_ofset(today, k)[0], today)
+        if t and t not in out:
+            out.append(t)
     return out
 
 
-def _month_tab_variant(pairs, month):
-    """Bir oyning bir nechta varianti bo'lsa ("Undiruv sentabr" va
-    "Undiruv sentabr(2026)") — joriy yil suffiksli nusxa ustun; u yo'q bo'lsa
-    ro'yxatdagi so'nggisi. undiruv.find_tab bilan bir xil afzallik."""
-    cands = [t for m, t in pairs if m == month]
-    if not cands:
-        return None
-    yr = str(date.today().year)
-    for t in cands:
-        if yr in t:
-            return t
-    return cands[-1]
+def _undiruv_qatiy_pairs(pairs, today=None):
+    """«undiruv» oy guruhidan faqat 💰 blok qoidasi bo'yicha HAQIQIY tablar (har oyga
+    bittadan, undiruv.month_tab): 01.11 da 2025 yilgi «Undiruv noyabr» arxivi joriy oy
+    sifatida yuklanmasin (AUDIT.md P0-1). QATIY_DAN dan oldingi oylar arxivi qoladi."""
+    import undiruv as undiruvmod
+    titles = [t for _m, t in pairs]
+    keep = set()
+    for m in dict.fromkeys(m for m, _t in pairs):
+        t, _y = undiruvmod.month_tab(titles, m, today)
+        if t:
+            keep.add(t)
+    return [(m, t) for m, t in pairs if t in keep]
 
 
 def month_tab_groups(tabs):
@@ -641,16 +643,20 @@ def month_tab_groups(tabs):
     return groups
 
 
-def tabs_for_question(tabs, q, extra_tabs=None):
+def tabs_for_question(tabs, q, extra_tabs=None, today=None):
     """(tanlangan tab'lar, kontekst-ko'rsatmalar). Oy-guruhli sheet'larda
     (SMM: "Undiruv <oy>", "Hoji mini kpi <oy>") savolda guruh nomi bo'lsa
     so'ralgan oy(lar)ning BARCHA variantlari yuklanadi; PM KPI sheet'larda
-    (guruh prefiksi yo'q) avvalgi xatti-harakat to'liq saqlanadi."""
+    (guruh prefiksi yo'q) avvalgi xatti-harakat to'liq saqlanadi. Istisno — «undiruv»
+    guruhi: har oyga 💰 blok qoidasidagi BITTA tab (undiruv.month_tab, QATIY_DAN), yilsiz
+    2025 arxivi faqat savolda «arxiv»/«2025» aytilsa."""
     notes = []
-    chosen = list(fetchmod.detect_watch_tabs(tabs))
+    chosen = list(fetchmod.detect_watch_tabs(tabs, today))
     q_months = months_in_question(q)
     qn = _q_norm(q)
-    cur_month = fetchmod.current_month_name()
+    cur_month = fetchmod.current_month_name(today)
+    # «arxiv»/«2025» deb aniq so'ralsa — yilsiz Undiruv tablari ham ochiq (izoh bilan)
+    arxiv_sorov = "arxiv" in qn or "2025" in qn
 
     # 1) Oy-guruhlar: savolda guruh prefiksining biror so'zi (≥3 harf) bo'lsa,
     # o'sha guruhdan so'ralgan oylarning hamma varianti (oddiy + (Ball)) olinadi.
@@ -660,6 +666,9 @@ def tabs_for_question(tabs, q, extra_tabs=None):
         if not any(len(w) >= 3 and w in qn for w in prefix.split()):
             continue
         matched_prefix = True
+        undiruv_guruh = prefix == "undiruv"
+        if undiruv_guruh and not arxiv_sorov:
+            pairs = _undiruv_qatiy_pairs(pairs, today)
         avail = []
         for m, _t in pairs:
             if m not in avail:
@@ -669,11 +678,18 @@ def tabs_for_question(tabs, q, extra_tabs=None):
         if not q_months:
             # Oy aytilmagan: joriy oy, u bo'lmasa guruhning eng so'nggi oyi
             fb = cur_month if cur_month in avail else (avail[-1] if avail else None)
+            if undiruv_guruh and fb != cur_month:
+                # Tab tartibi emas, KALENDAR bo'yicha eng so'nggi oy (project_lookup_tabs bilan bir xil)
+                import undiruv as undiruvmod
+                kal = [undiruvmod.oy_ofset(today or date.today(), k)[0] for k in range(-1, -12, -1)]
+                fb = next((m for m in kal if m in avail), None)
             if fb:
                 want = [fb]
                 if fb != cur_month:
+                    kutilgan = (f" (kutilgan nom: «{fetchmod.expected_month_tab('Undiruv <oy>', today)}»;"
+                                " yilsiz tablar — arxiv)") if undiruv_guruh else ""
                     notes.append(
-                        f"«{prefix}» guruhida joriy oy ({cur_month}) tabi yo'q — eng "
+                        f"«{prefix}» guruhida joriy oy ({cur_month}) tabi yo'q{kutilgan} — eng "
                         f"so'nggi mavjud oy ({fb}) yuklandi; javob boshida shuni ayt."
                     )
         picked = [t for m, t in pairs if m in want]
@@ -686,6 +702,8 @@ def tabs_for_question(tabs, q, extra_tabs=None):
                 f"{MAX_MONTH_TABS} tasi yuklandi; javob boshida shuni ayt."
             )
             picked = picked[-MAX_MONTH_TABS:]
+        if undiruv_guruh and arxiv_sorov and picked:
+            notes.append("«undiruv»: yilsiz tablar — 2025-08…2026-07 arxivi; javobda buni ayt.")
         if missing:
             avail_h = ", ".join(avail)
             if picked:
@@ -886,8 +904,10 @@ def build_data(q, extra_sel=None, force_live=False):
             # ular ham bo'lmasa birinchi tab
             wt = s.get("watch_tabs")
             if isinstance(wt, list):
-                wanted = {fetchmod.norm(fetchmod.expand_month(w)) for w in wt}
-                sel_tabs = [t for t in tabs if fetchmod.norm(t) in wanted]
+                # Kunlik fetch bilan YAGONA qoida (yilsiz arxiv emas, imlo/yil aliasi bilan)
+                sel_tabs, wmiss = fetchmod.resolve_watch_tabs(wt, tabs)
+                notes += [f"«{m}» tabi hali yo'q — yilsiz arxiv tabidan joriy oy deb javob berma."
+                          for m in wmiss]
             sel_tabs = sel_tabs or fetchmod.detect_watch_tabs(tabs) or tabs[:1]
         # Loyiha qidiruvi — snapshot yo'lidagi bilan bir xil qoida (fallback'dan keyin)
         extra_proj = [t for t in project_lookup_tabs(tabs, q) if t not in sel_tabs]
@@ -1526,21 +1546,20 @@ def do_hisobot():
             sh, tabs = sheet_tabs(s)
             # config'dagi eksplitsit watch_tabs (masalan SMM) hurmat qilinadi,
             # auto bo'lsa avvalgidek Main+joriy oy topiladi
-            wt = s.get("watch_tabs", "auto")
-            if wt in (None, "auto"):
-                watch_titles = fetchmod.detect_watch_tabs(tabs)
-            else:
-                wanted = {fetchmod.norm(fetchmod.expand_month(w)) for w in wt}
-                watch_titles = [t for t in tabs if fetchmod.norm(t) in wanted]
+            # Kunlik fetch bilan YAGONA qoida (fetch.resolve_watch_tabs): yilsiz arxiv
+            # kuzatilmaydi, «(2026)» tabi imlo aliasi bilan topiladi, yo'q bo'lsa ⚠️
+            watch_titles, wmiss = fetchmod.resolve_watch_tabs(s.get("watch_tabs", "auto"), tabs, date.today())
             ranges_keys = [fetchmod.tab_range(t) for t in watch_titles]
             live = fetchmod.fetch_ranges(sh, ranges_keys, name) if ranges_keys else {}
-            kc_map = fetchmod.resolve_key_columns(tabs, s.get("key_column", 1))
+            kc_map = fetchmod.resolve_key_columns(tabs, s.get("key_column", 1), date.today())
         except Exception as e:
             result["fetch_errors"][s["id"]] = {
                 "name": name, "error": f"{type(e).__name__}: {str(e)[:200]}"
             }
             continue
         entry = {"name": name, "watch": s.get("watch", ""), "ranges": {}}
+        if wmiss:
+            entry["watch_missing"] = wmiss
         old_snap = old_sheets.get(s["id"])
         if old_snap is None:
             entry["baseline"] = True
@@ -1554,12 +1573,25 @@ def do_hisobot():
                     r["new_range"] = True
             else:
                 r = diffmod.diff_range(old_rng.get("values", []), vals, kc)
+                diffmod.mark_watch_new(r, rng, old_snap, today)
             entry["ranges"][rng] = r
             st = r["stats"]
             for k in ("added", "removed", "changed"):
                 result["totals"][k] += st.get(k, 0)
             if "header_changed" in r:
                 result["totals"]["header_changed"] += 1
+        if old_snap is not None:
+            # Jimlik — kunlik diff bilan bir qoida. Kuzatilmaydigan tablar oxirgi snapshot'dan,
+            # kuzatiladiganlari jonli: other_changed to'g'ri chiqsin (AUDIT.md P0-4)
+            merged = {"pm_kpi": s.get("pm_kpi", True),
+                      "ranges": {**(old_snap.get("ranges") or {}), **live}}
+            try:
+                st = diffmod.stale_info(s["id"], merged, list(live), today)
+            except Exception as e:  # noqa: BLE001 — /hisobot jimlik hisobi uchun yiqilmasin
+                log(f"/hisobot: jimlik hisoblanmadi ({name}): {e}")
+                st = []
+            if st:
+                entry["stale"] = st
         result["sheets"][s["id"]] = entry
     result["totals"]["sheets"] = len(result["sheets"])
 
@@ -1575,6 +1607,8 @@ def do_hisobot():
             f"📊 O'zgarish yo'q: hozirgi jonli holat {latest} snapshot'idan farq qilmayapti "
             f"({t['sheets']} sheet tekshirildi)."
         )
+        for note in analyze.deterministic_notes(result):
+            msg += f"\n{note}"
         send_retry(msg)
         remember("/hisobot", msg)
         log(f"/hisobot: o'zgarish yo'q ({latest} ga nisbatan) — claude chaqirilmadi")
@@ -1601,6 +1635,9 @@ def do_hisobot():
     except Exception as e:
         log(f"claude xato: {e}")
         ans = analyze.fallback_report(result, str(e))
+    wm = analyze.deterministic_notes(result)
+    if wm:
+        ans += "\n\n" + "\n".join(wm)
     # PDF ko'rinishida urinamiz; yiqilsa — matn (hisobot hech qachon yo'qolmasin)
     ok = False
     try:
