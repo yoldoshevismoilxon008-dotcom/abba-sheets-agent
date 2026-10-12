@@ -252,7 +252,7 @@ def audit_month_tab(sheet_name, tab, vals, findings):
     return names
 
 
-def audit_sheet(snap, findings):
+def audit_sheet(snap, findings, today=None):
     """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar."""
     if not snap.get("pm_kpi", True):
         return  # PM KPI formatida emas (masalan SMM) — Main/oy tekshiruvlari yot
@@ -262,9 +262,8 @@ def audit_sheet(snap, findings):
     tabs = snap.get("tabs") or list(by_tab.keys())
 
     main_tab = next((t for t in tabs if fetchmod.norm(t) == "main"), None)
-    month = fetchmod.current_month_name()
-    month_tabs = [t for t in tabs if fetchmod.norm(t) == month]
-    month_tab = month_tabs[-1] if month_tabs else None
+    # kunlik diff bilan YAGONA qoida: 2026-09 dan «<Oy> (<yil>)» (fetch.pm_month_tab)
+    month_tab = fetchmod.pm_month_tab(tabs, today)
 
     main_names = None
     if main_tab is None:
@@ -274,7 +273,7 @@ def audit_sheet(snap, findings):
 
     month_names = None
     if month_tab is None:
-        findings.append((name, "—", CRIT, f"Joriy oy ({month.capitalize()}) tabi topilmadi", "oy-tab-yoq"))
+        findings.append((name, "—", CRIT, f"Joriy oy tabi «{fetchmod.expected_pm_month_tab(today)}» topilmadi", "oy-tab-yoq"))
     elif month_tab in by_tab:
         month_names = audit_month_tab(name, month_tab, ranges[by_tab[month_tab]].get("values", []), findings)
 
