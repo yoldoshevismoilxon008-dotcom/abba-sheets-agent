@@ -17,6 +17,12 @@
 # Ismoilxon "KPI tasdiqlayman" deganda true qilinadi.
 kpi_enabled: false
 
+# Dam olish (bayram) kunlari — PM KPI jimlik nazorati (diff.stale_info) ularni ish kuni
+# deb sanamaydi; yakshanba avtomatik. Ko'chma bayramlar (Ramazon/Qurbon hayit) va
+# ko'prik kunlarni har yil qo'shing.
+dam_kunlari: ["2026-01-01", "2026-03-08", "2026-03-21", "2026-05-09",
+              "2026-09-01", "2026-10-01", "2026-12-08"]
+
 # PDF hisobot dizayni: data/brand/themes/<nom>.yaml (bot /dizayn bilan boshqariladi)
 active_theme: "default"
 
@@ -29,6 +35,9 @@ sheets:
     name: "Zubair PM KPI"
     mode: all_tabs
     watch_tabs: auto
+    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
+    track_other_tabs: true
     key_column:
       main: "Loyihalar"
       month: "Proekt nomi"
@@ -38,6 +47,9 @@ sheets:
     name: "Islom PM KPI"
     mode: all_tabs
     watch_tabs: auto
+    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
+    track_other_tabs: true
     key_column:
       main: "Loyihalar"
       month: "Proekt nomi"
@@ -47,6 +59,9 @@ sheets:
     name: "Abdufattoh PM KPI"
     mode: all_tabs
     watch_tabs: auto
+    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
+    track_other_tabs: true
     key_column:
       main: "Loyihalar"
       month: "Proekt nomi"
@@ -56,6 +71,9 @@ sheets:
     name: "Azizxo'ja PM KPI"
     mode: all_tabs
     watch_tabs: auto
+    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
+    track_other_tabs: true
     key_column:
       main: "Loyihalar"
       month: "Proekt nomi"

@@ -1554,12 +1554,25 @@ def do_hisobot():
                     r["new_range"] = True
             else:
                 r = diffmod.diff_range(old_rng.get("values", []), vals, kc)
+                diffmod.mark_watch_new(r, rng, old_snap, today)
             entry["ranges"][rng] = r
             st = r["stats"]
             for k in ("added", "removed", "changed"):
                 result["totals"][k] += st.get(k, 0)
             if "header_changed" in r:
                 result["totals"]["header_changed"] += 1
+        if old_snap is not None:
+            # Jimlik — kunlik diff bilan bir qoida. Kuzatilmaydigan tablar oxirgi snapshot'dan,
+            # kuzatiladiganlari jonli: other_changed to'g'ri chiqsin (AUDIT.md P0-4)
+            merged = {"pm_kpi": s.get("pm_kpi", True),
+                      "ranges": {**(old_snap.get("ranges") or {}), **live}}
+            try:
+                st = diffmod.stale_info(s["id"], merged, list(live), today)
+            except Exception as e:  # noqa: BLE001 — /hisobot jimlik hisobi uchun yiqilmasin
+                log(f"/hisobot: jimlik hisoblanmadi ({name}): {e}")
+                st = []
+            if st:
+                entry["stale"] = st
         result["sheets"][s["id"]] = entry
     result["totals"]["sheets"] = len(result["sheets"])
 
@@ -1575,7 +1588,7 @@ def do_hisobot():
             f"📊 O'zgarish yo'q: hozirgi jonli holat {latest} snapshot'idan farq qilmayapti "
             f"({t['sheets']} sheet tekshirildi)."
         )
-        for note in analyze.watch_missing_note(result):
+        for note in analyze.deterministic_notes(result):
             msg += f"\n{note}"
         send_retry(msg)
         remember("/hisobot", msg)
@@ -1603,7 +1616,7 @@ def do_hisobot():
     except Exception as e:
         log(f"claude xato: {e}")
         ans = analyze.fallback_report(result, str(e))
-    wm = analyze.watch_missing_note(result)
+    wm = analyze.deterministic_notes(result)
     if wm:
         ans += "\n\n" + "\n".join(wm)
     # PDF ko'rinishida urinamiz; yiqilsa — matn (hisobot hech qachon yo'qolmasin)
