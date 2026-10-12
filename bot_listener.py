@@ -714,6 +714,10 @@ def tabs_for_question(tabs, q, extra_tabs=None, today=None):
 
     # 2) Sof oy tab'lari (PM sheet'lar) va guruh aniqlanmagan savollar — avvalgidek
     for m in q_months:
+        # PM KPI rasmiy tabi «<Oy> (<yil>)» (fetch.pm_month_tab, 2026-09 dan) — birinchi
+        yillik = fetchmod.pm_yillik_tablar(tabs, m)
+        if yillik:
+            chosen.append(yillik[-1])
         plain = [t for t in tabs if fetchmod.norm(t) == m]
         mgr = [t for t in tabs if m in fetchmod.norm(t) and "managerlar" in fetchmod.norm(t)]
         other = [t for t in tabs if m in fetchmod.norm(t) and t not in plain and t not in mgr]

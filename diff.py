@@ -20,7 +20,7 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 SNAPSHOTS = Path(os.environ.get("DATA_DIR") or (BASE / "data")) / "snapshots"
 
-from fetch import CONFIG, current_month_name, month_spellings, norm, tab_of_range  # noqa: E402
+from fetch import CONFIG, is_pm_month_tab, norm, tab_of_range  # noqa: E402
 
 SERVICE_FILES = {"_meta.json", "diff.json", "report.json", "report-live.json"}
 
@@ -200,8 +200,7 @@ def stale_info(sid, snap, watch, today, snapshots=None, dam=None):
     snapshots = snapshots or SNAPSHOTS
     dam = dam_kunlari() if dam is None else set(dam)
     d_today = date.fromisoformat(today)
-    spell = month_spellings(current_month_name(d_today))
-    targets = [r for r in watch if norm(tab_of_range(r)) in spell]
+    targets = [r for r in watch if is_pm_month_tab(tab_of_range(r), d_today)]
     if not targets or not snapshots.is_dir():
         return []
     month_start = d_today.replace(day=1).isoformat()
@@ -260,8 +259,7 @@ def mark_watch_new(r, rng, old_snap, today):
     ow = (old_snap or {}).get("watch_ranges")
     if ow and rng not in ow:
         r["watch_new"] = True
-        r["watch_new_month"] = norm(tab_of_range(rng)) in month_spellings(
-            current_month_name(date.fromisoformat(today)))
+        r["watch_new_month"] = is_pm_month_tab(tab_of_range(rng), date.fromisoformat(today))
 
 
 def baseline_range(vals):
