@@ -351,8 +351,10 @@ def test_hisobot_jimlikni_korsatadi():
 
     root = _tmp()
     try:
+        # 2026-10-12 dan rasmiy tab «Oktyabr (2026)» (fetch.pm_month_tab): u jim, yilsiz o'zgaradi
         for i, d in enumerate(_kunlar(1, 7)):
-            snap = _yoz(root, d, {"Oktyabr": _vals("29,0"), "Oktyabr (2026)": _vals(f"{31 + i},0")}, ["Oktyabr"])
+            snap = _yoz(root, d, {"Oktyabr (2026)": _vals("29,0"), "Oktyabr": _vals(f"{31 + i},0")},
+                        ["Oktyabr (2026)"])
         sent = []
         cfg = [{"id": SID, "name": "Zubair PM KPI", "watch_tabs": "auto", "key_column": {"month": "Proekt nomi"}}]
         patches = [(bl, "typing", lambda *a, **k: None), (bl, "send_retry", lambda m, **k: sent.append(m)),
@@ -370,8 +372,8 @@ def test_hisobot_jimlikni_korsatadi():
         finally:
             for o, n, v in asl:
                 setattr(o, n, v)
-        assert "⚠️ Zubair PM KPI: «Oktyabr» tabi 01.10 dan beri o'zgarmagan (6 ish kuni)" in sent[-1], sent[-1]
-        assert "«Oktyabr (2026)» o'zgargan" in sent[-1]
+        assert "⚠️ Zubair PM KPI: «Oktyabr (2026)» tabi 01.10 dan beri o'zgarmagan (6 ish kuni)" in sent[-1], sent[-1]
+        assert "«Oktyabr» o'zgargan" in sent[-1]
     finally:
         shutil.rmtree(root)
 

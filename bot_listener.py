@@ -634,6 +634,13 @@ def month_tab_groups(tabs):
     return groups
 
 
+def savol_oyi(month, today=None):
+    """Savoldagi oy (kanonik nom) qaysi oyning 1-kuni: joriy oydan keyingi oy — o'tgan yilniki."""
+    today = today or date.today()
+    mno = fetchmod.MONTHS.index(month) + 1
+    return date(today.year if mno <= today.month else today.year - 1, mno, 1)
+
+
 def tabs_for_question(tabs, q, extra_tabs=None, today=None):
     """(tanlangan tab'lar, kontekst-ko'rsatmalar). Oy-guruhli sheet'larda
     (SMM: "Undiruv <oy>", "Hoji mini kpi <oy>") savolda guruh nomi bo'lsa
@@ -717,6 +724,20 @@ def tabs_for_question(tabs, q, extra_tabs=None, today=None):
         plain = [t for t in tabs if fetchmod.norm(t) == m]
         mgr = [t for t in tabs if m in fetchmod.norm(t) and "managerlar" in fetchmod.norm(t)]
         other = [t for t in tabs if m in fetchmod.norm(t) and t not in plain and t not in mgr]
+        # PM KPI rasmiy tabi «<Oy> (<yil>)» (fetch.pm_month_tab, 2026-09 dan; ega qarori 2026-10-12):
+        # u birinchi yuklanadi, yilsiz tab rasmiy emas — faqat «arxiv» so'ralsa (10-07 da ikki tab
+        # ikki xil foiz bergan: 62,88% va 94,4%)
+        yillik = fetchmod.pm_yillik_tablar(tabs, m)
+        oy_1 = savol_oyi(m, today)
+        if yillik:
+            chosen.append(yillik[-1])
+        if plain and fetchmod.pm_qatiy(oy_1) and not arxiv_sorov:
+            if yillik:
+                plain = []
+            else:
+                notes.append(
+                    f"«{m.capitalize()} ({oy_1.year})» tabi yo'q — yilsiz «{plain[-1].strip()}» rasmiy "
+                    "PM KPI tabi emas (2026-09 dan rasmiy tab «<Oy> (<yil>)»); javob boshida shuni ayt.")
         if plain:
             chosen.append(plain[-1])
         if mgr:
@@ -1011,7 +1032,7 @@ def month_aggregate(snap):
     """Snapshot'dagi joriy oy watch tabidan (Σideal, Σfakt) hisoblaydi."""
     for rng in snap.get("watch_ranges", []):
         tab = fetchmod.tab_of_range(rng)
-        if fetchmod.norm(tab) in fetchmod.MONTHS:
+        if fetchmod.is_month_watch_tab(tab):             # «Oktyabr» yoki «Oktyabr (2026)»
             vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
             st = auditmod.pm_stats(vals)
             return tab, st["ideal"], st["fakt"]

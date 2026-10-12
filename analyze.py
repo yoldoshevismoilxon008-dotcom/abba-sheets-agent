@@ -303,6 +303,10 @@ def watch_new_note(diff):
                 kind = "yangi oy tabi sifatida " if d.get("watch_new_month") else ""
                 L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» kuzatuvga {kind}olindi "
                          f"({d['stats'].get('rows_now', 0)} qator) — o'zgarishlar uning kechagi holatiga nisbatan.")
+            elif d.get("new_range"):
+                # Kecha umuman yo'q edi (masalan oy o'rtasida ochilgan «Oktyabr (2026)») — jim o'tmasin
+                L.append(f"ℹ️ {sheet['name']}: «{tab_of_range(rng)}» tabi paydo bo'ldi va kuzatuvga olindi "
+                         f"({d['stats'].get('rows_now', 0)} qator) — o'zgarishlar ertadan ko'rinadi.")
     return L
 
 
@@ -369,7 +373,7 @@ def _day_stats(day):
     for snap in diffmod.load_day(day)[0].values():
         for rng in snap.get("watch_ranges", []):
             tab = fetchmod.tab_of_range(rng)
-            if fetchmod.norm(tab) not in fetchmod.MONTHS:
+            if not fetchmod.is_month_watch_tab(tab):     # «Oktyabr» yoki «Oktyabr (2026)»
                 continue
             vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
             st = auditmod.pm_stats(vals)   # yagona hisob: dashboard va Q&A bilan bir xil

@@ -3,8 +3,9 @@
 # mode: all_tabs — sheet'ning BARCHA tab'lari avtomatik topilib snapshot'ga
 #   yoziladi (Q&A va audit to'liq ma'lumot bilan ishlaydi).
 # watch_tabs: auto — kunlik diff uchun Main + JORIY OY tabi nomdan avtomatik
-#   aniqlanadi (oy nomining "Iyul " kabi bo'shliqli variantlarini ham taniydi;
-#   ikkita bir xil oy tabi bo'lsa tartibda oxirgisi = joriy yilniki olinadi).
+#   aniqlanadi. 2026-09 dan PM KPI oy tabi faqat «<Oy> (<yil>)» («Oktyabr (2026)»,
+#   bo'shliq/imlo farqi qabul) — ega qarori 2026-10-12; yilsiz «Oktyabr» kuzatilmaydi.
+#   Tab yo'q bo'lsa hisobotda ⚠️ «Noyabr (2026)» tabi topilmadi» chiqadi.
 #   Oy almashganda config'ni qo'lda yangilash KERAK EMAS.
 #   Xohlasangiz aniq ro'yxat ham berish mumkin: watch_tabs: ["Main", "Iyul "]
 # key_column — qatorni kunma-kun tanib olish kaliti, semantik:
@@ -35,7 +36,7 @@ sheets:
     name: "Zubair PM KPI"
     mode: all_tabs
     watch_tabs: auto
-    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # Kuzatuvdan tashqari tablar (masalan yilsiz «<Oy>», «Managerlar <oy> kpi»)
     # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
     track_other_tabs: true
     key_column:
@@ -47,7 +48,7 @@ sheets:
     name: "Islom PM KPI"
     mode: all_tabs
     watch_tabs: auto
-    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # Kuzatuvdan tashqari tablar (masalan yilsiz «<Oy>», «Managerlar <oy> kpi»)
     # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
     track_other_tabs: true
     key_column:
@@ -59,7 +60,7 @@ sheets:
     name: "Abdufattoh PM KPI"
     mode: all_tabs
     watch_tabs: auto
-    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # Kuzatuvdan tashqari tablar (masalan yilsiz «<Oy>», «Managerlar <oy> kpi»)
     # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
     track_other_tabs: true
     key_column:
@@ -71,7 +72,7 @@ sheets:
     name: "Azizxo'ja PM KPI"
     mode: all_tabs
     watch_tabs: auto
-    # Kuzatuvdan tashqari tablar (masalan «<Oy> (2026)» agregati, «Managerlar <oy> kpi»)
+    # Kuzatuvdan tashqari tablar (masalan yilsiz «<Oy>», «Managerlar <oy> kpi»)
     # o'zgarsa — hisobotda 1 qator. AUDIT.md P0-4: PM qaysi tabni to'ldirayotgani ko'rinsin.
     track_other_tabs: true
     key_column:

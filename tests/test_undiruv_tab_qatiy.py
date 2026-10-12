@@ -180,7 +180,10 @@ def test_resolve_watch_tabs_yagona():
     tabs = ["Undiruv noyabr", "Undiruv oktabr(2026)", "Smm main", "Pm proektlar After"]
     assert fmod.resolve_watch_tabs([T, "Smm main", "Pm proektlar After"], tabs, NOV01) == \
         (["Smm main", "Pm proektlar After"], ["Undiruv noyabr(2026)"])
-    assert fmod.resolve_watch_tabs("auto", ["Main", "Oktyabr"], OKT01) == (["Main", "Oktyabr"], [])
+    # PM KPI (auto): 2026-09 dan faqat «<Oy> (<yil>)» — yilsiz oy tabi kuzatilmaydi (fetch.pm_month_tab)
+    assert fmod.resolve_watch_tabs("auto", ["Main", "Oktyabr", "Oktyabr (2026) "], OKT01) == \
+        (["Main", "Oktyabr (2026) "], [])
+    assert fmod.resolve_watch_tabs("auto", ["Main", "Oktyabr"], OKT01) == (["Main"], ["Oktyabr (2026)"])
 
 
 # ------------------------------------------------------- undiruv.month_tab
