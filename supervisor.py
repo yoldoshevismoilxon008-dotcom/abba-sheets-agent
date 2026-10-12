@@ -97,7 +97,7 @@ DAILY_MARKER = DATA / "daily_last_run.txt"
 # run.sh log'idagi «hisobot ketdi / pipeline tugadi» belgilari — marker yo'q bo'lsa ham
 # (birinchi deploy kuni eski kod yuborgan, yoki restart send'dan keyin marker'dan oldin)
 # bugungi hisobot qayta yuborilmasin (review: catch-up ikki marta yuborardi)
-_DAILY_DONE_RE = re.compile(r"\[send\] PDF hisobot yuborildi|===== tugadi")
+_DAILY_DONE_RE = re.compile(r"\[send\] (?:PDF|matn) hisobot yuborildi|===== tugadi")
 _PIPELINE_LOCK = threading.Lock()
 _PM_LOCK = threading.Lock()
 

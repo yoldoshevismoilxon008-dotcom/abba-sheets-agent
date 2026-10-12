@@ -138,6 +138,7 @@ def test_sarlavha_izohi_kpi_bloki_va_dashboardga_chiqadi():
         assert izoh in u.report_block("2026-10-05")                    # ilgari: "" (jim)
         rows = dashboard.build_undiruv("2026-10-05", "2026-10-05 09:00")
         assert rows and "sarlavhasi o'qilmadi" in rows[0][0] and any(izoh in r[0] for r in rows)
+        assert "Oktyabr" not in rows[0][0]      # izoh boshqa (o'tgan oy) tabniki bo'lishi mumkin
     bosh = dict(view, notes=["ℹ️ boshqa izoh"])                          # oddiy bo'sh tab — o'zgarmagan
     with _soxta(u, "korinish", lambda *a, **k: bosh):
         assert u.summary("2026-10-05") is None
@@ -278,6 +279,10 @@ def test_bir_foiz_stavka_qoida_oraligi_va_son():
             _soxta(dashboard, "sheet_stats", lambda s: st):
         tabs = dashboard.build("2026-10-05")
     assert tabs["umumiy"][1][4] == 89.96 and tabs["trend"][0][5] == 89.96   # rang qoidasi <90 — sariq
+    # yaxlitlash emas, kesish: 89,996 → 89,99 (90,00 bo'lsa sheet yashil, PDF sariq bo'lardi)
+    assert dashboard.foiz2(89.996) == 89.99 and dashboard.foiz2(90.0) == 90.0
+    assert dashboard.foiz2(89.96) == 89.96 and dashboard.foiz2(7) == 7
+    assert analyze.pct_color(89.996) == "yellow"
     r = _kpi(10)
     assert r[2] == 200_000 and isinstance(r[2], int)          # matn emas — #,##0 formati ishlaydi
     assert r[8] == round(25 * 200_000 + 10 * 200_000 + 5_000_000)
@@ -492,6 +497,12 @@ def test_boot_catchup_pipeline_keyin_pm_push():
             sv.boot_catchup()()
             assert tartib == ["pm"]
             tartib.clear()
+            (logs / "2026-10-05.log").write_text(                 # PDF yiqilib, matn rejimida ketgan
+                "XATO: PDF render yiqildi\n[send] yuborildi: 2/2\n[send] matn hisobot yuborildi\n",
+                encoding="utf-8")
+            sv.boot_catchup()()
+            assert tartib == ["pm"]
+            tartib.clear()
             (logs / "2026-10-05.log").write_text("===== tugadi: 2026-10-05 09:12:00 =====\n",
                                                  encoding="utf-8")
             sv.boot_catchup()()
@@ -500,6 +511,25 @@ def test_boot_catchup_pipeline_keyin_pm_push():
             assert sv.boot_catchup() is None                          # hali 09:00 emas
         with _soxta(sv, "DAILY_MARKER", marker), _soxta(sv, "_hozir", lambda: _tk(15, 0)):
             assert sv.boot_catchup() is None                          # oyna o'tgan
+
+
+def test_send_matn_rejimida_hisobot_belgisi():
+    """Kunlik hisobot matn rejimida ketsa log'da «matn hisobot yuborildi» (catch-up shuni
+    o'qiydi); xato alerti (--text) bu belgini BERMAYDI — aks holda yiqilgan kun «bajarildi»."""
+    import io
+    import send as sendmod
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "2026-10-05").mkdir()
+        (Path(td) / "2026-10-05" / "report.md").write_text("hisobot", encoding="utf-8")
+        for argv, kerak in ((["send.py", "--date", "2026-10-05"], True),
+                            (["send.py", "--text", "⚠️ fetch yiqildi"], False)):
+            out = io.StringIO()
+            with _soxta(sendmod, "SNAPSHOTS", Path(td)), _soxta(sendmod, "load_env", lambda: None), \
+                    _soxta(sendmod, "tg_send", lambda *a, **k: None), _soxta(sys, "argv", argv), \
+                    _soxta(os, "environ", {**os.environ, "TELEGRAM_BOT_TOKEN": "x", "TELEGRAM_CHAT_ID": "1"}), \
+                    contextlib.redirect_stdout(out):
+                assert sendmod.main() == 0
+            assert ("[send] matn hisobot yuborildi" in out.getvalue()) is kerak, out.getvalue()
 
 
 def test_daily_job_marker_yozadi():

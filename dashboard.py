@@ -12,6 +12,7 @@ Ishlatish:
   dashboard.py [--date YYYY-MM-DD] [--dry-run]
 """
 import argparse
+import math
 import sys
 import time
 from datetime import date
@@ -40,6 +41,13 @@ def log(msg):
 
 def num(x, nd=1):
     return round(x, nd) if isinstance(x, float) else x
+
+
+def foiz2(x):
+    """Bajarilish % — 2 xonaga PASTGA kesiladi (yaxlitlanmaydi): sheet'dagi ≥90 yashil
+    qoidasi PDF (yaxlitlanmagan pct_color) bilan bir tomonda qolsin — 89,996 → 89,99, 90,00
+    emas (P2). 1e-6 — float shovqini (89,96·100 = 8995,9999…) kesib yuborilmasin."""
+    return math.floor(x * 100 + 1e-6) / 100 if isinstance(x, float) else x
 
 
 def sheet_stats(snap):
@@ -104,12 +112,12 @@ def build(day):
             umumiy.append([name, "—", "—", "—", "—", "—", crit, now])
             continue
         pct = st["fakt"] / st["ideal"] * 100 if st["ideal"] else 0.0
-        # Bajarilish % — 2 xona: sheet'dagi rang qoidasi (≥90 yashil) PDF bilan bir xil
-        # qiymatga qarasin (1 xonada 89,96 → 90,0 yashil bo'lardi, PDF'da sariq) (P2)
+        # Bajarilish % — foiz2: sheet'dagi rang qoidasi (≥90 yashil) PDF bilan bir xil
+        # tomonda (1 xonada 89,96 → 90,0 yashil bo'lardi, PDF'da sariq) (P2)
         umumiy.append([name, st["aktiv"], num(st["ideal"]), num(st["fakt"]),
-                       num(pct, 2), num(st["delay"]), crit, now])
+                       foiz2(pct), num(st["delay"]), crit, now])
         trend_rows.append([day, name, st["aktiv"], num(st["ideal"]), num(st["fakt"]),
-                           num(pct, 2), num(st["delay"]), crit])
+                           foiz2(pct), num(st["delay"]), crit])
         rate = one_pct_rate(st["aktiv"])
         delay_pct = (st["delay"] * 3.33 / st["aktiv"]) if st["aktiv"] else 0.0
         if rate is None:
@@ -179,8 +187,10 @@ def build_undiruv(day, now):
         sx = undiruvmod.sarlavha_izohlari(view.get("notes"))
         if not sx:
             return None
-        # Tab bor, sarlavha o'qilmadi — kechagi jadval jim qolib ketmasin (yuqoridagi kabi)
-        out = [[f"UNDIRUV — ⚠️ «{tab}» sarlavhasi o'qilmadi", "", "", "", "", "", ""]]
+        # Joriy tabda qator yo'q va sarlavha izohi bor — kechagi jadval jim qolib ketmasin.
+        # Sarlavhada tab nomi YO'Q: izoh o'tgan oy tabiniki bo'lishi mumkin (joriy tab yangi
+        # ochilgan, bo'sh) — qaysi tab ekanini izoh satrining o'zi aytadi
+        out = [["UNDIRUV — ⚠️ tab sarlavhasi o'qilmadi (izoh quyida)", "", "", "", "", "", ""]]
         out += [[n, "", "", "", "", "", ""] for n in undiruvmod.izoh_satrlari(view.get("notes") or [])]
         out.append(["Yangilangan", now, "", "", "", "", ""])
         return out
