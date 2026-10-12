@@ -197,6 +197,46 @@ matni bor) — qaytgach birinchi kun diff bo'sh tarixdan boshlanishi mumkin, kri
 - **Xarajat**: hobby plan ~$5/oy atrofida (bitta doimiy service + 1GB volume;
   claude API xarajati yo'q — Max plan token).
 
+## Undiruv: oy oxiri ko'chirish ro'yxati (AUDIT P0-3)
+
+Oy oxirida (oxirgi 6 kun) 💰 blok «🔁 <oy> tabiga ko'chirilgan» deb ko'rsatgan qarzlar
+keyingi oyda ham eslab qolinadi (`undiruv_carry.py`): o'tgan oy qatori ochiq qolsa, PM'dan
+IKKINCHI marta so'ralmaydi, egaga har kuni «⚠️ Ikki tabda dublikat» chiqadi; ko'chirilgan
+qatordan pul izsiz yo'qolsa — «$N izohsiz».
+
+- **Holat fayli:** `/data/undiruv_carry/<YYYY-MM>.json` (YYYY-MM — ro'yxat tuzilgan oy, masalan
+  `2026-09.json` oktabr uchun). Bu **volume holati — git'ga HECH QACHON qo'shilmaydi**: repo
+  public, faylda mijoz nomlari va summalar bor (`data/*` .gitignore'da).
+- **Qachon yoziladi:** keyingi oyning birinchi undiruv o'qishida (09:00 run, 09:30 push,
+  /hisobot yoki dashboard — qaysi biri birinchi bo'lsa) **bir marta** muzlatiladi, manbasi —
+  o'tgan oy oxirgi faol kunining `snapshots/<kun>/report.json`i. Keyin o'zgarmaydi.
+  Kelajak sanali simulyatsiya (`pm_push.py --dry-run --date 2026-11-01` 28.10 da) faylni
+  **muzlatmaydi** — real sana oy oxiridan o'tmaguncha ro'yxat faqat xotirada quriladi.
+- **Qayta qurish:** faylni o'chiring — keyingi o'qishda `snapshots/<oy oxiri>/report.json`dan
+  qayta tuziladi. Bu faqat o'sha papka turgan paytda ishlaydi: retention 30 kun (30.09 papkasi
+  **31.10 09:00 run oxirida** o'chadi).
+- **Buzilgan fayl:** bot o'zi tuzatmaydi — 💰 blokda «⚠️ undiruv_carry/… buzilgan» chiqadi va
+  qarzlar odatdagidek so'raladi. Faylni o'chiring (yuqoridagi qayta qurish).
+- **Kill switch:** Railway Variables'da `UNDIRUV_CARRY_OFF=1` → redeploy. P0-3 qo'shimchalarining
+  hammasi o'chadi (dublikat/izohsiz, 1–10 kunlik o'tgan tab kuzatuvi, 💰dagi «⚖️ Summa farqli»),
+  xulq 69a8de7 bilan bir xil. Fayl o'chirilmaydi — kalit olinsa yana ishlatiladi.
+- **Muzlatishdan oldin `analyze.py --date <oy oxiri>` ni ishga tushirmang:** `summary` jonli
+  ma'lumotdan o'qiydi va o'sha kunning report.json ro'yxatini BUGUNGI holat bilan qayta yozadi.
+
+**Birinchi deploy (sentabr → oktabr):** 31.10 09:00 dan OLDIN (aks holda 30.09 snapshot'i
+o'chib, oktabr eski xulqda qoladi). Avval zaxira:
+```bash
+mkdir -p /data/keep && cp -r /data/snapshots/2026-09-30 /data/snapshots/2026-10-01 /data/snapshots/2026-10-02 /data/keep/
+python3 -c "import json;d=json.load(open('/data/snapshots/2026-09-30/report.json'));print([(i['loyiha'],i['summa'],i['yangi_muddat']) for i in d['undiruv']['keyingi']['kochgan']])"
+```
+Ro'yxatda `('Bosimov shcool', 2500, '18.10')` bo'lishi kerak. Deploy'dan keyin (bu buyruq faylni
+o'zi muzlatadi ham):
+```bash
+cd /app && venv/bin/python -c "import undiruv_carry as c; from datetime import date; print(c.royxat(date(2026,10,13)))"
+ls -l /data/undiruv_carry/2026-09.json
+```
+Chiqishda `Bosimov shcool` 2500 → `Bosimov School` 18.10 bo'lishi, `baza` — `snapshot:2026-09-30`.
+
 ## Eslatmalar / ma'lum cheklovlar
 
 - Konteynerda `/dizayn` git-commit qilmaydi (theme'lar volume'da, git yo'q) —

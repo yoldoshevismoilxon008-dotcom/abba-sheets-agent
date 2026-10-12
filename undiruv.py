@@ -22,6 +22,7 @@ sys.path.insert(0, str(BASE))
 
 import diff as diffmod
 import fetch as fetchmod
+import undiruv_carry as carrymod
 
 MONEY_RE = re.compile(r"[-\d.,]+")
 DDMM_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})$")                 # 06.07 (yilsiz)
@@ -533,7 +534,7 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
         c = cur[j]
         kel_c = round(c["qoldiq"] + c["undirildi"])
         meta = {"cur_loyiha": c["loyiha"], "cur_summa": round(c["qoldiq"]), "cur_kelishilgan": kel_c,
-                "muddat": c["muddat"], "tab": cur_tab, "oy": prev_oy}
+                "muddat": c["muddat"], "tab": cur_tab, "oy": prev_oy, "cur_xom": carrymod.qator_qiymat(c), "cur_pm": c["pm"]}
         yangi_ok = yangi_min is None or (c["muddat"] is not None and c["muddat"] >= yangi_min)
         rq, cq = round(r["qoldiq"]), round(c["qoldiq"])
         q = _qaror_top(q_ok, r, cur_tab)
@@ -1029,6 +1030,19 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
         kk = {(r["loyiha"], round(r["qoldiq"])) for r in kechildi}
         for key in ("farqli", "noaniq"):
             t1[key] = [r for r in t1[key] if (r["loyiha"], round(r["qoldiq"])) not in kk]
+    # P0-3: o'tgan oy oxirida egaga «🔁 ko'chirilgan» deb ko'rsatilgan qarz o'tgan oy tabida
+    # ham ochiq qolsa — PM'dan ikkinchi marta so'ralmaydi, egaga «⚠️ Ikki tabda dublikat»;
+    # ko'chirilgan joriy qatorda izohsiz kamayish — «$N izohsiz» (undiruv_carry). t3 dan
+    # OLDIN (`_i` indekslari t1["real"]ga tayanadi). Xato — eski xulq (so'raladi) + egaga izoh.
+    ct = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set()}
+    if ptab is not None:
+        try:
+            ct = carrymod.tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=ptab)
+        except Exception as e:                   # noqa: BLE001
+            log(f"carry tekshiruvi xato: {type(e).__name__}: {e}")
+            ct = dict(ct, notes=[f"⚠️ Oy oxiri ko'chirish ro'yxati tekshirilmadi ({type(e).__name__}) — "
+                                 f"{prev_m} qoldiqlari odatdagidek so'ralmoqda"])
+        notes += ct["notes"]
     joriy = t1["cur_rows"]
     for r in joriy:
         kq = r.get("qoshimcha")
@@ -1120,7 +1134,11 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
         "today": today, "day": day, "tab": tab, "rows": joriy, "source": source, "oy": cur_m,
         "yil": cur_y,
         "prev": {"tab": ptab, "rows": prows, "source": psrc, "oy": prev_m, "kechildi": kechildi,
-                 **{k: t1[k] for k in ("real", "closed", "moved", "farqli", "noaniq", "izoh")}},
+                 **{k: t1[k] for k in ("real", "closed", "moved", "farqli", "noaniq", "izoh")},
+                 # P0-3: dublikat — real'dan olingan (so'ralmaydi, egaga ⚠️); izohsiz — ⚠️ satrlari;
+                 # carry_skip/carry_kochgan — summary'dagi o'tgan tab kuzatuvi uchun
+                 "dublikat": ct["dublikat"], "izohsiz": ct["izohsiz"],
+                 "carry_skip": sorted(ct["skip"]), "carry_kochgan": sorted(ct["kochgan"])},
         "keyingi": keyingi,
         "notes": notes,
         "data_source": "snapshot" if "snapshot" in srcs else "live",
@@ -1293,7 +1311,29 @@ def keyingi_tab_holati(k):
 
 def izoh_satrlari(notes):
     """Egaga izohlar: belgisiz (qaror holati) satrlar «📝 » bilan — matn, PDF va push bir xil."""
-    return [n if not n or n[:1] in "⚠📝ℹ🆕🔁🧹" else "📝 " + n for n in notes]
+    return [n if not n or n[:1] in "⚠📝ℹ🆕🔁🧹⚖" else "📝 " + n for n in notes]
+
+
+def farqli_satrlari(pv, cur_oy):
+    """O'tgan oy «⚖️ summa farqli» va «⚠️ moslik noaniq» qatorlari — 09:00 💰 blokiga ham
+    (AUDIT P0-3: 01.10–12.10 Bosimov «qaror kerak» faqat arxivlanmaydigan 09:30 jamlamasida
+    edi — summary notes'i farqli/noaniq'ni tashlab yuborardi). Matn pm_push jamlamasi bilan
+    AYNAN bir xil. Faqat summary() notes'iga (view.notes'ga emas — 09:30 jamlamasi ularni
+    o'zi chiqaradi, ikki marta bo'lmasin)."""
+    oy = pv.get("oy") or "o'tgan oy"
+    L = []
+    fq = pv.get("farqli") or []
+    if fq:
+        det = ", ".join(f"{r['loyiha']} ({r['pm']}, {oy} → {cur_oy}: {_fmt_usd(round(r['qoldiq']))} → "
+                        f"{_fmt_usd((r.get('_kochish') or {}).get('cur_summa') or 0)})" for r in fq[:6])
+        L.append(f"⚖️ Summa farqli — ko'chirilgan deb OLINMADI, o'tgan qoldiq ham so'ralmoqda "
+                 f"(qaror kerak): {det}" + (f" +{len(fq) - 6}" if len(fq) > 6 else ""))
+    nq = pv.get("noaniq") or []
+    if nq:
+        yoq = "ikki o'xshash nom"
+        det = "; ".join(f"{r['loyiha']} ({r['pm']}, {oy}: {r.get('_noaniq') or yoq})" for r in nq[:6])
+        L.append(f"⚠️ Moslik noaniq — qarz alohida so'ralmoqda (bir loyiha bo'lsa tabni tuzating): {det}")
+    return L
 
 
 def kochish_matn(r):
@@ -1354,7 +1394,11 @@ def summary(day, today=None, prefer_live=True):
         kk = r["keyingi_oyga"]
         return {"loyiha": r["loyiha"], "pm": r["pm"], "summa": round(r["qoldiq"]),
                 "yangi_summa": kk.get("cur_summa"), "yangi_muddat": _due_str(kk.get("muddat")),
-                "turi": kk.get("turi"), "matn": kochish_matn(r)}
+                "turi": kk.get("turi"), "matn": kochish_matn(r),
+                # P0-3: keyingi oyda undiruv_carry.royxat shu yozuvdan muzlatadi — L kunidagi
+                # ikkala qatorning sheet qiymatlari bilan (snapshot o'qish kerak bo'lmaydi)
+                "cur_loyiha": kk.get("cur_loyiha"), "cur_pm": kk.get("cur_pm"), "manba_oy": kk.get("manba_oy"),
+                "eski": carrymod.qator_qiymat(r), "yangi": kk.get("cur_xom")}
 
     pv = v["prev"]
     k = v.get("keyingi")
@@ -1392,6 +1436,21 @@ def summary(day, today=None, prefer_live=True):
         if r["muddat"] is None or (r["muddat"] - today).days <= PUSH_DUE_DAYS:
             otgan.append(item(r))
     otgan.sort(key=lambda x: -(x["kun"] or 0))
+    # P0-3 (faqat 09:00 hisobot va /hisobot — 09:30 push va dashboard qo'shimcha snapshot
+    # o'qimasin): 1–10 kunlar o'tgan oy tabi kecha↔bugun, o'tgan oy farqli/noaniq qatorlari
+    # (ilgari faqat 09:30 jamlamasida — view.notes'ga EMAS, u yerda ikki marta chiqmasin)
+    qosh = []
+    if carrymod.ochiq():
+        if pv.get("tab") is not None:
+            try:
+                qosh += carrymod.otgan_tab_farqi(today, day, set(pv.get("carry_skip") or ()),
+                                                 set(pv.get("carry_kochgan") or ()), v["rows"])
+            except Exception as e:               # noqa: BLE001
+                log(f"o'tgan tab kuzatuvi xato: {type(e).__name__}: {e}")
+                qosh.append(f"⚠️ {str(pv.get('oy') or '').capitalize()} tabi qatorma-qator "
+                            f"tekshirilmadi ({type(e).__name__})")
+        qosh += farqli_satrlari(pv, v["oy"])
+    dub = pv.get("dublikat") or []
     return {
         "oy": fetchmod.current_month_name(today),
         "tab": tab,
@@ -1409,13 +1468,15 @@ def summary(day, today=None, prefer_live=True):
         "yaqin_kun": DUE_SOON_DAYS,
         # O'tgan oy tabidan hali so'ralayotgan qoldiqlar (09:30 push bilan bir xil to'plam)
         "otgan_oy": {"oy": pv["oy"], "tab": pv["tab"], "items": otgan,
-                     "sum": round(sum(i["summa"] for i in otgan))},
+                     "sum": round(sum(i["summa"] for i in otgan)),
+                     # P0-3: ikki tabda dublikat (so'ralmaydi — ⚠️ satri notes'da)
+                     "dublikat_n": len(dub), "dublikat_sum": round(sum(r["qoldiq"] for r in dub))},
         # Oy oxirida: keyingi oy tabi (muddati yaqinlar + unga ko'chgan/yopilgan qarzlar)
         "keyingi": keyingi,
         # Egaga izohlar: tab topilmadi/o'qilmadi, ega qarorlari, ogohlantirishlar (matn bloki
         # va PDF shablon AYNAN shu satrlarni chiqaradi — C3)
         "notes": izoh_satrlari(list(v.get("notes") or []) + list(pv.get("izoh") or [])
-                               + list((k or {}).get("izoh") or [])),
+                               + list((k or {}).get("izoh") or []) + qosh),
         # Ketgan loyihalar — YAGONA manba (report_data ham aynan shuni chaqiradi)
         "lose": lose_summary(rows),
     }
@@ -1465,6 +1526,11 @@ def report_block(day, today=None):
         oy_nomi = (oo.get("oy") or "o'tgan oy").capitalize()
         L.append(f"⏰ {oy_nomi} qoldig'i (o'tgan oy tabidan, PM'dan so'ralmoqda): "
                  f"{len(oo['items'])} ta, {_fmt_usd(oo['sum'])}: {det}{more}")
+    elif oo.get("dublikat_n"):
+        # P0-3: so'raladigan yo'q, lekin ikki tabda dublikat — «✅ yo'q» o'rniga aniq holat
+        oy_nomi = (oo.get("oy") or "o'tgan oy").capitalize()
+        L.append(f"⏰ {oy_nomi} qoldig'i: 0 ta — PM'dan so'ralmaydi ({oo['dublikat_n']} ta, "
+                 f"{_fmt_usd(oo.get('dublikat_sum') or 0)} ikki tabda dublikat, ⚠️ yuqorida)")
     if s["muddat_yaqin"]:
         det = ", ".join(
             f"{i['loyiha']} ({i['pm']}, {_fmt_usd(i['summa'])}, {i['muddat']})"
@@ -1490,7 +1556,7 @@ def report_block(day, today=None):
     elif k is not None and not k.get("tab"):
         L += keyingi_tab_holati(k)
     if (not s["muddat_otgan"] and not s["muddat_yaqin"] and not (k and k.get("yaqin"))
-            and not oo.get("items") and not (k and k.get("yopilgan"))):
+            and not oo.get("items") and not (k and k.get("yopilgan")) and not oo.get("dublikat_n")):
         L.append("⏰ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q ✅")
     if s.get("status_blank_n"):
         L.append(f"⚠️ Status bo'sh (tasdiqlanmagan qarz): {s['status_blank_n']} ta qator")
