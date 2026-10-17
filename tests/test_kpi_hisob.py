@@ -1,7 +1,8 @@
 """KPI va undiruv hisob-kitobi — audit P1 (K1–K8) tuzatishlari testlari.
 
   K1  qisman to'lov o'tgan oy qoldig'ini jimgina yopmaydi;
-  K2  fuzzy juft + «ketdi»: Lose summa == o'tgan qoldiq bo'lsa yopiladi;
+  K2  fuzzy juft + «ketdi»: o'tgan qoldiq jim yopilmaydi (Lose teng bo'lsa ham) — so'raladi
+      + noaniq (ega qarori 2026-10-17: Bosimov holati P0-3 qoidasi bilan);
   K3  ideal bo'sh qatorning fakti foizni shishirmaydi (+ audit WARN);
   K4  Jami/nomsiz yig'indi qatori loyiha deb sanalmaydi;
   K5  o'ng tomondagi shablon katagi jadvalni kesmaydi;
@@ -125,14 +126,15 @@ def test_k1_egaga_kelishilgan_summa_korsatiladi():
 
 # ------------------------------------------------------------------ K2
 
-def test_k2_bosimov_lose_teng_yopiladi():
+def test_k2_bosimov_lose_teng_ham_jim_yopilmaydi():
     """09.10 real holati: sentyabr «Bosimov shcool» $1 500; oktyabr «Bosimov School»
-    Summa bo'sh, Lose $1 500, status sabab bilan — sentyabr qarzi PM'dan so'ralmaydi."""
+    Summa bo'sh, Lose $1 500, status sabab bilan. Ega qarori (2026-10-17): nomi aynan mos
+    emas — sentyabr qarzi jim yopilmaydi, so'raladi va noaniq (egaga dublikat ⚠️ — P0-3)."""
     prev = _tab(["14", "Bosimov shcool", "Zubair", "", "$1 500", "", "", "", "18.09", "", ""])
     cur = _tab(["10", "Bosimov School", "Zubair", "", "", "", "", "$1 500", "18.10", "Puli yo'q", ""])
     assert cur[0]["holat"] == "ketdi"
     t = u.month_transition(prev, cur)
-    assert _names(t["closed"]) == ["Bosimov shcool"] and not t["real"] and not t["noaniq"], t
+    assert not t["closed"] and _names(t["real"]) == ["Bosimov shcool"] and t["noaniq"], t
 
 
 def test_k2_lose_farqli_noaniq_qoladi():
