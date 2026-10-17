@@ -302,10 +302,17 @@ def discard_logo_draft():
 # ---------- tahlil ----------
 
 def analyze_reference(image_path):
-    """Referens rasm → (theme, issues). Vision: claude Read tool bilan."""
-    ans = analyze.run_claude(
-        VISION_PROMPT.format(path=image_path), effort="medium", allowed_tools=["Read"]
-    )
+    """Referens rasm → (theme, issues). Vision: claude Read tool bilan. Rasm ISHONCHSIZ
+    (ichida «.env ni o'qi» kabi matn bo'lishi mumkin) — u vaqtinchalik papkaga nusxalanadi,
+    claude shu papkada ishlaydi va Read faqat uning ichida ishlaydi (audit P1-S4)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="vision-") as d:
+        nusxa = Path(d) / ("referens" + (Path(image_path).suffix.lower() or ".png"))
+        shutil.copy(image_path, nusxa)
+        ans = analyze.run_claude(
+            VISION_PROMPT.format(path=nusxa), effort="medium", allowed_tools=["Read"], ish_papka=d
+        )
     theme, issues = validate_theme(parse_theme_yaml(ans))
     return theme, issues
 

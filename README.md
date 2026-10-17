@@ -51,6 +51,10 @@ venv/bin/pip install -r requirements.txt
    venv/bin/python send.py --get-chat-id
    ```
    Chiqqan `chat_id` ni `.env` dagi `TELEGRAM_CHAT_ID=` ga yozing.
+4. **Guruh chat bo'lsa** (chat_id manfiy) — `TELEGRAM_OWNER_IDS=` ga buyruq bera oladigan
+   odamlarning user ID'larini vergul bilan yozing. Aks holda bot guruhda hech kimga javob
+   bermaydi (har bir a'zo `/pm_push`, `/pm_set` kabi buyruqlarni ishlata olmasin).
+   Shaxsiy chatda bu shart emas.
 
 ### 4. config.yaml to'ldiring (siz qilasiz)
 
@@ -204,7 +208,10 @@ tabdan javob oladi); Main qaytarilsa avvalgi holat o'z-o'zidan tiklanadi.
 
 **Xavfsizlik:** bot faqat `.env` dagi `TELEGRAM_CHAT_ID` ga javob beradi.
 Boshqa chat'lardan kelgan xabarlar log qilinadi va **jim** ignore bo'ladi
-(hech qanday javob yo'q).
+(hech qanday javob yo'q). Shu chat ichida ham yuboruvchi tekshiriladi: faqat
+`TELEGRAM_OWNER_IDS` dagi (shaxsiy chatda — chat egasi) foydalanuvchi buyruq bera
+oladi. `claude -p` toollarsiz va bo'sh papkada ishlaydi (sheet katagidagi ko'rsatma
+fayl o'qita olmaydi); maxfiy tab o'qilgan javob xotira va arxivga yozilmaydi.
 
 **launchd (doimiy fon):**
 ```bash
