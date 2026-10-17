@@ -11,7 +11,7 @@ snapshot   diff.json    report.md           Telegram
         (data/snapshots/YYYY-MM-DD/)
 ```
 
-- Snapshotlar 30 kun saqlanadi (eski papkalar avtomatik o'chadi).
+- Snapshotlar 40 kun saqlanadi (eski papkalar avtomatik o'chadi; undiruv P0-5 oy asosi oy oxirigacha kerak).
 - Bir sheet o'qilmasa — skip + log, qolganlari davom etadi.
 - Claude ishlamay qolsa — quruq raqamlardan fallback hisobot ketadi.
 - Pipeline'ning istalgan bosqichi yiqilsa — Telegram'ga ⚠️ alert boradi.

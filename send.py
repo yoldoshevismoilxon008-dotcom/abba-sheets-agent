@@ -204,6 +204,12 @@ def build_caption(data, title="kunlik KPI hisobot"):
         if u.get("muddat_otgan"):
             tot = sum(i.get("summa", 0) for i in u["muddat_otgan"])
             u_line += f" · ⏰ muddat o'tgan: {len(u['muddat_otgan'])} ta ({fmt(tot)})"
+        # P0-5: joriy oy izohsiz yo'qolgan pul — oy oxirigacha har kuni (izohlanmaguncha)
+        izd = u.get("izohsiz") or {}
+        x = izd.get("x") or 0
+        if x > 1:
+            # jonli /hisobot sheet tahriridan keyin: X — 09:00 snapshot'dan (K/U esa jonli)
+            u_line += f" · ⚠️ izohsiz {fmt(x)}" + (" (09:00)" if izd.get("jonli_farq") else "")
     lines = [
         f"📊 {dd} — {title}",
         holat + (f" · 🤝 tan olingan: {len(data['acknowledged'])}" if data.get("acknowledged") else ""),

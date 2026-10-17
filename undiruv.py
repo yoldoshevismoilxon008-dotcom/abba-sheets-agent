@@ -23,6 +23,7 @@ sys.path.insert(0, str(BASE))
 import diff as diffmod
 import fetch as fetchmod
 import undiruv_carry as carrymod
+import undiruv_izohsiz as izohsizmod  # noqa: E402  (P0-5; u undiruv'ni kech import qiladi)
 
 DDMM_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})$")                 # 06.07 (yilsiz)
 DDMMYYYY_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$")  # 06.07.2026
@@ -268,8 +269,10 @@ def _pm_kalit(pm):
     return "".join(ch for ch in fetchmod.norm(pm or "") if ch.isalnum())
 
 
-def _juftla(prev_rows, cur_rows, faqat):
+def _juftla(prev_rows, cur_rows, faqat, tenglik=None):
     """O'tgan oy qatorlarini joriy oy qatorlariga 1:1 juftlaydi.
+    tenglik(r, c, i, j) — aynan nomli nomzodlar orasida (shu PM'dan keyin) tartib kaliti; None —
+    «summa teng» (oy almashuvi: M4/Pruddy). Kunlik (P0-5) juftlash o'zinikini beradi.
     Qaytadi: ({prev_i: cur_j}, noaniq_prev_i, fuzzy_prev_i).
 
       1) aynan _name_key — avval TO'LANMAGAN (`faqat`), keyin to'langan o'tgan qatorlar
@@ -291,7 +294,8 @@ def _juftla(prev_rows, cur_rows, faqat):
             c = cur_rows[j]
             aniq.append(((i not in faqat_set,                        # to'lanmagan o'tgan qator oldin
                           _pm_kalit(c["pm"]) != _pm_kalit(r["pm"]),   # keyin shu PM
-                          round(c["qoldiq"]) != round(r["qoldiq"]),   # keyin summa teng
+                          (tenglik(r, c, i, j) if tenglik else
+                           round(c["qoldiq"]) != round(r["qoldiq"])),  # keyin summa teng
                           i, j), i, j))
     for _kalit, i, j in sorted(aniq):
         if i in pair or j in used:
@@ -661,6 +665,9 @@ def header_row(vals, scan=6):
 # shu izohni (SARLAVHA_BELGI bo'yicha) ko'rsatadi.
 _SARLAVHA_IZOH = []
 SARLAVHA_BELGI = "tabi sarlavhasida"
+# «Jami»dan YUQORIDAGI PM'siz yig'indi qatorlari (AUDIT P0-5 1-qadam): «Aktive Summary», «Ehtimoli
+# aktive», «Jami:» yorlig'i yoki faqat son/summa («$7 536») — loyiha emas, K/U/Q'ga kirmaydi
+JAMLANMA_RE = re.compile(r"^(jami:?|jamlanma|итого|aktive( summary)?( #\d+)?|ehtimoli aktive)$")
 
 
 def sarlavha_izohlari(notes):
@@ -668,12 +675,15 @@ def sarlavha_izohlari(notes):
     return [n for n in (notes or []) if SARLAVHA_BELGI in n]
 
 
-def parse_rows(vals, today, ref=None, tab=""):
+def parse_rows(vals, today, ref=None, tab="", izoh=None):
     """Tab qiymatlari → [{loyiha, pm, qoldiq, undirildi, aktiv, kelishilgan,
     muddat: date|None, holat}]. Jami/summary qatorlari kirmaydi.
     ref — tab oyining 1-kuni: yilsiz «DD.MM» sanalar shu oyga eng yaqin yil bilan
     o'qiladi (yil almashuvi; berilmasa joriy yil — eski xulq).
-    tab — faqat izoh uchun (sarlavha topilmasa egaga qaysi tab ekani)."""
+    tab — faqat izoh uchun (sarlavha topilmasa egaga qaysi tab ekani).
+    izoh — sarlavha izohi yoziladigan ro'yxat (None — umumiy _SARLAVHA_IZOH). Tarixiy snapshot
+    o'qiydigan P0-5 o'z ro'yxatini beradi: bot oqimlari (09:30 push, /hisobot) umumiy ro'yxatni
+    bir vaqtda tozalaydi/o'qiydi — boshqa kun izohi bugungi blokka tushmasin, o'zinikini yo'qotmasin."""
     h = header_row(vals)
     header = [str(x) for x in (vals[h] if vals else [])]
     c_name = _col(header, "nomi")
@@ -694,7 +704,7 @@ def parse_rows(vals, today, ref=None, tab=""):
             note = (f"⚠️ «{tab or 'Undiruv'}» {SARLAVHA_BELGI} {yoq} ustuni topilmadi — "
                     f"qatorlar o'qilmadi (blok bo'sh). Sheet sarlavhasini tekshiring.")
             log(note)
-            _SARLAVHA_IZOH.append(note)
+            (_SARLAVHA_IZOH if izoh is None else izoh).append(note)
         return []
     rows = []
     for row in vals[h + 1:]:
@@ -705,6 +715,8 @@ def parse_rows(vals, today, ref=None, tab=""):
             break  # jadval tugadi — pastda yig'indi bloklari
         if not name:
             continue
+        if not get(c_pm) and (diffmod._son_kalit(name) or JAMLANMA_RE.match(_name_key(name))):
+            continue  # PM'siz yig'indi qatori (P0-5) — PM'li qator HECH QACHON tashlanmaydi
         qoldiq, undirildi, aktiv = money(get(c_left)), money(get(c_paid)), money(get(c_active))
         # Son emas (#REF!, matn) pul kataklari 0 deb sanaladi — jim emas: bad_sum belgisi
         # jamlamada «N qatorda summa son emas» bo'lib chiqadi (P2)
@@ -1134,7 +1146,7 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
     # ham ochiq qolsa — PM'dan ikkinchi marta so'ralmaydi, egaga «⚠️ Ikki tabda dublikat»;
     # ko'chirilgan joriy qatorda izohsiz kamayish — «$N izohsiz» (undiruv_carry). t3 dan
     # OLDIN (`_i` indekslari t1["real"]ga tayanadi). Xato — eski xulq (so'raladi) + egaga izoh.
-    ct = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set()}
+    ct = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set(), "hamkor": set()}
     if ptab is not None:
         try:
             ct = carrymod.tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=ptab)
@@ -1238,7 +1250,9 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
                  # P0-3: dublikat — real'dan olingan (so'ralmaydi, egaga ⚠️); izohsiz — ⚠️ satrlari;
                  # carry_skip/carry_kochgan — summary'dagi o'tgan tab kuzatuvi uchun
                  "dublikat": ct["dublikat"], "izohsiz": ct["izohsiz"],
-                 "carry_skip": sorted(ct["skip"]), "carry_kochgan": sorted(ct["kochgan"])},
+                 "carry_skip": sorted(ct["skip"]), "carry_kochgan": sorted(ct["kochgan"]),
+                 # P0-5: P0-3 bugun hukm qilgan JORIY tab qatorlari [nom, pm] (ikki marta ⚠️ yo'q)
+                 "carry_hamkor": [list(x) for x in sorted(ct.get("hamkor") or ())]},
         "keyingi": keyingi,
         "notes": notes,
         "data_source": "snapshot" if "snapshot" in srcs else "live",
@@ -1334,14 +1348,15 @@ def bad_sum_warn(t):
 
 
 def reconcile_warn(t):
-    """Ogohlantirish satri yoki "" — raqamlar yopilmasa (jamlama/PDF boshiga)."""
+    """Ogohlantirish satri yoki "" — K − U = Q (±$1) yopilmasa (jamlama/PDF boshiga; AUDIT P0-5 3.1:
+    K, U, Q alohida yaxlitlanadi — $1 farq signal emas)."""
     g = (t or {}).get("reconcile_gap") or 0
-    if not g:
+    if abs(g) <= 1:
         return ""
     kel_und = t["kelishilgan"] - t["undirildi"]
-    return (f"⚠️ Raqamlar yopilmadi: kelishilgan−undirildi = {_fmt_usd(kel_und)}, "
-            f"ro'yxat = {_fmt_usd(t['qoldiq'])} (farq {_fmt_usd(g)}) — sheet'da "
-            "yopilgan qatorda qoldiq qolgan bo'lishi mumkin, tekshiring.")
+    return (f"⚠️ Arifmetika mos emas, farq {_fmt_usd(abs(g))}: kelishilgan−undirildi = {_fmt_usd(kel_und)}, "
+            f"qoldiq = {_fmt_usd(t['qoldiq'])} — sheet'da yopilgan (to'langan/ketgan) qatorda Summa qolgan "
+            "bo'lishi mumkin, tekshiring.")
 
 
 LOSE_FLAG_EMPTY = "summa yozilmagan"  # Ketdi, lekin «Lose summa» bo'sh (jamiga 0)
@@ -1434,7 +1449,7 @@ def keyingi_tab_holati(k):
 
 def izoh_satrlari(notes):
     """Egaga izohlar: belgisiz (qaror holati) satrlar «📝 » bilan — matn, PDF va push bir xil."""
-    return [n if not n or n[:1] in "⚠📝ℹ🆕🔁🧹⚖" else "📝 " + n for n in notes]
+    return [n if not n or n[:1] in "⚠📝ℹ🆕🔁🧹⚖✅" else "📝 " + n for n in notes]
 
 
 def farqli_satrlari(pv, cur_oy):
@@ -1577,6 +1592,16 @@ def summary(day, today=None, prefer_live=True):
                 qosh.append(f"⚠️ {str(pv.get('oy') or '').capitalize()} tabi qatorma-qator "
                             f"tekshirilmadi ({type(e).__name__})")
         qosh += farqli_satrlari(pv, v["oy"])
+    # P0-5: joriy oy tabi kecha↔bugun qatorma-qator (snapshot zanjiri) — faqat summary (09:00, /hisobot)
+    iz = None
+    if izohsizmod.ochiq():
+        try:
+            iz = izohsizmod.hisobot(today, day, v)
+        except Exception as e:                   # noqa: BLE001
+            log(f"izohsiz tekshiruvi xato: {type(e).__name__}: {e}")
+            iz = {"notes": [f"⚠️ Izohsiz yo'qolish tekshiruvi ishlamadi ({type(e).__name__}) — "
+                            f"qatorma-qator tekshirilmadi"]}
+        qosh += iz.get("notes") or []
     dub = pv.get("dublikat") or []
     return {
         "oy": fetchmod.current_month_name(today),
@@ -1608,6 +1633,14 @@ def summary(day, today=None, prefer_live=True):
                                + list((k or {}).get("izoh") or []) + qosh),
         # Ketgan loyihalar — YAGONA manba (report_data ham aynan shuni chaqiradi)
         "lose": lose_summary(rows),
+        # P0-5: izohsiz yo'qolgan (joriy oy) va Lose summa ustuni jami (musbatlari, «ketdi»dan qat'i
+        # nazar — 2-foiz uchun). Kalit o'chiq yoki tekshiruv xato — maydon yo'q (report.json o'zgarmaydi)
+        # jonli_farq/lose_snap — faqat jonli sheet bugungi snapshot'dan farq qilsa (/hisobot tahrirdan keyin)
+        **({"izohsiz": {**{k: iz.get(k) for k in ("x", "dan", "kun", "eski")},
+                        **{k: iz[k] for k in ("jonli_farq", "lose_snap") if k in iz}},
+            **({"lose_jami": round(sum(max(0, r.get("lose") or 0) for r in rows))}
+               if rows[0].get("lose_col_present") else {})}
+           if iz and "x" in iz else {}),
     }
 
 
@@ -1631,13 +1664,15 @@ def report_block(day, today=None):
     banner = snapshot_banner(s.get("source"), s.get("day"))
     if banner:
         L.append(banner)
-    if s.get("reconcile_gap"):
-        L.append(reconcile_warn(s))
+    w = reconcile_warn(s)
+    if w:
+        L.append(w)
     L += [
         f"💰 **Undiruv ({s['oy']})** — {s['tab']}",
         f"Kelishilgan {_fmt_usd(s['kelishilgan'])} · undirildi {_fmt_usd(s['undirildi'])} "
         f"({str(s['pct']).replace('.', ',')}%) · qoldiq {_fmt_usd(s['qoldiq'])}"
-        + (f" · 💳 aktiv obuna {_fmt_usd(s['aktiv'])} (so'ralmaydi)" if s["aktiv"] else ""),
+        + (f" · 💳 aktiv obuna {_fmt_usd(s['aktiv'])} (so'ralmaydi)" if s["aktiv"] else "")
+        + izohsizmod.pul_qatori(s),
     ]
     L += izoh_satrlari(s.get("notes") or [])
     if s["muddat_otgan"]:
@@ -1900,8 +1935,9 @@ def full_report(rows, tab, today, source="", view=None):
     d = report_data(rows, tab, today, source, view=view)
     t, c = d["totals"], d["counts"]
     L = []
-    if t.get("reconcile_gap"):
-        L.append(reconcile_warn(t))
+    w = reconcile_warn(t)
+    if w:
+        L.append(w)
     L += [
         f"🧪 **Undiruv dry-run — {tab}**" + (f" ({source})" if source else ""),
         "Filtr: undirilmagan = «Summa» (shu oy qoldig'i) > 0 va holati «To'lov "
