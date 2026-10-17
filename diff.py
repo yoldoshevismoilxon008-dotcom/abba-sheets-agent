@@ -51,8 +51,11 @@ def dam_kunlari():
         return set()
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[diff] {msg}", flush=True)
+    print(f"[diff] {redact(msg)}", flush=True)
 
 
 def col_letter(i):

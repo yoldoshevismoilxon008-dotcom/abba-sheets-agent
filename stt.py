@@ -37,8 +37,11 @@ TTS_VOICES = {"sardor": "uz-UZ-SardorNeural", "madina": "uz-UZ-MadinaNeural"}
 TTS_MAX_CHARS = 500
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[stt] {msg}", flush=True)
+    print(f"[stt] {redact(msg)}", flush=True)
 
 
 def whisper_bin():

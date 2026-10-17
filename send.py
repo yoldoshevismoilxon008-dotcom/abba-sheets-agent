@@ -25,8 +25,11 @@ CHUNK_LIMIT = 4000  # Telegram limiti 4096 — teglar uchun zaxira qoldiramiz
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[send] {msg}", flush=True)
+    print(f"[send] {redact(msg)}", flush=True)
 
 
 def load_env():
@@ -158,7 +161,14 @@ def split_chunks(text, limit=CHUNK_LIMIT):
 def tg_call(token, method, payload):
     import requests
 
-    return requests.post(API.format(token=token, method=method), json=payload, timeout=30)
+    from maxfiy import safe_exc
+
+    if isinstance(payload, dict):
+        payload = {k: (redact(v) if k in ("text", "caption") else v) for k, v in payload.items()}
+    try:
+        return requests.post(API.format(token=token, method=method), json=payload, timeout=30)
+    except requests.RequestException as e:
+        raise safe_exc(e) from None            # xato matnida URL — ya'ni bot tokeni (P0-1)
 
 
 def tg_send_document(token, chat_id, path, caption="", filename=None):
@@ -167,13 +177,18 @@ def tg_send_document(token, chat_id, path, caption="", filename=None):
 
     import requests
 
+    from maxfiy import safe_exc
+
     with open(path, "rb") as f:
-        r = requests.post(
-            API.format(token=token, method="sendDocument"),
-            data={"chat_id": chat_id, "caption": caption[:1024]},
-            files={"document": (filename or _os.path.basename(path), f, "application/pdf")},
-            timeout=180,
-        )
+        try:
+            r = requests.post(
+                API.format(token=token, method="sendDocument"),
+                data={"chat_id": chat_id, "caption": redact(caption)[:1024]},
+                files={"document": (filename or _os.path.basename(path), f, "application/pdf")},
+                timeout=180,
+            )
+        except requests.RequestException as e:
+            raise safe_exc(e) from None        # xato matnida URL — ya'ni bot tokeni (P0-1)
     if r.status_code != 200:
         raise RuntimeError(f"sendDocument {r.status_code}: {r.text[:250]}")
 
@@ -239,7 +254,12 @@ def tg_send(token, chat_id, html_text):
 def get_chat_id(token):
     import requests
 
-    r = requests.get(API.format(token=token, method="getUpdates"), timeout=30)
+    from maxfiy import safe_exc
+
+    try:
+        r = requests.get(API.format(token=token, method="getUpdates"), timeout=30)
+    except requests.RequestException as e:
+        raise safe_exc(e) from None
     if r.status_code != 200:
         log(f"XATO: getUpdates {r.status_code}: {r.text[:200]}")
         return 1

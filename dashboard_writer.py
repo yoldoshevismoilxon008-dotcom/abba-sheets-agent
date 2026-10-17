@@ -3,7 +3,8 @@
 
 XAVFSIZLIK MODELI:
   - O'qish (fetch.py va h.k.) — faqat spreadsheets.readonly scope, yozolmaydi.
-  - Yozish — FAQAT shu modul orqali va FAQAT config.yaml dagi dashboard_id ga.
+  - Yozish — FAQAT shu modul orqali va FAQAT dashboard_id ga (config.local.yaml /
+    CONFIG_LOCAL_B64 — fetch.load_full_config; public config.yaml'da bo'sh).
   - Boshqa har qanday spreadsheet_id ga yozish urinishi: WriteDeniedError +
     log + Telegram alert. Guard tarmoq chaqiruvidan OLDIN ishlaydi.
 
@@ -27,8 +28,11 @@ class WriteDeniedError(RuntimeError):
     pass
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[dashboard_writer] {msg}", flush=True)
+    print(f"[dashboard_writer] {redact(msg)}", flush=True)
 
 
 def _alert(msg):
@@ -55,7 +59,7 @@ def guard(spreadsheet_id):
     did = dashboard_id()
     if not did:
         raise WriteDeniedError(
-            "dashboard_id config.yaml da to'ldirilmagan — yozish o'chiq"
+            "dashboard_id to'ldirilmagan (config.local.yaml / CONFIG_LOCAL_B64) — yozish o'chiq"
         )
     if str(spreadsheet_id).strip() != did:
         msg = (

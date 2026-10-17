@@ -87,7 +87,8 @@ else
 fi
 
 # Dashboard yangilash (dashboard_id to'ldirilgan bo'lsa) — yiqilsa alert, pipeline davom etadi
-if grep -qE '^dashboard_id: *"[^"]+"' config.yaml; then
+# dashboard_id config.local.yaml / CONFIG_LOCAL_B64 da (public config.yaml'da emas — P0-2)
+if "$PY" -c "import sys, fetch; sys.exit(0 if fetch.load_full_config().get('dashboard_id') else 1)" 2>/dev/null; then
   if ! "$PY" dashboard.py --date "$TODAY"; then
     echo "XATO: dashboard yangilanmadi"
     "$PY" send.py --text "⚠️ abba-sheets-agent ($TODAY): dashboard yangilanmadi. Log: $DATA_DIR/logs/$TODAY.log" || true

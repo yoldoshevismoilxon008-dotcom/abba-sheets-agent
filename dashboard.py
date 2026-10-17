@@ -35,8 +35,11 @@ HEADERS_UNDIRUV = ["PM", "Loyiha", "Kelishilgan $", "Undirildi $", "Qoldiq $",
                    "To'lov muddati", "Holat"]
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[dashboard] {msg}", flush=True)
+    print(f"[dashboard] {redact(msg)}", flush=True)
 
 
 def num(x, nd=1):

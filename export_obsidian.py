@@ -25,8 +25,11 @@ INDEX_HEAD = [
 ]
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[export] {msg}", flush=True)
+    print(f"[export] {redact(msg)}", flush=True)
 
 
 def main():

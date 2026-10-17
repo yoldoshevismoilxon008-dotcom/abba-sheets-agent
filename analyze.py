@@ -40,8 +40,11 @@ CLAUDE_FALLBACK_PATHS = [
 ]
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[analyze] {msg}", flush=True)
+    print(f"[analyze] {redact(msg)}", flush=True)
 
 
 def load_env():

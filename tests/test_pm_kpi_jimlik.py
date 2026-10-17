@@ -380,7 +380,10 @@ def test_hisobot_jimlikni_korsatadi():
 
 def test_config_pm_sheetlari_boshqa_tablarni_kuzatadi():
     import fetch
-    pm = [s for s in fetch.load_config() if s.get("pm_kpi", True)]
+    # config.yaml tuzilmasi (ID'lar config.local.yaml / CONFIG_LOCAL_B64 da — P0-1;
+    # load_config ID'siz sheet'ni o'tkazib yuboradi, shuning uchun to'liq config o'qiladi)
+    pm = [s for s in fetch.load_full_config().get("sheets", [])
+          if s.get("pm_kpi", True) and not s.get("qa_only")]
     assert len(pm) == 4 and all(s.get("track_other_tabs") for s in pm)
 
 
