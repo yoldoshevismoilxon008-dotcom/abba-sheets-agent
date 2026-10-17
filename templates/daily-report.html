@@ -167,13 +167,15 @@
 {% elif undiruv %}
 <div class="undiruv">
   {% if undiruv.source == "snapshot" %}<div style="background:#0F1111;color:#fff;border-radius:2mm;padding:1.6mm 2.4mm;margin-bottom:1.6mm;font-size:9.5px;font-weight:800;">🧊 SNAPSHOT — JONLI MA'LUMOT EMAS</div>{% endif %}
-  <h3>💰 Undiruv ({{ undiruv.oy }}) — {{ undiruv.tab }}</h3>
+  <h3>💰 Undiruv ({{ undiruv.oy }}) — {{ undiruv.tab }}</h3>{% if undiruv.reconcile_w %}
+  <div class="u-due"><span class="overdue">{{ undiruv.reconcile_w }}</span></div>{% endif %}
   <div class="u-kpis">
     <div class="uk"><div class="l">Kelishilgan</div><div class="v">{{ undiruv.kelishilgan_disp }}</div></div>
     <div class="uk"><div class="l">Undirildi</div><div class="v c-green">{{ undiruv.undirildi_disp }}</div></div>
     <div class="uk"><div class="l">Qoldiq</div><div class="v c-orange">{{ undiruv.qoldiq_disp }}</div></div>
     {% if undiruv.aktiv %}<div class="uk"><div class="l">Aktiv obuna</div><div class="v muted">{{ undiruv.aktiv_disp }}</div></div>{% endif %}
-    <div class="uk"><div class="l">Bajarilish</div><div class="v">{{ undiruv.pct|string|replace(".", ",") }}%</div></div>
+    <div class="uk"><div class="l">Bajarilish</div><div class="v">{{ undiruv.pct|string|replace(".", ",") }}%</div>{% if undiruv.izohsiz_kpi and undiruv.izohsiz_kpi.pct2 %}<div class="l" style="font-size:7.5px;margin-top:.4mm;text-transform:none;">lose+izohsiz bilan {{ undiruv.izohsiz_kpi.pct2 }}%</div>{% endif %}</div>{% if undiruv.izohsiz_kpi %}
+    <div class="uk"><div class="l">Lose · izohsiz</div><div class="v" style="font-size:12px;"><span class="muted">{{ undiruv.izohsiz_kpi.lose_d }}</span> · <span class="{% if undiruv.izohsiz_kpi.x %}c-red{% else %}muted{% endif %}">{{ undiruv.izohsiz_kpi.x_d }}</span></div><div class="l" style="font-size:7.5px;margin-top:.4mm;text-transform:none;">izohsiz {{ undiruv.izohsiz_kpi.belgi }}</div></div>{% endif %}
   </div>
   {% for n in undiruv.notes or [] %}<div class="u-due"><span class="soon">{{ n }}</span></div>{% endfor %}
   {% if undiruv.muddat_otgan %}

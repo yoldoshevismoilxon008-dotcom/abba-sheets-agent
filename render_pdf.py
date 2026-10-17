@@ -278,6 +278,19 @@ def build_html(data, theme=None, logo_uri=None):
         for k in ("kelishilgan", "undirildi", "qoldiq", "aktiv"):
             undiruv[k + "_disp"] = f"${undiruv.get(k, 0):,.0f}".replace(",", " ")
         undiruv["otgan_sum"] = "$" + f"{sum(i.get('summa', 0) for i in undiruv.get('muddat_otgan', [])):,.0f}".replace(",", " ")
+        # AUDIT P0-5: K−U=Q (±$1) ogohlantirishi kunlik PDF'da ham; Lose · izohsiz (joriy oy) KPI va 2-foiz
+        import undiruv as _und
+        import undiruv_izohsiz as _izm
+        undiruv["reconcile_w"] = _und.reconcile_warn(undiruv)
+        izd = undiruv.get("izohsiz")
+        if izd:
+            lj, xx = undiruv.get("lose_jami"), izd.get("x") or 0
+            # belgi — 💰 matn qatoridagi yorliq bilan bir xil («oy boshidan», «…, 09:00 snapshot»);
+            # tekshirilmagan oyda (kun None) X «—» (tekshirilmagan $0 ko'rsatilmaydi)
+            undiruv["izohsiz_kpi"] = {
+                "lose_d": "—" if lj is None else f"${lj:,.0f}".replace(",", " "),
+                "x_d": "—" if izd.get("kun") is None else f"${xx:,.0f}".replace(",", " "), "x": xx,
+                "pct2": _izm.ikkinchi_foiz(undiruv), "belgi": _izm.belgi(izd)}
         # Yo'qotilgan loyihalar (undiruv.lose_summary — yagona manba) → display.
         # col_missing yoki lose yo'q → undiruv["lose"] O'CHIRILADI (shablon yashiradi;
         # nusxadagi asl col_missing dict qolib ketmasin).
