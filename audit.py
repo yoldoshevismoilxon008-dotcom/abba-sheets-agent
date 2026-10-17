@@ -57,6 +57,7 @@ KEY_LABELS = {
     "sana-yilsiz": "Yilsiz sana",
     "jami-nol": "Jami=0, ball bor",
     "ball-raqam-emas": "Ball raqam emas",
+    "ideal-bosh": "Ideal bali bo'sh, fakt bor",
     "oy-mainda-yoq": "Oy tabida bor, Main'da yo'q",
     "mainda-oy-yoq": "Main'da bor, oy tabida yo'q",
 }
@@ -169,19 +170,122 @@ def _numval(v):
         return None
 
 
+def table_width(header):
+    """Asosiy jadval kengligi: sarlavhaning chapdan boshlangan bloki (ichidagi BITTA
+    bo'sh sarlavha katagiga chidamli). Ketma-ket 2+ bo'sh ustun bilan ajralgan o'ng
+    tomondagi shablon/yon jadvallar («May oyligi→ …» bloklari) jadvalga kirmaydi.
+    Sarlavha bo'sh bo'lsa None — butun qator (eski xulq)."""
+    last, gap, seen = -1, 0, False
+    for i, h in enumerate(header):
+        if str(h).strip():
+            last, gap, seen = i, 0, True
+        elif seen:
+            gap += 1
+            if gap >= 2:
+                break
+    return last + 1 if last >= 0 else None
+
+
 def data_rows(vals):
     """(header, [(real_qator_raqami, row), ...]) — jadvalning HAQIQIY qatorlari.
-    Birinchi to'liq bo'sh qator yoki oylik-blok markeri = jadval tugadi."""
+    Birinchi to'liq bo'sh qator yoki oylik-blok markeri = jadval tugadi.
+
+    Marker faqat jadvalning O'Z ustunlarida qidiriladi (audit K5): loyiha qatori bilan
+    bir qatorda turgan o'ng tomondagi shablon katagi («May oyligi→ Abdullox», «Limit»)
+    jadvalni kesib, qolgan loyihalarni hisobdan tushirib yubormasin. Jadval qismi bo'sh
+    qatorda (jadval tugagan, o'ngda blok davom etadi) marker butun qatorda qidiriladi.
+
+    KPI oy tabida (ideal/«Proekt bali» ustunlari bor) jadval chegarasi — eng o'ngdagi KPI
+    ustuni: yon jadval (Manager / O'rtacha ball / Fakt foizda) sarlavhasi bir qatorda,
+    0–1 bo'sh ustun bilan tursa ham jadvalga qo'shilmaydi. Boshqa tablarda — table_width."""
     h = diffmod.detect_header(vals)
     header = [str(x) for x in (vals[h] if vals else [])]
+    w = table_width(header)
+    kpi = [i for i in (find_col(header, "ideal"), find_col(header, "proekt bali"),
+                       find_col(header, "kechga qolgan")) if i is not None]
+    if kpi:
+        w = max(kpi) + 1
     rows = []
     for n, row in enumerate(vals[h + 1:], start=h + 2):
         if not any(str(c).strip() for c in row):
             break
-        if _is_marker_row(row):
+        part = row[:w] if w else row
+        if any(str(c).strip() for c in part):
+            if _is_marker_row(part):
+                break
+        elif _is_marker_row(row):
             break
         rows.append((n, row))
     return header, rows
+
+
+# Yig'indi qatorining loyiha nomi katagidagi yorliqlari — loyiha emas (audit K4)
+JAMI_NOMLAR = {"jami", "jami:", "jamlanma", "umumiy", "umumiy jami", "itogo", "итого"}
+
+
+def is_sum_name(name):
+    """Nom katagi yig'indi qatoriniki: bo'sh, «Jami» yorlig'i yoki SON. Real oy tablarida
+    Jami qatorining «Proekt nomi» katagida loyihalar soni yoki Σideal/39 turadi
+    («17», «12», «9,794871795» — 19.08/30.07/22.08 hisobotlari): u loyiha emas."""
+    n = fetchmod.norm(name)
+    return not n or n in JAMI_NOMLAR or _numval(str(name)) is not None
+
+
+def _name_col(header, *skip):
+    """Loyiha nomi ustuni. Ball ustunlari («Proekt bali») nom deb olinmasin."""
+    for nd in ("proekt nomi", "loyiha", "nomi", "proekt"):
+        i = find_col(header, nd)
+        if i is not None and i not in skip:
+            return i
+    return None
+
+
+def pm_stats(vals):
+    """Oy tabidan PM KPI statistikasi — dashboard, kunlik PDF va Q&A uchun YAGONA hisob.
+
+    Qaytadi: {aktiv, ideal, fakt, delay, rows, ideal_bosh, cols}
+      aktiv      — «Kpi ideal bali» > 0 bo'lgan nomli loyihalar soni (1% stavka n'i);
+      ideal/fakt — faqat shu aktiv loyihalar bo'yicha yig'indi (foiz = fakt/ideal);
+      delay      — shu loyihalarning «Kechga qolgan» kunlari yig'indisi;
+      rows       — data_rows qatorlari soni (Q&A «N qator»);
+      ideal_bosh — ideal bo'sh/0, lekin fakt > 0 bo'lgan loyihalar nomi (foizga KIRMAYDI);
+      cols       — ideal yoki fakt ustuni topildimi (False — KPI jadvali emas).
+
+    Qoidalar:
+      • ideal bo'sh/0/#REF! qatorning fakti suratga qo'shilib, maxrajga qo'shilmasa foiz
+        sun'iy shishadi (16.08: Kanzec ideal bo'sh, fakt 23,2) — bunday qator umuman
+        hisoblanmaydi, nomi ideal_bosh'da qaytadi va audit WARN beradi (audit K3);
+      • yig'indi qatori loyiha emas (K4): nomi bo'sh, «Jami» yoki SON («17», «9,79…» —
+        is_sum_name), yoki bali SUM_ROW_MAX'dan katta. Aks holda bo'sh qatorsiz kelgan
+        Jami qatori aktivni +1, ideal/fakt/kechikishni 2 baravar qiladi."""
+    header, rows = data_rows(vals)
+    ci = find_col(header, "ideal")
+    cf = find_col(header, "proekt bali")
+    ck = find_col(header, "kechga qolgan", "kech")
+    cp = _name_col(header, ci, cf, ck)
+    aktiv, si, sf, dl, bosh = 0, 0.0, 0.0, 0.0, []
+    for n, row in rows:
+        vi = _numval(cell(row, ci)) or 0.0
+        vf = _numval(cell(row, cf)) or 0.0
+        vd = _numval(cell(row, ck)) or 0.0
+        if vi >= SUM_ROW_MAX or vf >= SUM_ROW_MAX:
+            continue                       # bitta loyiha bali bunchalik bo'lmaydi — yig'indi
+        if cp is not None:
+            name = cell(row, cp)
+            if is_sum_name(name):
+                continue
+        else:
+            name = f"{n}-qator"
+        if vi <= 0:
+            if vf > 0:
+                bosh.append(name)
+            continue
+        aktiv += 1
+        si += vi
+        sf += vf
+        dl += vd
+    return {"aktiv": aktiv, "ideal": si, "fakt": sf, "delay": dl, "rows": len(rows),
+            "ideal_bosh": bosh, "cols": ci is not None or cf is not None}
 
 
 def audit_main_tab(sheet_name, vals, findings):
@@ -244,11 +348,19 @@ def audit_month_tab(sheet_name, tab, vals, findings):
             if any(nonzero(s) for s in scores) and (not nums or max(nums) < SUM_ROW_MAX):
                 findings.append((sheet_name, tab, CRIT, f"{n}-qator: proekt nomi bo'sh, lekin ballari bor", "nomsiz-qator"))
             continue
+        if is_sum_name(name):
+            continue                       # yig'indi qatori («Jami», «17») — loyiha emas, Main bilan solishtirilmaydi
         names.add(fetchmod.norm(name))
         for label, idx in (("Kpi ideal bali", c_ideal), ("Proekt bali", c_fact)):
             v = cell(row, idx)
             if idx is not None and v and not is_num(v):
                 findings.append((sheet_name, tab, CRIT, f"«{name}» ({n}-q): {label} raqam emas: {v!r}", "ball-raqam-emas"))
+        vi, vf = cell(row, c_ideal), cell(row, c_fact)
+        if (c_ideal is not None and (not vi or (is_num(vi) and not nonzero(vi)))
+                and is_num(vf) and nonzero(vf)):
+            findings.append((sheet_name, tab, WARN,
+                             f"«{name}» ({n}-q): Kpi ideal bali bo'sh, lekin Proekt bali {vf!r} — "
+                             f"bajarilish foiziga kirmaydi, ideal to'ldirilsin", "ideal-bosh"))
     return names
 
 

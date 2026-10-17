@@ -413,6 +413,18 @@ def _xabar_matni(dd, lines, nd):
             + "\n\nHar biri bo'yicha holat + aniq to'lov sanasini shu yerga yozing.")
 
 
+def _farqli_item(r, yonalish):
+    """«Summa farqli (qaror kerak)» qatori. «yangi» — joriy qatorning KELISHILGANI: ega
+    qarori (undiruv_qaror.json yangi_summa) aynan shu summa bilan solishtiriladi. Qisman
+    to'lov bo'lsa (audit K1) qolgan qarz alohida «qoldiq» — qatordan ko'chirilgan qaror
+    «eskirgan» bo'lib qolmasin."""
+    k = r["_kochish"]
+    kel = k.get("cur_kelishilgan", k["cur_summa"])
+    return {"loyiha": r["loyiha"], "pm": r["pm"], "otgan": round(r["qoldiq"]),
+            "yangi": kel, "qoldiq": k["cur_summa"], "yangi_loyiha": k["cur_loyiha"],
+            "yonalish": yonalish}
+
+
 def build_push(today, cur_rows, prev_rows, prev_month, view=None):
     """(pm_display → [qator matnlari], stats). Filtr: undiruv.is_unpaid +
     muddat o'tgan yoki ≤PUSH_DUE_DAYS kun. Sanasizlar PM'ga ketmaydi (stats'da).
@@ -453,9 +465,7 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
     if view is not None:
         pv = view["prev"]
         prev_real, closed, moved = pv["real"], pv["closed"], pv["moved"]
-        stats["farqli"] = [{"loyiha": r["loyiha"], "pm": r["pm"], "otgan": round(r["qoldiq"]),
-                            "yangi": r["_kochish"]["cur_summa"], "yangi_loyiha": r["_kochish"]["cur_loyiha"],
-                            "yonalish": f"{prev_month} → {cur_oy}"} for r in pv["farqli"]]
+        stats["farqli"] = [_farqli_item(r, f"{prev_month} → {cur_oy}") for r in pv["farqli"]]
         stats["noaniq"] = [_noaniq_satr(r, prev_month) for r in pv["noaniq"]]
         stats["qaror_izoh"] = list(pv["izoh"])
         stats["qaror_qollangan"] = [x for x in (_qaror_satri(m, cur_oy) for m in moved) if x]
@@ -538,9 +548,7 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
                     "matn": undiruv.kochish_matn(r)}
         stats["keyingi_kochgan"] = [_ki(r) for r in flag if r["keyingi_oyga"].get("turi") != "yopilgan"]
         stats["keyingi_yopilgan"] = [_ki(r) for r in flag if r["keyingi_oyga"].get("turi") == "yopilgan"]
-        stats["farqli"] += [{"loyiha": r["loyiha"], "pm": r["pm"], "otgan": round(r["qoldiq"]),
-                             "yangi": r["_kochish"]["cur_summa"], "yangi_loyiha": r["_kochish"]["cur_loyiha"],
-                             "yonalish": r.get("_yonalish") or f"{cur_oy} → {k['oy']}"}
+        stats["farqli"] += [_farqli_item(r, r.get("_yonalish") or f"{cur_oy} → {k['oy']}")
                             for r in k.get("farqli", [])]
         stats["noaniq"] += [_noaniq_satr(r, cur_oy) for r in k.get("noaniq", [])]
         stats["qaror_izoh"] += list(k.get("izoh", []))
@@ -791,7 +799,9 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     if stats.get("farqli"):
         fq = stats["farqli"]
         det = ", ".join(f"{i['loyiha']} ({i['pm']}, {i['yonalish']}: {_fmt(i['otgan'])} → "
-                        f"{_fmt(i['yangi'])})" for i in fq[:6])
+                        f"{_fmt(i['yangi'])}"
+                        + (f", qoldiq {_fmt(i['qoldiq'])}" if i.get("qoldiq", i["yangi"]) != i["yangi"] else "")
+                        + ")" for i in fq[:6])
         L.append(f"⚖️ Summa farqli — ko'chirilgan deb OLINMADI, o'tgan qoldiq ham so'ralmoqda "
                  f"(qaror kerak): {det}" + (f" +{len(fq) - 6}" if len(fq) > 6 else ""))
     if stats.get("noaniq"):

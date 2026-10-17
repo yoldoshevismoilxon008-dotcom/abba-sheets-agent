@@ -868,22 +868,16 @@ def sheet_aggregates(day, snap, exclude):
         for rng, data in snap.get("ranges", {}).items():
             tab = fetchmod.tab_of_range(rng)
             vals = data.get("values", [])
-            header, rows = auditmod.data_rows(vals)
-            ci = auditmod.find_col(header, "ideal")
-            cf = auditmod.find_col(header, "proekt bali")
-            ck = auditmod.find_col(header, "kechga qolgan", "kech")
-            if ci is None and cf is None:
-                lines.append((tab, f"{tab}: {len(rows)} qator"))
+            st = auditmod.pm_stats(vals)   # yagona hisob: dashboard va PDF bilan bir xil
+            if not st["cols"]:
+                lines.append((tab, f"{tab}: {st['rows']} qator"))
                 continue
-            si = sum(auditmod._numval(auditmod.cell(r, ci)) or 0 for _, r in rows)
-            sf = sum(auditmod._numval(auditmod.cell(r, cf)) or 0 for _, r in rows)
-            dl = (
-                sum(auditmod._numval(auditmod.cell(r, ck)) or 0 for _, r in rows)
-                if ck is not None else 0
-            )
+            si, sf, dl = st["ideal"], st["fakt"], st["delay"]
             pct = f"{sf / si * 100:.1f}%" if si else "—"
+            bosh = f" | ideal bo'sh (foizga kirmagan): {', '.join(st['ideal_bosh'])}" if st["ideal_bosh"] else ""
             lines.append(
-                (tab, f"{tab}: {len(rows)} qator | Σideal {si:.1f} | Σfakt {sf:.1f} | {pct} | kechikish {dl:.0f}")
+                (tab, f"{tab}: {st['rows']} qator, {st['aktiv']} aktiv | Σideal {si:.1f} | Σfakt {sf:.1f} | "
+                      f"{pct} | kechikish {dl:.0f}{bosh}")
             )
         _agg_cache[key] = lines
     return [txt for tab, txt in lines if tab not in exclude]
@@ -1040,12 +1034,8 @@ def month_aggregate(snap):
         tab = fetchmod.tab_of_range(rng)
         if fetchmod.is_month_watch_tab(tab):             # «Oktyabr» yoki «Oktyabr (2026)»
             vals = snap.get("ranges", {}).get(rng, {}).get("values", [])
-            header, rows = auditmod.data_rows(vals)
-            ci = auditmod.find_col(header, "ideal")
-            cf = auditmod.find_col(header, "proekt bali")
-            si = sum(auditmod._numval(auditmod.cell(r, ci)) or 0 for _, r in rows)
-            sf = sum(auditmod._numval(auditmod.cell(r, cf)) or 0 for _, r in rows)
-            return tab, si, sf
+            st = auditmod.pm_stats(vals)
+            return tab, st["ideal"], st["fakt"]
     return None, 0, 0
 
 

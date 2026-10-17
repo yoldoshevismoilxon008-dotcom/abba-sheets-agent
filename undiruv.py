@@ -496,8 +496,11 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
       cur_rows — joriy qatorlar NUSXASI («qoshilsin» qarori qo'llangan — qaror_qoll);
       real     — hali so'raladigan o'tgan-oy qoldiqlari;
       closed   — joriyda to'langan/ketgan yoki undirildi>0 (o'tgan oy tabi tuzatilmagan).
-                 FAQAT nomi aynan mos juftda — fuzzy juft (boshqa loyiha bo'lishi mumkin)
-                 to'langan bo'lsa qarz yopilmaydi, so'raladi + noaniq (review M3);
+                 Qisman to'lov (joriy qatorda qarz qolgan) faqat kelishilgan == o'tgan
+                 qoldiq bo'lsa yopadi (audit K1). Fuzzy juft (boshqa loyiha bo'lishi
+                 mumkin) faqat to'langanda va kelishilgan == qoldiq bo'lsa yopiladi; ketgan
+                 fuzzy juft HECH QACHON jim yopilmaydi — so'raladi + noaniq (M3; ega qarori
+                 2026-10-17: Bosimov holati P0-3 qoidasi bilan — dublikat ogohlantirishi);
       moved    — joriy oyga KO'CHIRILGAN: summa AYNAN teng yoki ega qarori bor. PM'dan
                  IKKINCHI marta so'ralmaydi (egasining konvensiyasi, 01.09 va 29.09:
                  yangi oy tabini ochganda to'lanmagan qoldiqni ko'chiradi). Ega qarori
@@ -551,12 +554,22 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
             else:
                 out["real"].append(r)
             continue
-        if c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0:
-            # Fuzzy juft faqat yangi qator KELISHILGANI o'tgan qoldiqqa AYNAN teng bo'lsa yopiladi
-            # (to'lovdan oldin shu tenglik uni «ko'chirilgan» qilgan edi — «Bosimov shcool» →
-            # «Bosimov School»): aks holda to'lovdan keyin to'langan qarz har kuni «muddat o'tdi»
-            # deb so'ralardi (review KN2). Summa farqli yoki ketgan — so'raladi + noaniq (M3).
-            if i in fuzzy_i and (c["holat"] == "ketdi" or kel_c != rq):
+        tolov_yopadi = c["holat"] in ("paid", "ketdi") or c["undirildi"] > 0
+        if (tolov_yopadi and i not in fuzzy_i and c["holat"] not in ("paid", "ketdi")
+                and c["qoldiq"] > 0 and kel_c != rq):
+            # QISMAN to'lov (audit K1): joriy qatorda qarz hali bor va uning kelishilgani o'tgan
+            # qoldiqqa teng emas — to'lov joriy oy hisobiga tushgan bo'lishi mumkin, o'tgan
+            # qoldiq jimgina yopilmaydi. Pastdagi oddiy qoida ishlaydi: summa teng —
+            # ko'chirilgan, farqli — so'raladi + egaga «qaror kerak» (to'lovdan oldingidek).
+            tolov_yopadi = False
+        if tolov_yopadi:
+            # Fuzzy juft faqat to'langan/qisman to'langan qatorning KELISHILGANI o'tgan qoldiqqa
+            # AYNAN teng bo'lsa yopiladi (to'lovdan oldin shu tenglik uni «ko'chirilgan» qilgan
+            # edi — «Bosimov shcool» → «Bosimov School», review KN2). Ketgan fuzzy juft — «Lose
+            # summa» qoldiqqa teng bo'lsa ham — so'raladi + noaniq (M3): ega qarori 2026-10-17,
+            # 09.10 Bosimov holati P0-3 qoidasi bilan (egaga «dublikat» ogohlantirishi) ko'riladi.
+            mos = i not in fuzzy_i or (c["holat"] != "ketdi" and kel_c == rq)
+            if not mos:
                 out["real"].append(r)
                 out["noaniq"].append(dict(r, _noaniq=f"nomi aynan mos emas: «{c['loyiha']}» "
                                                      f"{cur_tab or 'joriy tab'}da to'langan/ketgan"))
