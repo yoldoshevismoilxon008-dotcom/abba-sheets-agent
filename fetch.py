@@ -252,6 +252,20 @@ def is_pm_month_tab(title, today=None):
     return norm(title) in month_spellings(month) or bool(pm_yillik_tablar([title], month, today.year))
 
 
+def month_tab_dup_note(tab_titles, today=None):
+    """Joriy oyga bittadan ko'p PM KPI tabi (pm_month_tab qoidasi bo'yicha) bo'lsa egaga
+    izoh, aks holda "". Ilgari jim tartibda oxirgisi olinardi (P2). 2026-09 dan faqat
+    «<Oy> (<yil>)» tablari sanaladi — yilsiz eski «Oktyabr» yonida turishi normal."""
+    today = today or date.today()
+    month = current_month_name(today)
+    c = (pm_yillik_tablar(tab_titles, month, today.year) if pm_qatiy(today)
+         else [t for t in tab_titles if norm(t) == month])
+    if len(c) < 2:
+        return ""
+    return (f"joriy oyga {len(c)} tab bor — «{c[-1]}» o'qildi; boshqalari e'tiborsiz: "
+            + ", ".join(f"«{t}»" for t in c[:-1]) + " (nusxa bo'lsa o'chiring/nomini o'zgartiring)")
+
+
 def detect_watch_tabs(tab_titles, today=None):
     """Main + joriy oy tabini (pm_month_tab) topadi.
     Main yo'q bo'lsa — vaqtinchalik manba sifatida "...ishlash muddati" tabi
@@ -419,6 +433,11 @@ def fetch_sheet(gc, s, today=None):
             "key_column": resolve_key_columns(fetch_tabs, s.get("key_column", 1), today),
             "watch_missing": missing,
         }
+        if s.get("watch_tabs", "auto") in (None, "auto") and s.get("pm_kpi", True):
+            dup = month_tab_dup_note(fetch_tabs, today)
+            if dup:
+                meta["watch_notes"] = [dup]
+                log(f"'{name}': DIQQAT — {dup}")
         for m in missing:
             log(f"'{name}': DIQQAT — «{m}» tabi topilmadi, bugun u kuzatilmaydi "
                 "(yilsiz eski tab arxiv sifatida ataylab o'qilmaydi)")
@@ -500,6 +519,7 @@ def main():
                 "excluded_tabs": meta.get("excluded_tabs", []),
                 "watch_ranges": meta["watch_ranges"],
                 "watch_missing": meta.get("watch_missing", []),
+                "watch_notes": meta.get("watch_notes", []),
                 "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "ranges": ranges,
             }

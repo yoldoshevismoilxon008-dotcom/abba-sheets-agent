@@ -338,6 +338,9 @@ def main():
     except Exception as e:
         log(f"XATO: {e}")
         return 1
+    if args.text is None:
+        # kunlik hisobot (alert emas) matn rejimida ketdi — supervisor catch-up shu satrga qaraydi
+        log("matn hisobot yuborildi")
     return 0
 
 

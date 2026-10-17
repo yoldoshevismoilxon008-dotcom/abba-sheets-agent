@@ -1,0 +1,318 @@
+{
+ "_izoh": "SINTETIK fixture (tests/test_qa_project_lookup.py): 2026-09-07 snapshoti tuzilmasi — tab nomlari va Livardi joylashuvi asl hodisadagidek, qolgan qatorlar to'qima. Haqiqiy sheet ID/ma'lumot YO'Q.",
+ "config": [
+  {
+   "id": "fx-zubair",
+   "name": "Zubair PM KPI",
+   "mode": "all_tabs",
+   "watch_tabs": "auto"
+  },
+  {
+   "id": "fx-islom",
+   "name": "Islom PM KPI",
+   "mode": "all_tabs",
+   "watch_tabs": "auto"
+  },
+  {
+   "id": "fx-smm",
+   "name": "SMM proektlar",
+   "pm_kpi": false,
+   "exclude_tabs": [
+    "Mijozlarning ma'lumot bazasi"
+   ],
+   "watch_tabs": [
+    "Undiruv <oy>",
+    "Smm main",
+    "Pm proektlar After"
+   ],
+   "aliases": [
+    "smm",
+    "undiruv",
+    "hoji",
+    "ltv",
+    "sibistoimost",
+    "mijozlar"
+   ]
+  }
+ ],
+ "snapshots": {
+  "fx-zubair": {
+   "id": "fx-zubair",
+   "name": "Zubair PM KPI",
+   "pm_kpi": true,
+   "tabs": [
+    "Loyihalarning ishlash muddati",
+    "Avgust",
+    "Sentyabr",
+    "Sentyabr (2026)"
+   ],
+   "excluded_tabs": [],
+   "watch_ranges": [
+    "'Loyihalarning ishlash muddati'!A1:BZ1000",
+    "'Sentyabr (2026)'!A1:BZ1000"
+   ],
+   "fetched_at": "2026-09-07 09:00:00",
+   "ranges": {
+    "'Loyihalarning ishlash muddati'!A1:BZ1000": {
+     "values": [
+      [
+       "Loyihalar",
+       "Shartnoma muddati",
+       "Tugash sanasi"
+      ],
+      [
+       "Alfa Market",
+       "01.03.2026",
+       "01.03.2027"
+      ],
+      [
+       "Beta Studio",
+       "15.05.2026",
+       "15.11.2026"
+      ]
+     ]
+    },
+    "'Avgust'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Proekt nomi",
+       "Ideal",
+       "Proekt bali",
+       "Kechga qolgan kun"
+      ],
+      [
+       "1",
+       "Alfa Market",
+       "10",
+       "9",
+       "0"
+      ]
+     ]
+    },
+    "'Sentyabr'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Proekt nomi",
+       "Ideal",
+       "Proekt bali",
+       "Kechga qolgan kun"
+      ],
+      [
+       "1",
+       "Alfa Market",
+       "10",
+       "9",
+       "0"
+      ],
+      [
+       "2",
+       "Beta Studio",
+       "10",
+       "8",
+       "1"
+      ]
+     ]
+    },
+    "'Sentyabr (2026)'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Proekt nomi",
+       "Ideal",
+       "Proekt bali",
+       "Kechga qolgan kun"
+      ],
+      [
+       "1",
+       "Alfa Market",
+       "10",
+       "9",
+       "0"
+      ],
+      [
+       "2",
+       "Beta Studio",
+       "10",
+       "9",
+       "0"
+      ]
+     ]
+    }
+   }
+  },
+  "fx-islom": {
+   "id": "fx-islom",
+   "name": "Islom PM KPI",
+   "pm_kpi": true,
+   "tabs": [
+    "Main",
+    "Sentyabr (2026)"
+   ],
+   "excluded_tabs": [],
+   "watch_ranges": [
+    "'Main'!A1:BZ1000",
+    "'Sentyabr (2026)'!A1:BZ1000"
+   ],
+   "fetched_at": "2026-09-07 09:00:00",
+   "ranges": {
+    "'Main'!A1:BZ1000": {
+     "values": [
+      [
+       "Loyihalar"
+      ],
+      [
+       "Gamma Plus"
+      ]
+     ]
+    },
+    "'Sentyabr (2026)'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Proekt nomi",
+       "Ideal",
+       "Proekt bali",
+       "Kechga qolgan kun"
+      ],
+      [
+       "1",
+       "Gamma Plus",
+       "10",
+       "10",
+       "0"
+      ]
+     ]
+    }
+   }
+  },
+  "fx-smm": {
+   "id": "fx-smm",
+   "name": "SMM proektlar",
+   "pm_kpi": false,
+   "tabs": [
+    "Smm main",
+    "Pm proektlar After",
+    "Undiruv avgust",
+    "Undiruv avgust(2026)",
+    "Undiruv sentabr(2026)",
+    "Mijozlarning ma'lumot bazasi"
+   ],
+   "excluded_tabs": [
+    "Mijozlarning ma'lumot bazasi"
+   ],
+   "watch_ranges": [
+    "'Undiruv sentabr(2026)'!A1:BZ1000",
+    "'Smm main'!A1:BZ1000",
+    "'Pm proektlar After'!A1:BZ1000"
+   ],
+   "fetched_at": "2026-09-07 09:00:00",
+   "ranges": {
+    "'Smm main'!A1:BZ1000": {
+     "values": [
+      [
+       "Proektlar nomi",
+       "Holati"
+      ],
+      [
+       "Alfa Market",
+       "faol"
+      ]
+     ]
+    },
+    "'Pm proektlar After'!A1:BZ1000": {
+     "values": [
+      [
+       "Loyihalar",
+       "Ball"
+      ],
+      [
+       "Livardi",
+       "8"
+      ],
+      [
+       "Alfa Market",
+       "9"
+      ]
+     ]
+    },
+    "'Undiruv avgust'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Ishlar nomi",
+       "Ma'sul shaxs",
+       "Summa",
+       "Undirildi",
+       "Final sana",
+       "Xolati"
+      ],
+      [
+       "1",
+       "Eski Loyiha",
+       "Zubair",
+       "$500",
+       "$0",
+       "05.08",
+       ""
+      ]
+     ]
+    },
+    "'Undiruv avgust(2026)'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Ishlar nomi",
+       "Ma'sul shaxs",
+       "Summa",
+       "Undirildi",
+       "Final sana",
+       "Xolati"
+      ],
+      [
+       "1",
+       "Livardi",
+       "Zubair",
+       "$3 400",
+       "$0",
+       "20.08",
+       ""
+      ]
+     ]
+    },
+    "'Undiruv sentabr(2026)'!A1:BZ1000": {
+     "values": [
+      [
+       "№",
+       "Ishlar nomi",
+       "Ma'sul shaxs",
+       "Summa",
+       "Undirildi",
+       "Final sana",
+       "Xolati"
+      ],
+      [
+       "1",
+       "Alfa Market",
+       "Zubair",
+       "$1 000",
+       "$0",
+       "10.09",
+       ""
+      ],
+      [
+       "2",
+       "Livardi",
+       "Zubair",
+       "$3 400",
+       "$0",
+       "20.09",
+       ""
+      ]
+     ]
+    }
+   }
+  }
+ }
+}

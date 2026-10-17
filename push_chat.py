@@ -41,13 +41,15 @@ def _san(msg):
 
 
 def _urls(repo, token):
-    """(auth_url, clean_url) — token'li (klon/pull/push) va TOKENSIZ (config'da qoladi)."""
-    return (f"https://x-access-token:{token}@github.com/{repo}.git",
-            f"https://github.com/{repo}.git")
+    """(url, git_env) — URL TOKENSIZ (argv/config), token GIT_CONFIG_* env'da: ilgari
+    tokenli URL git argv'ida edi va `ps` orqali ko'rinardi (P2, git_auth)."""
+    import git_auth
+
+    return git_auth.url(repo), git_auth.env(token)
 
 
-def sh(*cmd, check=True):
-    r = subprocess.run(list(cmd), capture_output=True, text=True, timeout=180)
+def sh(*cmd, check=True, env=None):
+    r = subprocess.run(list(cmd), capture_output=True, text=True, timeout=180, env=env)
     if check and r.returncode != 0:
         raise RuntimeError(_san(f"{' '.join(cmd[:4])} → {r.stderr.strip()[:200]}"))
     return r
@@ -110,14 +112,16 @@ def _sync_files():
     return changed
 
 
-def _push_with_retry(auth):
-    """push (TOKENLI URL argument — config'ga yozilmaydi); non-ff bo'lsa `pull --rebase` + 1 retry."""
+def _push_with_retry(url, genv=None):
+    """push (tokensiz URL, token env'da — config/argv'ga yozilmaydi); non-ff bo'lsa
+    `pull --rebase` + 1 retry."""
     for attempt in (1, 2):
-        if sh("git", "-C", str(CLONE), "push", "-q", auth, "HEAD", check=False).returncode == 0:
+        if sh("git", "-C", str(CLONE), "push", "-q", url, "HEAD", check=False, env=genv).returncode == 0:
             return True
         if attempt == 1:
             log("push rad etildi (non-ff?) — pull --rebase + qayta urinish")
-            if sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", auth, check=False).returncode != 0:
+            if sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", url, check=False,
+                  env=genv).returncode != 0:
                 sh("git", "-C", str(CLONE), "rebase", "--abort", check=False)
                 break
     return False
@@ -129,14 +133,14 @@ def main():
     if not repo or not token:
         log("REPORTS_REPO / GH_TOKEN_REPORTS yo'q — o'tkazildi")
         return 0
-    auth, clean = _urls(repo, token)
+    clean, genv = _urls(repo, token)
     try:
         if not (CLONE / ".git").is_dir():
-            sh("git", "clone", "--depth", "1", auth, str(CLONE))
-            sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)  # token diskda qolmasin
+            sh("git", "clone", "--depth", "1", clean, str(CLONE), env=genv)
+            sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)  # tokensiz origin
         else:
             sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)  # eski tokenli bo'lsa tozala
-            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", auth, check=False)
+            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", clean, check=False, env=genv)
         if _sync_files() == 0:
             log("yangi/o'zgargan chat yo'q")
             _mark_ok()                         # mexanizm ishladi — jim yiqilish EMAS
@@ -149,7 +153,7 @@ def main():
         sh("git", "-C", str(CLONE),
            "-c", "user.name=abba-sheets-agent", "-c", "user.email=agent@abba.local",
            "commit", "-q", "-m", f"chat {date.today().isoformat()}")
-        if _push_with_retry(auth):
+        if _push_with_retry(clean, genv):
             log("chat push qilindi")
             _mark_ok()
         else:

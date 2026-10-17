@@ -5,8 +5,9 @@ Boot tartibi:
   1. Secrets: GOOGLE_SA_JSON (base64 env) → DATA_DIR/credentials/service-account.json
   2. Brand seed: image'dagi data/brand → DATA_DIR/brand (faqat yo'q fayllar —
      bot orqali tasdiqlangan theme/logo redeploy'da saqlanib qoladi)
-  3. APScheduler (background): har kuni 09:00 Asia/Tashkent → run.sh subprocess;
-     misfire_grace_time 3 soat — deploy/restart 09:00 ga to'g'ri kelsa keyin bajaradi
+  3. APScheduler (background): har kuni 09:00 Asia/Tashkent → run.sh subprocess,
+     09:30 PM push (pipeline tugashini kutadi). Restart/deploy 09:00 dan keyin bo'lsa
+     boot catch-up o'sha kungi ishni 3 soat ichida bajaradi (daily_last_run.txt)
   4. bot_listener.main() — asosiy thread. Yiqilsa process o'ladi → Railway
      restart policy qayta ko'taradi (launchd KeepAlive ekvivalenti).
 
@@ -14,9 +15,12 @@ Kunlik pipeline'dan keyin hisobotlar repo'ga push (push_reports.py, env bo'lsa).
 """
 import base64
 import os
+import re
 import shutil
 import subprocess
 import sys
+import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -77,6 +81,97 @@ def boot_seed():
     n = _copy_missing(BASE / "seed", DATA)
     if n:
         log(f"holat seed: {n} fayl volume'ga nusxalandi")
+
+
+# ---- Kunlik ishlar tartibi (P2) ----
+# MemoryJobStore: konteyner 09:00 dan keyin restart/deploy bo'lsa cron keyingi kunga
+# suriladi (misfire_grace_time faqat ISHLAB TURGAN scheduler'ga yordam beradi) — o'sha
+# kungi hisobot va PM push jim o'tib ketardi. Bugungi pipeline marker fayli + boot
+# catch-up shuni yopadi (oyna — misfire_grace_time bilan bir xil 3 soat). 09:30 PM push
+# esa 09:00 pipeline TUGASHINI kutadi (ilgari kutmasdi).
+TZ = "Asia/Tashkent"
+DAILY_AT, PM_PUSH_AT = (9, 0), (9, 30)
+CATCHUP_GRACE_H = 3
+PM_WAIT_SEC = 50 * 60
+DAILY_MARKER = DATA / "daily_last_run.txt"
+# run.sh log'idagi «hisobot ketdi / pipeline tugadi» belgilari — marker yo'q bo'lsa ham
+# (birinchi deploy kuni eski kod yuborgan, yoki restart send'dan keyin marker'dan oldin)
+# bugungi hisobot qayta yuborilmasin (review: catch-up ikki marta yuborardi)
+_DAILY_DONE_RE = re.compile(r"\[send\] (?:PDF|matn) hisobot yuborildi|===== tugadi")
+_PIPELINE_LOCK = threading.Lock()
+_PM_LOCK = threading.Lock()
+
+
+def _hozir():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo(TZ))
+
+
+def daily_job():
+    """09:00 cron va boot catch-up: kunlik pipeline (lock ostida) + bugungi marker."""
+    with _PIPELINE_LOCK:
+        run_daily()
+        try:
+            DAILY_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            DAILY_MARKER.write_text(_hozir().date().isoformat(), encoding="utf-8")
+        except Exception as e:
+            log(f"kunlik marker yozilmadi: {e}")
+
+
+def pm_push_job():
+    """09:30: avval kunlik pipeline tugashini kutadi (ko'pi bilan PM_WAIT_SEC), keyin push.
+    _PM_LOCK — cron va catch-up bir vaqtda ikki marta yubormasin."""
+    if _PIPELINE_LOCK.acquire(timeout=PM_WAIT_SEC):
+        _PIPELINE_LOCK.release()
+    else:
+        log(f"OGOHLANTIRISH: kunlik pipeline {PM_WAIT_SEC // 60} daqiqada tugamadi — "
+            "PM push kutmasdan ishga tushdi")
+    with _PM_LOCK:
+        run_pm_push()
+
+
+def catchup_kerak(hozir, at, marker_kun=""):
+    """Bugungi `at` (soat, daqiqa) ishi o'tib ketganmi: vaqti kelgan, CATCHUP_GRACE_H
+    oynasi ichida va bugun bajarilmagan (marker_kun — oxirgi bajarilgan kun)."""
+    boshi = hozir.replace(hour=at[0], minute=at[1], second=0, microsecond=0)
+    return boshi <= hozir < boshi + timedelta(hours=CATCHUP_GRACE_H) \
+        and marker_kun != hozir.date().isoformat()
+
+
+def bugun_bajarilganmi(kun, marker_kun=""):
+    """Bugungi pipeline hisobotni yuborib bo'lganmi: marker YOKI run.sh log'ida
+    PDF yuborilgani / pipeline tugagani (DATA/logs/<kun>.log)."""
+    if marker_kun == kun:
+        return True
+    try:
+        return bool(_DAILY_DONE_RE.search(
+            (DATA / "logs" / f"{kun}.log").read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return False
+
+
+def boot_catchup():
+    """Boot: bugungi pipeline / PM push restart sababli o'tib ketgan bo'lsa — bajaradigan
+    funksiya (yoki None). PM push «bugun yuborilgan»ni o'zi tekshiradi (pm_push state)."""
+    hozir = _hozir()
+    try:
+        marker = DAILY_MARKER.read_text(encoding="utf-8").strip()
+    except Exception:
+        marker = ""
+    daily = catchup_kerak(hozir, DAILY_AT, marker) \
+        and not bugun_bajarilganmi(hozir.date().isoformat(), marker)
+    pm = catchup_kerak(hozir, PM_PUSH_AT)
+    if not (daily or pm):
+        return None
+
+    def _ish():
+        if daily:
+            log("catch-up: bugungi 09:00 pipeline o'tib ketgan (restart/deploy) — hozir ishga tushadi")
+            daily_job()
+        if pm:
+            log("catch-up: 09:30 PM push (bugun yuborilgan bo'lsa o'zi skip qiladi)")
+            pm_push_job()
+    return _ish
 
 
 def run_daily():
@@ -251,12 +346,12 @@ def main():
 
     sched = BackgroundScheduler(timezone="Asia/Tashkent")
     sched.add_job(
-        run_daily, "cron", hour=9, minute=0,
-        misfire_grace_time=3 * 3600, coalesce=True,
+        daily_job, "cron", hour=DAILY_AT[0], minute=DAILY_AT[1],
+        misfire_grace_time=CATCHUP_GRACE_H * 3600, coalesce=True,
     )
     sched.add_job(
-        run_pm_push, "cron", hour=9, minute=30,
-        misfire_grace_time=3 * 3600, coalesce=True,
+        pm_push_job, "cron", hour=PM_PUSH_AT[0], minute=PM_PUSH_AT[1],
+        misfire_grace_time=CATCHUP_GRACE_H * 3600, coalesce=True,
     )
     sched.add_job(
         run_tg_kunlik_watch, "cron", hour=12, minute=0,
@@ -270,6 +365,10 @@ def main():
         run_push_chat, "interval", minutes=10,
         max_instances=1, coalesce=True,
     )
+    catchup = boot_catchup()
+    if catchup:
+        # trigger'siz — darhol, fon thread'ida; misfire_grace_time=None: start kechiksa ham o'tkazilmaydi
+        sched.add_job(catchup, id="catchup", misfire_grace_time=None)
     sched.start()
     log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + 12:00 TG-kunlik nazorat + "
         "har 10daq vault sinxron + chat push (Asia/Tashkent)")

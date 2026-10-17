@@ -339,7 +339,11 @@ def recover_inflight():
     log(f"restart paytida uzilgan so'rov tiklanmoqda (urinish {att + 1}): {preview!r}")
     _write_inflight(upd, attempts=att + 1)
     try:
-        handle_update(upd)
+        # Watchdog bilan (polling loop'dagi kabi): restartdan keyin ham osilgan xabar
+        # pollingni boshlanmasdan BLOKLAB qo'ymasin — chek tugasa tashlab ketiladi (P2)
+        holat = handle_with_watchdog(upd)
+        if holat != "ok":
+            log(f"recover_inflight: tiklangan so'rov holati — {holat}")
     except Exception as e:
         log(f"XATO recover_inflight: {e}")
     finally:
@@ -2000,8 +2004,10 @@ def handle_update(upd):
         import pm_push
 
         cmd, slot = low.lstrip("/").split("_", 1)
-        slot = slot.split()[0].split("@")[0]
-        send_retry(pm_push.approve(slot) if cmd == "approve" else pm_push.reject(slot),
+        slot, *arg = slot.split() or [""]
+        slot = slot.split("@")[0]
+        cid = arg[0] if arg else None     # /approve_<slot> <chat_id> — bir nechta so'rov bo'lsa
+        send_retry(pm_push.approve(slot, cid) if cmd == "approve" else pm_push.reject(slot, cid),
                    attempts=2)
         return f"pm-{cmd}"
     if low.startswith("/stt_status"):

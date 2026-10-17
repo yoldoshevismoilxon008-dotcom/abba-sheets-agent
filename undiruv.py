@@ -24,7 +24,6 @@ import diff as diffmod
 import fetch as fetchmod
 import undiruv_carry as carrymod
 
-MONEY_RE = re.compile(r"[-\d.,]+")
 DDMM_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})$")                 # 06.07 (yilsiz)
 DDMMYYYY_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$")  # 06.07.2026
 ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")             # 2026-07-06
@@ -45,15 +44,51 @@ def log(msg):
 
 
 def money(v):
-    """"$1 800" / "1 800,50" → float. Bo'sh/matn → 0."""
-    s = str(v).replace("\xa0", "").replace(" ", "").replace(" ", "")
-    m = MONEY_RE.search(s)
+    """"$1 800" / "1 800,50" / "$1,800" / "$2,500.00" / "-$500" → float.
+    Bo'sh/matn/xato katak (#REF!) → 0 (qaysi katak son emasligini money_parse aytadi)."""
+    r = money_parse(v)
+    return 0.0 if r is None else r
+
+
+_MONEY_NUM_RE = re.compile(r"\d[\d.,]*")
+_THOUSANDS_COMMA_RE = re.compile(r"[1-9]\d{0,2}(?:,\d{3})+")
+_THOUSANDS_DOT_RE = re.compile(r"[1-9]\d{0,2}(?:\.\d{3}){2,}")
+_BOSH_PUL = {"", "-", "—", "–", "−", "$"}
+
+
+def money_parse(v):
+    """Pul katagi → float, bo'sh → 0.0, SON EMAS (#REF!, #N/A, matn) → None.
+    Ilgari "$1,800" → 1,8; "$2,500.00" va "-$500" → 0; "#REF!" → jim 0 edi (P2).
+    Ajratgichlar: ikkalasi bo'lsa oxirgisi o'nlik ("2,500.00", "2.500,00");
+    faqat vergul — "1,800"/"12,500,000" minglik, "1 800,50"/"0,5" o'nlik;
+    faqat nuqta — "1.800.000" minglik, "1.8" o'nlik (eski xulq).
+    Manfiy: "-$500", "$-500", "−500", "($500)"."""
+    s = str("" if v is None else v).strip()
+    for ch in ("\xa0", " ", " ", " "):
+        s = s.replace(ch, "")
+    if s in _BOSH_PUL:
+        return 0.0
+    if s.startswith("#"):                 # #REF!, #N/A, #VALUE!, #DIV/0!, #ERROR!
+        return None
+    m = _MONEY_NUM_RE.search(s)
     if not m:
-        return 0.0
+        return None
+    num = m.group(0).rstrip(".,")
+    if "," in num and "." in num:
+        dec = "," if num.rfind(",") > num.rfind(".") else "."
+        num = num.replace("." if dec == "," else ",", "").replace(dec, ".")
+    elif "," in num:
+        num = num.replace(",", "") if _THOUSANDS_COMMA_RE.fullmatch(num) else num.replace(",", ".")
+    elif _THOUSANDS_DOT_RE.fullmatch(num):
+        num = num.replace(".", "")
     try:
-        return float(m.group(0).replace(",", "."))
+        x = float(num)
     except ValueError:
-        return 0.0
+        return None
+    oldi = s[:m.start()]
+    if "-" in oldi or "−" in oldi or (s.startswith("(") and s.endswith(")")):
+        x = -x
+    return x
 
 
 def _safe_date(y, mm, dd):
@@ -604,12 +639,42 @@ def carryover_filter(prev_rows, cur_rows, cur_tab=None, qlar=None):
     return t["real"], t["closed"], t["moved"]
 
 
-def parse_rows(vals, today, ref=None):
+def header_row(vals, scan=6):
+    """Undiruv tab sarlavhasi indeksi. Avval «nomi» VA «undirildi» ustunlari bor
+    birinchi qator — sarlavhada bo'sh katak bo'lsa, ma'lumot qatori «eng to'la» bo'lib
+    sarlavha deb olinardi va blok jimgina bo'shardi (P2). Keyin — ulardan BIRI bor
+    qator (sarlavha katagi bo'sh: izoh aynan yo'q ustunni aytadi). Topilmasa — eski
+    qoida (diff.detect_header: birinchi ~6 qatorning eng to'lasi)."""
+    hdrs = [[str(x) for x in row] for row in vals[:scan]]
+    for i, hdr in enumerate(hdrs):
+        if _col(hdr, "nomi") is not None and _col(hdr, "undirildi") is not None:
+            return i
+    for i, hdr in enumerate(hdrs):
+        if _col(hdr, "nomi") is not None or _col(hdr, "undirildi") is not None:
+            return i
+    return diffmod.detect_header(vals, scan)
+
+
+# parse_rows sarlavhada «nomi»/«undirildi» ustunini topa olmagan tablar — egaga izoh.
+# Ilgari [] jim qaytardi: Undiruv bloki, PM push va dashboard izsiz yo'qolardi (P2).
+# consume_tab_note() _TAB_NOTE bilan birga qaytaradi; summary()/dashboard qatorsiz tabda
+# shu izohni (SARLAVHA_BELGI bo'yicha) ko'rsatadi.
+_SARLAVHA_IZOH = []
+SARLAVHA_BELGI = "tabi sarlavhasida"
+
+
+def sarlavha_izohlari(notes):
+    """notes ichidan sarlavha topilmagani haqidagi izohlar (qatorsiz tab sababi)."""
+    return [n for n in (notes or []) if SARLAVHA_BELGI in n]
+
+
+def parse_rows(vals, today, ref=None, tab=""):
     """Tab qiymatlari → [{loyiha, pm, qoldiq, undirildi, aktiv, kelishilgan,
     muddat: date|None, holat}]. Jami/summary qatorlari kirmaydi.
     ref — tab oyining 1-kuni: yilsiz «DD.MM» sanalar shu oyga eng yaqin yil bilan
-    o'qiladi (yil almashuvi; berilmasa joriy yil — eski xulq)."""
-    h = diffmod.detect_header(vals)
+    o'qiladi (yil almashuvi; berilmasa joriy yil — eski xulq).
+    tab — faqat izoh uchun (sarlavha topilmasa egaga qaysi tab ekani)."""
+    h = header_row(vals)
     header = [str(x) for x in (vals[h] if vals else [])]
     c_name = _col(header, "nomi")
     c_pm = _col(header, "shaxs")
@@ -623,6 +688,13 @@ def parse_rows(vals, today, ref=None):
     # (c_left «Summa»ni aniq-tenglik bilan oladi — bu ustunga tegmaymiz).
     c_lose = _col(header, "lose summa", "lose")
     if c_name is None or c_paid is None:
+        if vals:
+            yoq = " va ".join(n for n, c in (("«Ishlar nomi»", c_name), ("«Undirildi»", c_paid))
+                              if c is None)
+            note = (f"⚠️ «{tab or 'Undiruv'}» {SARLAVHA_BELGI} {yoq} ustuni topilmadi — "
+                    f"qatorlar o'qilmadi (blok bo'sh). Sheet sarlavhasini tekshiring.")
+            log(note)
+            _SARLAVHA_IZOH.append(note)
         return []
     rows = []
     for row in vals[h + 1:]:
@@ -634,6 +706,9 @@ def parse_rows(vals, today, ref=None):
         if not name:
             continue
         qoldiq, undirildi, aktiv = money(get(c_left)), money(get(c_paid)), money(get(c_active))
+        # Son emas (#REF!, matn) pul kataklari 0 deb sanaladi — jim emas: bad_sum belgisi
+        # jamlamada «N qatorda summa son emas» bo'lib chiqadi (P2)
+        bad_sum = [c for c in (c_left, c_paid, c_lose) if money_parse(get(c)) is None]
         # KONVENSIYA (2026-07-30, 27/27 paid qator isbotladi): «Summa» (D) =
         # QOLGAN QARZ, «Undirildi» (E) = shu paytgacha yig'ilgani, Bitim = D+E.
         # So'raladigan qoldiq = D (AYIRMASIZ). E'ni ayirish (eski qoldiq_net)
@@ -661,6 +736,7 @@ def parse_rows(vals, today, ref=None):
             "pm_col_present": c_pm is not None,
             "qoldiq": qoldiq,
             "qoldiq_raw": get(c_left),  # jamlamada "Summa son emas" hisobi uchun
+            "bad_sum": bool(bad_sum),
             "undirildi": undirildi,
             "aktiv": aktiv,
             # «Lose summa» — ketgan (status «Ketdi») loyiha zarari. D/E qoldiq
@@ -695,6 +771,10 @@ _TAB_NOTE = ""
 def consume_tab_note():
     global _TAB_NOTE
     n, _TAB_NOTE = _TAB_NOTE, ""
+    if _SARLAVHA_IZOH:
+        extra = "\n".join(dict.fromkeys(_SARLAVHA_IZOH))
+        _SARLAVHA_IZOH.clear()
+        n = f"{n}\n{extra}" if n else extra
     return n
 
 
@@ -846,6 +926,7 @@ def fetch_live_month(month_name, today, year=None, qat_iy=False, ref=None):
     qat_iy=True (o'tgan/keyingi oy) — faqat year suffiksli tab, FALLBACK YO'Q: aks holda
     «keyingi oy» o'rniga joriy oy tabi qaytib, qarz ikki karra sanalardi."""
     _set_tab_note("")
+    _SARLAVHA_IZOH.clear()
     sid = smm_sheet_id()
     if not sid:
         return None, []
@@ -856,7 +937,7 @@ def fetch_live_month(month_name, today, year=None, qat_iy=False, ref=None):
     def _read(tab):
         ranges = fetchmod.fetch_ranges(sh, [fetchmod.tab_range(tab)], "undiruv-live")
         vals = next(iter(ranges.values())).get("values", [])
-        return parse_rows(vals, today, ref)
+        return parse_rows(vals, today, ref, tab=tab)
 
     matched = rank_month_tabs(titles, month_name, today, year=year, suffikssiz=not qat_iy)
     if not matched and qat_iy:
@@ -943,6 +1024,7 @@ def _oy_oqi(month, year, ref, today, day, prefer_live, qat_iy, notes):
     Jonli-birinchi, xato/topilmasa snapshot. Jonli o'qish XATO berib, snapshot'da ham
     tab bo'lmasa — «xato» + egaga izoh: «tab hali yo'q» degan yolg'on o'rniga (A2, C4/S5)."""
     xato = ""
+    _SARLAVHA_IZOH.clear()          # boshqa yo'ldan (pm_push fallback) qolgan eski izoh
     if prefer_live:
         try:
             tab, rows = fetch_live_month(month, today, year=year, qat_iy=qat_iy, ref=ref)
@@ -961,7 +1043,12 @@ def _oy_oqi(month, year, ref, today, day, prefer_live, qat_iy, notes):
         rng = find_tab(snap, today, month=month, year=year, qat_iy=qat_iy)
         if rng:
             vals = snap["ranges"][rng].get("values", [])
-            return fetchmod.tab_of_range(rng), parse_rows(vals, today, ref), "snapshot"
+            tab = fetchmod.tab_of_range(rng)
+            rows = parse_rows(vals, today, ref, tab=tab)
+            n = consume_tab_note()
+            if n:
+                notes.append(n)
+            return tab, rows, "snapshot"
     if xato:
         notes.append(f"⚠️ «Undiruv {month}({year})» tabi o'qilmadi (jonli xato: {xato}) — "
                      f"snapshot'da ham yo'q")
@@ -1198,7 +1285,9 @@ def totals(rows):
       qoldiq      = Σ D  (is_unpaid qatorlar)  — so'raladigan qarz (= D, ayirmasiz)
       aktiv       = Σ Aktive Summary
       pct         = undirildi / kelishilgan
-      status_blank_n = status bo'sh, lekin qarz sanalgan qatorlar soni (⚠️)
+      status_blank_n = status bo'sh, lekin qarz sanalgan qatorlar soni
+      unpaid_n       = so'raladigan (is_unpaid, ko'chmagan) qatorlar soni
+      bad_sum_n      = pul katagi son emas (#REF!, matn) — 0 deb sanalgan qatorlar
     Paid qatorlarda D=0 bo'lgani uchun qoldiq = kelishilgan − undirildi bilan
     yopiladi (agar paid+D>0 anomaliya bo'lsa — o'sha farq ogohlantirish belgisi)."""
     kelishilgan = sum(r["qoldiq"] + r["undirildi"] for r in rows)
@@ -1219,8 +1308,29 @@ def totals(rows):
         # keyingi oy tabiga ko'chgan/yopilgan qatorlar so'ralmaydi — «status bo'sh qarz» emas (C2)
         "status_blank_n": sum(1 for r in rows if is_unpaid(r) and r.get("status_blank")
                               and not r.get("keyingi_oyga")),
+        "unpaid_n": sum(1 for r in rows if is_unpaid(r) and not r.get("keyingi_oyga")),
+        "bad_sum_n": sum(1 for r in rows if r.get("bad_sum")),
         "reconcile_gap": gap,
     }
+
+
+def status_blank_warn(t):
+    """«Status bo'sh» ⚠️ satri yoki "". Sheet'da undirilmagan qator statusi odatda
+    BO'SH turadi — deyarli hammasi (≥80%) bo'sh bo'lsa bu konvensiya, anomaliya emas:
+    satr har kuni undirilmaganlar sonini takrorlab shovqin bo'lardi (P2). Faqat
+    qisman bo'sh bo'lsa (ko'pi belgilangan, bir qismi yo'q) ogohlantiradi — PM push
+    jamlamasidagi qoida bilan bir xil."""
+    n, tot = (t or {}).get("status_blank_n") or 0, (t or {}).get("unpaid_n") or 0
+    if not n or (tot and n >= 0.8 * tot):
+        return ""
+    return f"⚠️ Status bo'sh (tasdiqlanmagan qarz): {n}/{tot} ta qator"
+
+
+def bad_sum_warn(t):
+    """Son emas pul kataklari (#REF!, matn) — 0 deb sanaldi; jim qolmasin (P2)."""
+    n = (t or {}).get("bad_sum_n") or 0
+    return (f"⚠️ {n} ta qatorda summa katagi son emas (#REF!/matn) — 0 deb hisoblandi, "
+            f"sheet'ni tekshiring") if n else ""
 
 
 def reconcile_warn(t):
@@ -1387,6 +1497,10 @@ def summary(day, today=None, prefer_live=True):
         return {"topilmadi": True, "oy": v["oy"], "tab": None, "source": source, "day": day,
                 "notes": list(v.get("notes") or [])}
     if not rows:
+        if sarlavha_izohlari(v.get("notes")):
+            # Tab bor, lekin sarlavha o'qilmadi — 09:00 hisobotida jim bo'sh qolmasin
+            return {"topilmadi": True, "oy": v["oy"], "tab": tab, "source": source, "day": day,
+                    "notes": list(v.get("notes") or [])}
         return None
     t = totals(rows)
 
@@ -1473,6 +1587,8 @@ def summary(day, today=None, prefer_live=True):
         "aktiv": t["aktiv"],
         "pct": t["pct"],
         "status_blank_n": t["status_blank_n"],
+        "unpaid_n": t["unpaid_n"],
+        "bad_sum_n": t["bad_sum_n"],
         "reconcile_gap": t["reconcile_gap"],
         "source": source,
         "day": day,
@@ -1571,8 +1687,9 @@ def report_block(day, today=None):
     if (not s["muddat_otgan"] and not s["muddat_yaqin"] and not (k and k.get("yaqin"))
             and not oo.get("items") and not (k and k.get("yopilgan")) and not oo.get("dublikat_n")):
         L.append("⏰ Muddati o'tgan yoki yaqin qolgan undirilmagan loyiha yo'q ✅")
-    if s.get("status_blank_n"):
-        L.append(f"⚠️ Status bo'sh (tasdiqlanmagan qarz): {s['status_blank_n']} ta qator")
+    for w in (status_blank_warn(s), bad_sum_warn(s)):
+        if w:
+            L.append(w)
     return "\n".join(L)
 
 
@@ -1712,6 +1829,11 @@ def report_data(rows, tab, today, source="", view=None):
             "yopildi_n": sum(1 for p in ps for i in p["items"] if i["status"] == "yopildi"),
             "yopildi_sum": sum(i["summa"] for p in ps for i in p["items"] if i["status"] == "yopildi"),
         }
+    if not status_blank_warn(data["totals"]):
+        # Status deyarli hamma qatorda bo'sh (konvensiya) — har qatordagi ⚠️ ham shovqin
+        for p in ps:
+            for i in p["items"]:
+                i["status_blank"] = False
     return data
 
 
@@ -1811,9 +1933,11 @@ def full_report(rows, tab, today, source="", view=None):
             L.append(f"  {STATUS_MARK[i['status']]} {i['loyiha']} — {_fmt_usd(i['summa'])}, {mud}{extra}")
         if pm["paid_n"]:
             L.append(f"  ✅ to'langan: {pm['paid_n']} ta, {_fmt_usd(pm['paid_sum'])}")
-    if t.get("status_blank_n"):
-        L.append(f"\n⚠️ Status bo'sh (tasdiqlanmagan qarz): {t['status_blank_n']} ta qator — "
+    if status_blank_warn(t):
+        L.append(f"\n{status_blank_warn(t)} — "
                  "D>0 bo'lgani uchun qarz sanaldi; sheet'da holatni belgilash tavsiya etiladi.")
+    if bad_sum_warn(t):
+        L.append(f"\n{bad_sum_warn(t)}")
     lose = d.get("lose") or {}
     if not lose.get("col_missing"):        # ustun yo'q → blokni butunlay chiqarmaymiz
         if lose.get("count"):

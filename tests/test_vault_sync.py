@@ -254,10 +254,11 @@ def test_ensure_clone_stores_no_token():
     setup()
     vs._ensure_clone = _ORIG_ENSURE                  # haqiqiy funksiya
     vs.CLONE = Path(tempfile.mkdtemp(prefix="vsclone_")) / "vault"
-    calls = []
+    calls, envs = [], []
 
-    def rec(*args):
+    def rec(*args, env=None):
         calls.append(tuple(str(a) for a in args))
+        envs.append(env)
         if args and args[0] == "clone":
             (Path(args[-1]) / ".git").mkdir(parents=True, exist_ok=True)
         return ""
@@ -268,6 +269,10 @@ def test_ensure_clone_stores_no_token():
     assert seturl, "clone'dan keyin set-url chaqirilmadi"
     assert "https://github.com/owner/repo.git" in seturl[0]      # tokensiz URL config'ga
     assert "SECRETTOK" not in seturl[0]
+    # P2: token git argv'ida ham yo'q (ps ko'rmaydi) — clone env'dagi header bilan
+    assert not any("SECRETTOK" in " ".join(c) for c in calls)
+    clone_env = envs[next(i for i, c in enumerate(calls) if c[0] == "clone")]
+    assert clone_env and "http.https://github.com/.extraheader" in clone_env.values()
 
 
 def test_ensure_clone_fetch_reset_real_git():

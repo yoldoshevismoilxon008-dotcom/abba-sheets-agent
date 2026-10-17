@@ -211,6 +211,36 @@ def git_commit_brand(msg):
 
 # ---------- media ----------
 
+INBOX_KEEP_DAYS = 7    # inbox — vaqtinchalik: KB/logo/referens o'z nusxasini oladi
+
+
+def safe_name(name, n=60):
+    """Xavfsiz fayl nomi (≤n belgi), KENGAYTMA saqlanadi. Ilgari butun nom 60 belgiga
+    kesilardi: uzun «….pdf» kengaytmasiz qolib, kb uni matn deb o'qir va binar axlat
+    bazaga tushardi (P2)."""
+    base = re.sub(r"[^\w.-]", "_", str(name or "") or "fayl")
+    stem, dot, ext = base.rpartition(".")
+    if not dot or not stem or len(ext) > 10:
+        stem, ext = base, ""
+    ext = f".{ext}" if ext else ""
+    return (stem.lstrip(".")[:max(1, n - len(ext))] or "fayl") + ext
+
+
+def prune_inbox(days=INBOX_KEEP_DAYS):
+    """INBOX'dan `days` kundan eski fayllarni o'chiradi (ilgari hech qachon tozalanmasdi)."""
+    if not INBOX.is_dir():
+        return 0
+    chegara, n = time.time() - days * 86400, 0
+    for p in INBOX.iterdir():
+        try:
+            if p.is_file() and p.stat().st_mtime < chegara:
+                p.unlink()
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
 def download(token, file_id, name):
     import requests
 
@@ -225,8 +255,8 @@ def download(token, file_id, name):
         f"https://api.telegram.org/file/bot{token}/{fp}", timeout=120
     ).content
     INBOX.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^\w.-]", "_", name)[:60]
-    path = INBOX / f"{time.strftime('%Y%m%d-%H%M%S')}-{safe}"
+    prune_inbox()
+    path = INBOX / f"{time.strftime('%Y%m%d-%H%M%S')}-{safe_name(name)}"
     path.write_bytes(data)
     return path
 

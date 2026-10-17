@@ -25,6 +25,9 @@ PROMPT_TPL = BASE / "prompts" / "daily-report.md"
 MAX_ROWS = 30      # kontekstda har bo'limdagi maksimal qatorlar
 MAX_ROW_CHARS = 260
 CLAUDE_TIMEOUT = 600
+# Kunlik hisobot: claude -p yiqilsa bitta qayta urinish shuncha soniyadan keyin (P2:
+# 31.07, 01.10, 02.10 — oy almashuvi kunlari hisobot jim fallback'ga tushgan)
+CLAUDE_RETRY_WAIT = int(os.environ.get("CLAUDE_RETRY_WAIT", "30"))
 
 CLAUDE_FALLBACK_PATHS = [
     "/opt/homebrew/bin/claude",  # macOS (brew)
@@ -98,6 +101,8 @@ def build_context(diff):
                      "avtomatik qo'shiladi.")
         if sheet.get("baseline"):
             L.append("(bu sheet uchun birinchi snapshot — solishtirish yo'q)")
+        if sheet.get("prev_date"):
+            L.append(f"(kechagi snapshot yo'q — o'zgarishlar {sheet['prev_date']} holatiga nisbatan)")
         if sheet.get("removed_ranges"):
             L.append(f"O'chirilgan range'lar: {', '.join(sheet['removed_ranges'])}")
         ot = sheet.get("other_tabs")
@@ -212,13 +217,25 @@ def run_claude(prompt, effort=None, allowed_tools=None, timeout=None):
         timeout=timeout if timeout is not None else CLAUDE_TIMEOUT,
     )
     if r.returncode != 0 or not r.stdout.strip():
-        raise RuntimeError(f"claude -p xato (kod {r.returncode}): {r.stderr.strip()[:400]}")
+        raise RuntimeError(f"claude -p xato (kod {r.returncode}): {claude_diag(r)}")
     return r.stdout.strip()
+
+
+def claude_diag(r):
+    """claude -p xatosi diagnostikasi. Ilgari faqat stderr olinardi — CLI ba'zi xatolarni
+    (limit, login) stdout'ga yozadi va egaga «xato (kod 1): » bo'sh sabab borardi (P2)."""
+    err, out = (r.stderr or "").strip(), (r.stdout or "").strip()
+    if err:
+        return err[:400]
+    if out:
+        return f"stdout: {out[-400:]}"
+    return "stderr va stdout bo'sh (CLI javobsiz tugadi)"
 
 
 def fallback_report(diff, err):
     L = [f"📊 {diff['date']} — Sheets kunlik hisobot (avtomatik)", ""]
-    L.append(f"⚠️ AI tahlil ishlamadi ({trunc(err, 160)}). Quruq raqamlar:")
+    L.append(f"⚠️ AI tahlil ishlamadi ({trunc(err, 240)}). Claude CLI holatini (login/limit) "
+             "tekshiring. Quruq raqamlar:")
     for sheet in diff["sheets"].values():
         for rng, d in sheet["ranges"].items():
             st = d["stats"]
@@ -253,7 +270,17 @@ def is_quiet(diff):
         and not diff.get("fetch_errors")
         and not diff.get("missing_today")
         and not any(s.get("baseline") or s.get("removed_ranges") for s in diff["sheets"].values())
+        and not yangi_range_bor(diff)
     )
+
+
+def yangi_range_bor(diff):
+    """Range darajasida baseline yoki yangi oy tabi (new_range) bormi — 01.10 da «Oktyabr»
+    tabi paydo bo'lgan kun «o'zgarish yo'q» deb chiqardi (P2). is_quiet va report.json
+    (PDF badge/caption) bir xil qoidadan foydalanadi."""
+    return any(r.get("baseline") or r.get("new_range")
+               for s in (diff.get("sheets") or {}).values()
+               for r in (s.get("ranges") or {}).values())
 
 
 def watch_missing_note(diff):
@@ -267,6 +294,8 @@ def watch_missing_note(diff):
                 f"⚠️ {sheet['name']}: «{t}» tabi topilmadi — bugun bu tab bo'yicha diff yo'q. "
                 "Yilsiz eski tab arxiv sifatida ataylab o'qilmaydi; joriy oy tabini shu nom bilan oching."
             )
+        for n in sheet.get("watch_notes") or []:     # oy tabi dublikati (fetch.month_tab_dup_note)
+            L.append(f"⚠️ {sheet['name']}: {n}")
     return L
 
 
@@ -330,10 +359,21 @@ def baseline_gap_note(diff):
             f"({', '.join(kunlar[:5])}{' …' if gap > 5 else ''}); o'zgarishlar shu davr uchun jamlangan."]
 
 
+def sheet_gap_note(diff):
+    """Kecha o'qilmagan sheet o'zining oxirgi snapshot'i bilan solishtirilgan (diff.prev_snapshot,
+    P2) — umumiy «kechagi holatga nisbatan» shu sheet uchun noto'g'ri bo'lmasin."""
+    L = []
+    for sheet in diff["sheets"].values():
+        if sheet.get("prev_date"):
+            L.append(f"ℹ️ {sheet['name']}: {_dm(str(diff.get('prev_date') or ''))} da o'qilmagan — "
+                     f"o'zgarishlar {_dm(sheet['prev_date'])} holatiga nisbatan.")
+    return L
+
+
 def deterministic_notes(diff):
     """AI matniga tayanmaydigan ogohlantirishlar — quiet, AI, fallback va /hisobot yo'llarida."""
     return (watch_missing_note(diff) + stale_note(diff) + watch_new_note(diff)
-            + baseline_gap_note(diff))
+            + baseline_gap_note(diff) + sheet_gap_note(diff))
 
 
 def other_tabs_note(diff):
@@ -381,6 +421,7 @@ def _day_stats(day):
             out[snap.get("name", "?")] = {
                 "aktiv": aktiv, "ideal": round(si, 1), "fakt": round(sf, 1),
                 "pct": round(sf / si * 100, 1) if si else 0.0,
+                "pct_raw": sf / si * 100 if si else 0.0,   # rang chegarasi uchun (yaxlitlanmagan)
                 "delay_days": round(dl, 1),
                 "delay_pct": round((dl * 3.33 / aktiv), 2) if aktiv else 0.0,
                 "fetched_at": snap.get("fetched_at", day),
@@ -479,12 +520,14 @@ def build_report_json(day, diff_dict, report_text, insights=None, out_name="repo
             "aktiv": st["aktiv"], "ideal": st["ideal"], "fakt": st["fakt"],
             "pct": st["pct"], "delay_days": st["delay_days"], "delay_pct": st["delay_pct"],
             "delta": delta,
-            "color": pct_color(st["pct"]),
+            # Rang YAXLITLANMAGAN qiymatdan: 89,96 → «90,0» ko'rinadi, lekin yashil emas (P2)
+            "color": pct_color(st.get("pct_raw", st["pct"])),
             "top_changes": _top_changes(dsheet),
         })
 
     t = diff_dict.get("totals", {})
-    quiet = not (t.get("added") or t.get("removed") or t.get("changed"))
+    quiet = not (t.get("added") or t.get("removed") or t.get("changed")) \
+        and not yangi_range_bor(diff_dict)
     data = {
         "date": day,
         "generated_at": time.strftime("%Y-%m-%d %H:%M"),
@@ -587,12 +630,21 @@ def main():
     )
     log(f"kontekst: {len(context)} belgi, claude -p chaqirilmoqda…")
 
-    try:
-        report = run_claude(prompt)
-    except Exception as e:
-        log(f"OGOHLANTIRISH: {e}")
+    report, xato = None, ""
+    for urinish in (1, 2):
+        try:
+            report, xato = run_claude(prompt), ""
+            break
+        except Exception as e:
+            xato = f"{type(e).__name__}: {e}"
+            log(f"OGOHLANTIRISH: claude {urinish}-urinish yiqildi — {trunc(xato, 400)}")
+            # Timeout'ni qayta urinish yana CLAUDE_TIMEOUT kutadi — 09:30 PM push'gacha ulgurmaydi
+            if urinish == 2 or isinstance(e, subprocess.TimeoutExpired):
+                break
+            time.sleep(CLAUDE_RETRY_WAIT)
+    if report is None:
         log("fallback hisobot yozilyapti (quruq raqamlar)")
-        report = fallback_report(diff, str(e))
+        report = fallback_report(diff, xato)
 
     wm = deterministic_notes(diff)
     if wm:
@@ -603,7 +655,8 @@ def main():
     report_path.write_text(report + "\n", encoding="utf-8")
     log(f"hisobot tayyor: {report_path} ({len(report)} belgi)")
     try:
-        build_report_json(args.date, diff, report, insights=make_insights(report))
+        # Claude yiqilgan kun insights ham chaqirilmaydi (yana yiqilib vaqt yeydi)
+        build_report_json(args.date, diff, report, insights=make_insights(report) if not xato else [])
     except Exception as e:
         log(f"report.json yozilmadi (PDF matnsiz qoladi): {e}")
     return 0

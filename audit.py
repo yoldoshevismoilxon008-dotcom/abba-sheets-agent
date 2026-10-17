@@ -48,6 +48,7 @@ ACK_FILE = DATA / "audit-acknowledged.yaml"
 KEY_LABELS = {
     "main-tab-yoq": "Main tabi yo'q",
     "oy-tab-yoq": "Joriy oy tabi yo'q",
+    "oy-tab-dublikat": "Joriy oyga bir nechta tab",
     "nomsiz-qator": "Nomsiz to'ldirilgan qator",
     "manager-bosh": "Manager katagi bo'sh",
     "reyting-bosh": "Reyting bo'sh",
@@ -365,7 +366,8 @@ def audit_month_tab(sheet_name, tab, vals, findings):
 
 
 def audit_sheet(snap, findings, today=None):
-    """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar."""
+    """Bitta sheet snapshot'i (ranges + tabs) ustida barcha tekshiruvlar.
+    today — snapshot sanasi (joriy oy shundan; None — bugun)."""
     if not snap.get("pm_kpi", True):
         return  # PM KPI formatida emas (masalan SMM) — Main/oy tekshiruvlari yot
     name = snap.get("name", snap.get("id", "?"))
@@ -374,8 +376,13 @@ def audit_sheet(snap, findings, today=None):
     tabs = snap.get("tabs") or list(by_tab.keys())
 
     main_tab = next((t for t in tabs if fetchmod.norm(t) == "main"), None)
-    # kunlik diff bilan YAGONA qoida: 2026-09 dan «<Oy> (<yil>)» (fetch.pm_month_tab)
+    # Joriy oy SNAPSHOT sanasidan (run_checks beradi): eski snapshot qayta tekshirilsa devor
+    # soati boshqa oyni berib soxta «oy tabi topilmadi» CRIT chiqardi (P2). Oy tabi — kunlik
+    # diff bilan YAGONA qoida: 2026-09 dan «<Oy> (<yil>)» (fetch.pm_month_tab).
     month_tab = fetchmod.pm_month_tab(tabs, today)
+    dup = fetchmod.month_tab_dup_note(tabs, today)
+    if dup:
+        findings.append((name, month_tab, WARN, dup[:1].upper() + dup[1:], "oy-tab-dublikat"))
 
     main_names = None
     if main_tab is None:
@@ -420,9 +427,10 @@ def gather(from_snapshot=None):
 
 def run_checks(from_snapshot=None):
     snaps, source = gather(from_snapshot)
+    today = date.fromisoformat(from_snapshot) if from_snapshot else None
     findings = []
     for snap in snaps:
-        audit_sheet(snap, findings)
+        audit_sheet(snap, findings, today)
     return findings, source
 
 

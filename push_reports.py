@@ -37,8 +37,8 @@ def _san(msg):
     return s.replace(tok, "***") if tok else s
 
 
-def sh(*cmd, cwd=None):
-    r = subprocess.run(list(cmd), cwd=cwd, capture_output=True, text=True, timeout=180)
+def sh(*cmd, cwd=None, env=None):
+    r = subprocess.run(list(cmd), cwd=cwd, capture_output=True, text=True, timeout=180, env=env)
     if r.returncode != 0:
         raise RuntimeError(_san(f"{' '.join(cmd[:4])} → {r.stderr.strip()[:250]}"))
     return r.stdout
@@ -50,21 +50,23 @@ def main():
     if not repo or not token:
         log("REPORTS_REPO / GH_TOKEN_REPORTS yo'q — o'tkazildi")
         return 0
-    # Token DISKDA saqlanmasin: origin TOKENSIZ URL, tarmoq amallariga token argument bilan
-    auth = f"https://x-access-token:{token}@github.com/{repo}.git"
-    clean = f"https://github.com/{repo}.git"
+    # Token na DISKDA, na git ARGV'ida (ps): URL tokensiz, token GIT_CONFIG_* env'da (git_auth)
+    import git_auth
+
+    clean = git_auth.url(repo)
+    genv = git_auth.env(token)
 
     if not (CLONE / ".git").is_dir():
-        sh("git", "clone", "--depth", "1", auth, str(CLONE))
-        sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)   # token diskda qolmasin
+        sh("git", "clone", "--depth", "1", clean, str(CLONE), env=genv)
+        sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)   # tokensiz origin
     else:
         sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)   # eski tokenli bo'lsa tozala
         try:
-            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", auth)
+            sh("git", "-C", str(CLONE), "pull", "--rebase", "-q", clean, env=genv)
         except RuntimeError as e:
             log(f"pull yiqildi ({_san(str(e))}) — klon yangidan olinadi")
             shutil.rmtree(CLONE, ignore_errors=True)
-            sh("git", "clone", "--depth", "1", auth, str(CLONE))
+            sh("git", "clone", "--depth", "1", clean, str(CLONE), env=genv)
             sh("git", "-C", str(CLONE), "remote", "set-url", "origin", clean)
 
     out = CLONE / "hisobotlar"
@@ -89,7 +91,7 @@ def main():
         "-c", "user.name=abba-sheets-agent", "-c", "user.email=agent@abba.local",
         "commit", "-q", "-m", f"hisobot {date.today().isoformat()}",
     )
-    sh("git", "-C", str(CLONE), "push", "-q", auth, "HEAD")   # tokenli URL argument (config'da emas)
+    sh("git", "-C", str(CLONE), "push", "-q", clean, "HEAD", env=genv)
     log(f"{changed} hisobot push qilindi → {repo}")
     return 0
 

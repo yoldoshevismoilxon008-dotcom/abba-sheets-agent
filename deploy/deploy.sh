@@ -17,6 +17,8 @@ MODE=${2:-full}
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_USER=abba
 APP_DIR=/home/$APP_USER/abba-sheets-agent
+# claude CLI versiyasi QOTIRILGAN (Dockerfile bilan bir xil; audit P2)
+CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION:-2.1.287}
 MAC_AGENT=com.abba.sheets-agent
 MAC_BOT=com.abba.sheets-bot
 
@@ -117,8 +119,13 @@ sudo -u $APP_USER bash -c '
   venv/bin/pip install -q -r requirements.txt
   export PATH="\$HOME/.claude/local:\$HOME/.local/bin:/usr/local/bin:\$PATH"
   if ! command -v claude >/dev/null 2>&1; then
-    echo "  claude CLI o'\''rnatilmoqda (native installer)..."
-    curl -fsSL https://claude.ai/install.sh | bash >/dev/null
+    echo "  claude CLI $CLAUDE_CODE_VERSION o'\''rnatilmoqda (native installer)..."
+    # curl | bash EMAS (audit P2): avval faylga (uzilgan yuklama yarim bajarilmaydi),
+    # versiya qotirilgan; installer binarni manifest checksum bilan tekshiradi
+    inst=\$(mktemp)
+    curl -fsSL -o "\$inst" https://claude.ai/install.sh
+    bash "\$inst" "$CLAUDE_CODE_VERSION" >/dev/null
+    rm -f "\$inst"
   fi
   command -v claude >/dev/null 2>&1 || { echo "XATO: claude CLI o'\''rnatilmadi"; exit 1; }
   echo "  venv + claude CLI OK (\$(claude --version 2>/dev/null | head -1))"
