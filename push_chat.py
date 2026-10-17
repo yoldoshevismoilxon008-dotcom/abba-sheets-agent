@@ -29,8 +29,11 @@ NOTIFY_AFTER = 6            # shuncha KETMA-KET yiqilishdan (~1 soat) keyin egag
 _TOKEN_RE = re.compile(r"x-access-token:[^@]*@")
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[push_chat] {msg}", flush=True)
+    print(f"[push_chat] {redact(msg)}", flush=True)
 
 
 def _san(msg):

@@ -37,8 +37,11 @@ PUSH_DUE_DAYS = undiruv.PUSH_DUE_DAYS  # yagona chegara — undiruv.py'da
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[pm_push] {msg}", flush=True)
+    print(f"[pm_push] {redact(msg)}", flush=True)
 
 
 def _owner():
@@ -52,6 +55,8 @@ def _tg(method, payload, attempts=2):
     import requests
 
     token, _ = _owner()
+    if isinstance(payload, dict):
+        payload = {k: (redact(v) if k in ("text", "caption") else v) for k, v in payload.items()}
     for i in range(attempts):
         try:
             r = requests.post(API.format(token=token, method=method), json=payload, timeout=30)
@@ -59,7 +64,7 @@ def _tg(method, payload, attempts=2):
                 return True
             log(f"{method} HTTP {r.status_code}: {r.text[:150]}")
         except Exception as e:
-            log(f"{method} xato: {type(e).__name__}: {str(e)[:120]}")
+            log(f"{method} xato: {type(e).__name__}: {redact(str(e))[:120]}")
         if i + 1 < attempts:
             time.sleep(2)
     return False
@@ -643,6 +648,17 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     view = undiruv.korinish(today, day=snap_day, prefer_live=True)
     tab, cur_rows, cur_src = view["tab"], view["rows"], view["source"]
     birinchi_izoh, birinchi_src = list(view.get("notes") or []), cur_src
+    if tab is None and cur_src in ("none", "xato") and undiruv.smm_sheet_id() is None:
+        # Sheet ID yo'q (CONFIG_LOCAL_B64 / config.local.yaml o'rnatilmagan) — bu konfiguratsiya
+        # xatosi, «tab yo'q» emas: oxirgi eski snapshot'dan PM'larga har kuni muzlagan qarz
+        # eslatmasi ketmasin (review P0-2)
+        msg = ("⚠️ Undiruv push: SMM sheet ID topilmadi (CONFIG_LOCAL_B64 / config.local.yaml "
+               "o'rnatilmagan) — PM'larga hech narsa yuborilmadi. ID'larni o'rnating "
+               "(scripts/maxfiy_migratsiya.py), keyin /pm_push force.")
+        if not dry_run:
+            send_owner(msg)
+        log("SMM sheet ID yo'q — push to'xtatildi")
+        return "no-config", msg
     if tab is None and cur_src in ("none", "xato"):
         # snapshot ham bugun yo'q — oxirgi mavjud kundan urinamiz
         days = sorted(d.name for d in diffmod.SNAPSHOTS.iterdir()

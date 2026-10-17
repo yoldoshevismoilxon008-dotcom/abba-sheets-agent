@@ -15,8 +15,11 @@ CHAT_DIR = DATA / "chat"
 CHAT_MAX = 8000            # bitta yozuv (savol/javob) shu belgidan kesiladi — kunlik fayl shishmasin
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[chat_log] {msg}", flush=True)
+    print(f"[chat_log] {redact(msg)}", flush=True)
 
 
 def _clip(s):

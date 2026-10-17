@@ -2,7 +2,9 @@
 """Railway supervisor — bot va kunlik scheduler BITTA processda.
 
 Boot tartibi:
-  1. Secrets: GOOGLE_SA_JSON (base64 env) → DATA_DIR/credentials/service-account.json
+  1. Secrets: GOOGLE_SA_JSON (base64 env) → DATA_DIR/credentials/service-account.json,
+     UNDIRUV_QAROR_B64 → DATA_DIR/undiruv_qaror.json; Sheet ID'lar tekshiriladi
+     (CONFIG_LOCAL_B64 / config.local.yaml — yo'q bo'lsa egaga ogohlantirish)
   2. Brand seed: image'dagi data/brand → DATA_DIR/brand (faqat yo'q fayllar —
      bot orqali tasdiqlangan theme/logo redeploy'da saqlanib qoladi)
   3. APScheduler (background): har kuni 09:00 Asia/Tashkent → run.sh subprocess,
@@ -29,26 +31,123 @@ sys.path.insert(0, str(BASE))
 DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[supervisor] {msg}", flush=True)
+    print(f"[supervisor] {redact(msg)}", flush=True)
 
 
-def boot_secrets():
-    """GOOGLE_SA_JSON (base64) → volume'dagi service-account.json (600)."""
-    b64 = os.environ.get("GOOGLE_SA_JSON", "").strip()
+def _env_fayl(var, dst):
+    """Env (base64) → volume'dagi fayl (600). Env manba: o'zgarsa fayl yangilanadi."""
+    b64 = os.environ.get(var, "").strip()
     if not b64:
-        return
+        return False
     try:
         raw = base64.b64decode(b64)
     except Exception as e:
-        log(f"XATO: GOOGLE_SA_JSON base64 o'qilmadi: {e}")
-        return
-    dst = DATA / "credentials" / "service-account.json"
+        log(f"XATO: {var} base64 o'qilmadi: {type(e).__name__}")
+        return False
     dst.parent.mkdir(parents=True, exist_ok=True)
     if not dst.exists() or dst.read_bytes() != raw:
         dst.write_bytes(raw)
         os.chmod(dst, 0o600)
-        log(f"service account yozildi: {dst}")
+        log(f"{var} → {dst} yozildi")
+    return True
+
+
+def boot_secrets():
+    """Railway Variables (base64) → volume:
+      GOOGLE_SA_JSON    → credentials/service-account.json
+      UNDIRUV_QAROR_B64 → undiruv_qaror.json (ega qarorlari — public repo'da emas, P0-2).
+    Sheet ID'lar (CONFIG_LOCAL_B64) faylga yozilmaydi — fetch env'dan to'g'ridan-to'g'ri o'qiydi."""
+    _env_fayl("GOOGLE_SA_JSON", DATA / "credentials" / "service-account.json")
+    boot_qarorlar()
+
+
+QAROR_ENV = "UNDIRUV_QAROR_B64"
+
+
+def boot_qarorlar():
+    """UNDIRUV_QAROR_B64 → DATA/undiruv_qaror.json. Env — manba: qiymat buzuq bo'lsa yoki
+    o'chirilsa, avval env'dan yozilgan fayl JIM qo'llanaverib qolmasin (review) — u
+    .stale ga olinadi va egaga ⚠️. Qo'lda qo'yilgan fayl (env'dan yozilmagan) tegilmaydi."""
+    dst = DATA / "undiruv_qaror.json"
+    belgi = DATA / "undiruv_qaror.json.env"          # fayl env'dan yozilganini bildiradi
+    b64 = "".join(os.environ.get(QAROR_ENV, "").split())
+    if not b64:
+        if belgi.exists() and dst.exists():
+            dst.replace(DATA / "undiruv_qaror.json.stale")
+            belgi.unlink()
+            _qaror_ogohlantir(f"{QAROR_ENV} o'chirilgan — eski qarorlar qo'llanmaydi "
+                              "(undiruv_qaror.json.stale ga olindi)")
+        return False
+    try:
+        import json
+
+        raw = base64.b64decode(b64, validate=True)
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("qarorlar"), list):
+            raise ValueError("«qarorlar» ro'yxati yo'q")
+    except Exception as e:                           # noqa: BLE001
+        if dst.exists():
+            dst.replace(DATA / "undiruv_qaror.json.stale")
+        belgi.unlink(missing_ok=True)
+        _qaror_ogohlantir(f"{QAROR_ENV} buzuq ({type(e).__name__}) — ega qarorlari QO'LLANMAYDI, "
+                          "qiymatni qayta nusxalang")
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists() or dst.read_bytes() != raw:
+        dst.write_bytes(raw)
+        os.chmod(dst, 0o600)
+        log(f"{QAROR_ENV} → {dst} yozildi")
+    belgi.write_text("env\n", encoding="utf-8")
+    return True
+
+
+def _qaror_ogohlantir(sabab):
+    msg = f"⚠️ abba-sheets-agent: {sabab}."
+    log(msg)
+    _notify_owner_once_daily(msg, key="undiruv_qaror")
+
+
+def boot_config_check():
+    """Maxfiy konfiguratsiya holati (boot'da va har kuni 09:00 dan oldin): Sheet ID'lar,
+    nomi mos kelmagan sheet'lar, dashboard_id, ega qarorlari fayli. Muammo bo'lsa egaga
+    kuniga bir marta ⚠️ — jim tushib qolish bo'lmasin (review P0-2). True — hammasi joyida."""
+    try:
+        import fetch
+        import undiruv
+
+        bor = fetch.load_config(include_qa_only=True)
+        idsiz, ortiqcha, dash_ok = fetch.overlay_holati()
+        qaror_ok = undiruv.qaror_fayl().exists()
+    except Exception as e:                          # noqa: BLE001
+        log(f"config tekshiruvi o'tkazildi: {type(e).__name__}: {e}")
+        return False
+    if not bor:
+        msg = ("⚠️ abba-sheets-agent: Google Sheet ID'lar topilmadi — CONFIG_LOCAL_B64 (Railway "
+               "Variables) yoki config.local.yaml o'rnatilmagan. Kunlik hisobot, Q&A va PM "
+               "eslatmalari ishlamaydi. Yasash: python3 scripts/maxfiy_migratsiya.py")
+        log(msg)
+        _notify_owner_once_daily(msg, key="config_ids")
+        return False
+    satrlar = []
+    if idsiz:
+        satrlar.append("ID'si yo'q sheet'lar (o'qilmaydi): " + ", ".join(idsiz))
+    if ortiqcha:
+        satrlar.append("hech qaysi sheet nomiga mos kelmagan ID kalitlari: " + ", ".join(ortiqcha))
+    if not dash_ok:
+        satrlar.append("dashboard_id yo'q — dashboard yangilanmaydi")
+    if not qaror_ok:
+        satrlar.append(f"undiruv_qaror.json yo'q ({QAROR_ENV} o'rnatilmagan) — ega qarorlari "
+                       "qo'llanmaydi, o'tgan oy qoldiqlari alohida so'raladi")
+    if satrlar:
+        msg = "⚠️ abba-sheets-agent konfiguratsiyasi:\n• " + "\n• ".join(satrlar)
+        log(msg)
+        _notify_owner_once_daily(msg, key="config_holat")
+        return False
+    return True
 
 
 def _copy_missing(src, dst):
@@ -176,6 +275,7 @@ def boot_catchup():
 
 def run_daily():
     log("kunlik pipeline boshlandi (run.sh)")
+    boot_config_check()                 # ID/qaror muammosi har kuni egaga ko'rinsin (kuniga 1 marta)
     env = dict(os.environ, LOG_TEE="1")
     try:
         r = subprocess.run(["/bin/bash", str(BASE / "run.sh")], env=env, timeout=3600)
@@ -319,6 +419,7 @@ def main():
     boot_secrets()
     boot_brand()
     boot_seed()
+    boot_config_check()
     # Bilim bazasi (KB) — sxema (idempotent). Yiqilsa bot baribir ko'tariladi.
     try:
         import kb

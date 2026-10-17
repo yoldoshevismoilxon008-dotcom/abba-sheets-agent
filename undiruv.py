@@ -40,8 +40,11 @@ _SERIAL_EPOCH = date(1899, 12, 30)
 _SERIAL_MIN, _SERIAL_MAX = 33000, 80000
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[undiruv] {msg}", flush=True)
+    print(f"[undiruv] {redact(msg)}", flush=True)
 
 
 def money(v):
@@ -219,7 +222,20 @@ def _name_key(name):
 # ---- O'tgan oy → joriy oy (va joriy → keyingi) moslash -----------------------
 
 FUZZY_MIN = 0.85
-QAROR_FAYL = BASE / "undiruv_qaror.json"
+# Ega qarorlari — mijoz nomi, qarz summasi, sabab: biznes ma'lumoti, PUBLIC repo'da EMAS
+# (audit P0-2). Avval DATA_DIR (Railway volume; supervisor UNDIRUV_QAROR_B64 env'dan yozadi),
+# keyin loyiha papkasi (Mac; .gitignore'da). Namuna: undiruv_qaror.example.json.
+# QAROR_FAYL berilsa (test) — aynan shu fayl.
+QAROR_FAYL = None
+DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
+
+
+def qaror_fayl():
+    if QAROR_FAYL is not None:
+        return Path(QAROR_FAYL)
+    d = DATA / "undiruv_qaror.json"
+    lokal = BASE / "undiruv_qaror.json"
+    return lokal if (not d.exists() and lokal.exists()) else d
 # Oy oxiri: keyingi oy qatori joriy muddatdan shuncha kun keyin bo'lsa — navbatdagi oylik
 # to'lov (ko'chirilgan qarz emas), agar joriy invoice muddati hali kelmagan bo'lsa (KN1)
 KEYINGI_SIKL_KUN = 20
@@ -413,11 +429,12 @@ def qarorlar():
     """undiruv_qaror.json — egasining summa farqli ko'chirishlar bo'yicha qarorlari
     (qaror_tekshir'dan o'tganlari). Fayl yo'q — [] (log). Buzuq JSON yoki yaroqsiz yozuv
     — tashlanadi, sababi qaror_xatolari() orqali EGAGA ko'rsatiladi (jim emas)."""
+    fayl = qaror_fayl()
     try:
-        mt = QAROR_FAYL.stat().st_mtime
+        mt = fayl.stat().st_mtime
     except FileNotFoundError:
         if _QAROR_KESH["mtime"] != "yoq":
-            log(f"{QAROR_FAYL.name} yo'q — ega qarorlarisiz ishlanadi")
+            log(f"{fayl} yo'q — ega qarorlarisiz ishlanadi (UNDIRUV_QAROR_B64 o'rnatilmagan?)")
             # Egaga ham (S6): deploy'da fayl tushib qolsa, qarorlari jim qo'llanmay qolmasin.
             # Qaror kerak bo'lmasa ham fayl turadi: {"qarorlar": []}
             _QAROR_KESH.update(mtime="yoq", data=[], xato=[
@@ -426,7 +443,7 @@ def qarorlar():
         return []
     if _QAROR_KESH["mtime"] != mt:
         try:
-            raw = json.loads(QAROR_FAYL.read_text(encoding="utf-8"))
+            raw = json.loads(fayl.read_text(encoding="utf-8"))
             data, xato = qaror_tekshir(raw.get("qarorlar", []) if isinstance(raw, dict) else None)
         except Exception as e:                       # noqa: BLE001
             data, xato = [], [f"undiruv_qaror.json o'qilmadi ({type(e).__name__}) — ega qarorlarisiz ishlandi"]

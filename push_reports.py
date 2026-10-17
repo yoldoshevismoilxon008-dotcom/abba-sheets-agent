@@ -23,8 +23,11 @@ SNAPSHOTS = DATA / "snapshots"
 CLONE = DATA / "hisobotlar-repo"
 
 
+from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+
+
 def log(msg):
-    print(f"[push_reports] {msg}", flush=True)
+    print(f"[push_reports] {redact(msg)}", flush=True)
 
 
 _TOKEN_RE = re.compile(r"x-access-token:[^@]*@")

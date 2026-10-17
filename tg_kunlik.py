@@ -29,8 +29,9 @@ _ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def log(msg):
+    from maxfiy import redact  # audit P0-1: log'da token/sir yo'q (boshqa modullar bilan bir xil)
     # stdout emas: health.py --line chiqishi report.md ga yoziladi
-    print(f"[tg_kunlik] {msg}", file=sys.stderr, flush=True)
+    print(f"[tg_kunlik] {redact(msg)}", file=sys.stderr, flush=True)
 
 
 def _dm(iso):

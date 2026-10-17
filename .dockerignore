@@ -2,6 +2,10 @@
 .env
 .env.*
 credentials/
+config.local.yaml
+undiruv_qaror.json
+*.session
+*.session-journal
 
 # Lokal state (Railway'da volume /data) — brand bundan mustasno (seed uchun kerak)
 data/*

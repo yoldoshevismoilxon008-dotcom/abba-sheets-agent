@@ -384,10 +384,15 @@ def test_buzuq_qaror_korinishni_yiqitmaydi():
 
 
 def test_repo_qaror_fayli_yaroqli():
-    """Deploy bilan ketadigan undiruv_qaror.json — 2 ta yaroqli qaror, xatosiz (S6)."""
-    u._QAROR_KESH.update(mtime=None, data=[], xato=[])
-    q = u.qarorlar()
-    assert {x["loyiha"] for x in q} == {"Stirka", "Maestro kids", "Baaztruck"} and not u.qaror_xatolari()
+    """Haqiqiy undiruv_qaror.json git'da EMAS (public repo — audit P0-2). Repo'dagi namuna
+    (undiruv_qaror.example.json) yaroqli: uchala qaror turi xatosiz, «qarorlar» bo'sh (S6)."""
+    import json
+
+    raw = json.loads((Path(u.BASE) / "undiruv_qaror.example.json").read_text(encoding="utf-8"))
+    assert raw["qarorlar"] == []
+    ok, xato = u.qaror_tekshir(raw["_namuna"])
+    assert len(ok) == 3 and not xato, (ok, xato)
+    assert {q["qaror"] for q in ok} == {"qoshilsin", "yangi_toliq", "hisobdan_chiqarilsin"}
 
 
 def test_oy_oxiri_keyingi_tabda_tolangan_alohida_belgi():
@@ -783,15 +788,16 @@ def test_tab_yoq_kuni_holat_saqlanmaydi():
     v = _view(date(2026, 11, 2), qlar=[], tabs={("oktyabr", 2026): ("Undiruv oktabr(2026)", OKT)})
     assert v["tab"] is None
     saqla = {n: getattr(pp, n) for n in ("_load_state", "_save_state", "send_owner")}
-    orig_k, yozildi, egaga = u.korinish, [], []
+    orig_k, orig_id, yozildi, egaga = u.korinish, u.smm_sheet_id, [], []
     pp._load_state, pp._save_state, pp.send_owner = (lambda: {}), (lambda d: yozildi.append(d)), egaga.append
     u.korinish = lambda *a, **k: v
+    u.smm_sheet_id = lambda: "TEST-SMM-ID"     # ID'lar o'rnatilgan (repo config'da ID yo'q — P0-2)
     try:
         holat, msg = pp.run_daily(today=date(2026, 11, 2))
     finally:
         for n, f in saqla.items():
             setattr(pp, n, f)
-        u.korinish = orig_k
+        u.korinish, u.smm_sheet_id = orig_k, orig_id
     assert holat == "no-tab" and not yozildi and "/pm_push force" in msg, (holat, yozildi, msg)
 
 

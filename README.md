@@ -58,7 +58,21 @@ venv/bin/pip install -r requirements.txt
 
 ### 4. config.yaml to'ldiring (siz qilasiz)
 
-Har sheet uchun: `id` (URL'dagi uzun ID), `name`, `mode: all_tabs` (barcha
+**Sheet ID'lar va `dashboard_id` — `config.yaml`'da EMAS** (repo public bo'lishi mumkin):
+ular `config.local.yaml` (`.gitignore`'da) yoki Railway'da `CONFIG_LOCAL_B64` orqali
+beriladi, sheet NOMI bo'yicha qo'shiladi:
+
+```yaml
+dashboard_id: "..."
+sheet_ids:
+  "Zubair PM KPI": "..."
+```
+
+Ega qarorlari ham shunday: `undiruv_qaror.json` (`.gitignore`'da, namuna —
+`undiruv_qaror.example.json`), Railway'da `UNDIRUV_QAROR_B64`. Eski commit'dan yasash:
+`python3 scripts/maxfiy_migratsiya.py`.
+
+Har sheet uchun `config.yaml`'da: `name`, `mode: all_tabs` (barcha
 tab'lar avtomatik o'qiladi), `watch_tabs: auto` (kunlik diff uchun Main +
 joriy oy tabi NOMDAN avtomatik topiladi — oy almashganda config'ga tegish
 shart emas), `watch` (tahlil izohyi), `key_column` (semantik: `main:` /
