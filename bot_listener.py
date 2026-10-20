@@ -151,22 +151,28 @@ HELP = (
     "/vault_stat — vault sinxron holati\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
     "/help — shu yordam\n\n"
-    "«/y_» bilan boshlanadigan buyruqlar va «#Y12» belgili kartalar — Abba yordamchi (shaxsiy "
+    "«/y_» bilan boshlanadigan buyruqlar va 🔖 belgili kartalar — Abba yordamchi (shaxsiy "
     "Telegram agent) niki: /y_yordam"
 )
 
 # abba-hisobotlar/yordamchi (shaxsiy Telegram agent) ham SHU botdan xabar yuboradi, lekin botning
 # update'larini O'QIMAYDI (ikki o'quvchi bo'lsa — 409 / xabarlar bo'linib ketadi): egasining buyruqlarini
-# o'z (userbot) sessiyasi orqali ko'radi. Uning buyruqlari «/y_…», kartalari «#Y12» belgili — bularga
+# o'z (userbot) sessiyasi orqali ko'radi. Uning buyruqlari «/y_…», kartalari «🔖Y12» belgili — bularga
 # Sheets agenti javob bermaydi (aks holda «Bunday buyruq yo'q» yoki savolga javob ketadi).
-_YORDAMCHI_BELGI = re.compile(r"#Y\d+")
+# Qoida yordamchi bilan BIR XIL (yordamchi/bot.py): faqat matnli xabar; ovoz/rasm/hujjat va boshqa «/»
+# buyruqlar — reply bo'lsa ham — Sheets agentiniki. Aks holda ikkalasi ham jim qolib, xabar yo'qoladi.
+_YORDAMCHI_BELGI = re.compile(r"🔖Y\d+")
 
 
 def yordamchi_xabari(msg):
-    """Egasining yordamchiga yozgani: «/y_…» buyruq yoki yordamchi kartasiga reply."""
-    matn = (msg.get("text") or msg.get("caption") or "").strip().lower()
-    if matn.startswith("/y_"):
+    """Egasining yordamchiga yozgani: «/y_…» buyruq yoki yordamchi kartasiga matnli reply."""
+    matn = (msg.get("text") or "").strip()
+    if not matn:
+        return False
+    if matn.lower().startswith("/y_"):
         return True
+    if matn.startswith("/"):
+        return False
     rep = msg.get("reply_to_message") or {}
     return bool(_YORDAMCHI_BELGI.search(rep.get("text") or rep.get("caption") or ""))
 
