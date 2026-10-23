@@ -13,7 +13,7 @@ har kuni «sentyabr qoldig'i $1 500» so'raldi (01.10–12.10); 09.10 dan oktabr
                       BIR MARTA DATA_DIR/undiruv_carry/<YYYY-MM>.json ga muzlatiladi (atomik,
                       faqat fayl yo'q bo'lsa): keyin `analyze.py --date <oy oxiri>` qayta
                       ishlatilsa ham (summary jonli-birinchi — ro'yxatni bugungi ma'lumot bilan
-                      qayta yozardi), 30 kunlik retention snapshot'ni o'chirsa ham o'zgarmaydi.
+                      qayta yozardi), retention (run.sh, 40 kun) snapshot'ni o'chirsa ham o'zgarmaydi.
   tekshir()         — korinish() ichida: ro'yxatdagi qarzning o'tgan oy qatori hali ochiq va
                       L kunidagi o'sha joriy qator bilan juft — PM'dan IKKINCHI marta
                       so'ralmaydi, egaga har kuni «⚠️ Ikki tabda dublikat». Ko'chirilgan joriy
@@ -339,7 +339,11 @@ def _hozir(c):
 def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
     """korinish() ichida, t1 + kechish_ajrat'dan keyin, look-ahead (t3 `_i`) dan OLDIN.
     Qaytadi {dublikat: [o'tgan oy qatorlari], izohsiz: [{loyiha, pm, summa}], notes,
-    skip: {name_key} (dublikat — o'tgan tab kuzatuvi takrorlamasin), kochgan: {name_key}}.
+    skip: {name_key} (dublikat — o'tgan tab kuzatuvi takrorlamasin), kochgan: {name_key},
+    hamkor: {(name_key, pm_kalit)} — JORIY tab qatorlari, ularni P0-3 BUGUN hukm qildi: izohsiz ⚠️, o'tgan
+    tab izohlagan (ℹ️/jim) yoki «topilmadi». P0-5 (undiruv_izohsiz) faqat shu kunlari ularni takrorlamaydi;
+    P0-3 jim kunlari (asosga nisbatan joyida — ustiga yangi hisob tushgan bo'lsa ham) P0-5 o'zi ko'rsatadi.
+    PM bilan: shu nomli boshqa PM qatori (yangi mijoz/hisob) P0-5'dan yashirinmaydi}.
     Oxirgi qadamgacha toza; oxirida t1 real/farqli/noaniq kechish_ajrat kabi qayta bog'lanadi.
 
     DUBLIKAT (PM'dan so'ralmaydi, egaga ⚠️) — HAMMASI bajarilsa: o'tgan oy qatori yozuv bilan
@@ -350,7 +354,7 @@ def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
     IZOHSIZ — hamkor qator L kunidagi asosga nisbatan (o'tgan qator qaysi tasnifda bo'lishidan
     qat'i nazar: PR #1 K2 uni yopsa ham $1 000 ko'rinadi)."""
     u = _u()
-    out = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set()}
+    out = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set(), "hamkor": set()}
     rec, iz = royxat(today)
     out["notes"] += iz
     if not rec or tab is None or not u._tab_mos(rec.get("keyingi_tab"), tab):
@@ -386,6 +390,10 @@ def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
                 notes.append(f"⚠️ {r['loyiha']} ({r['pm']}): {sana} da {cur_m} tabiga «{yn}» bo'lib "
                              f"ko'chirilgan edi, endi u yerda topilmadi — {prev_m} qoldig'i "
                              f"{_usd(r['qoldiq'])} qayta so'ralmoqda")
+                # P0-5: qarz o'tgan tabdan qayta so'raladi — joriy nusxa o'chgani «yo'qolish» emas
+                # (qator yo'q — L kunidagi joriy PM'i va o'tgan oy PM'i bilan)
+                for p_ in {e.get("yangi_pm"), e.get("pm")}:
+                    out["hamkor"].add((u._name_key(yn), u._pm_kalit(p_)))
             # Faqat joriy qator qarzni SHEET'da o'zi saqlasa. qaror_qoshildi ($364 bot xotirada
             # qo'shgan) / qaror_yangi_toliq — qaror amal qilsa month_transition r'ni real'dan
             # o'zi oladi; bu yerga faqat qaror ESKIRGANDA keladi — undiruv.py qoidasi («📝 …
@@ -428,7 +436,11 @@ def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
                     "undirildi": 0, "lose": 0, "aktiv": 0}
         f = qator_farqi(base, qator_qiymat(c))
         if f["izohsiz"] < 1:
-            continue
+            continue                             # P0-3 jim — P0-5 bu qatorni o'zi kuzatadi (hamkor EMAS)
+        # P0-5: bugun bu qatorni P0-3 hukm qiladi (o'tgan tab izohlagan $1 000 ham, ⚠️ $917 ham) —
+        # undiruv_izohsiz takrorlamaydi. Faqat hukm kuni: asos kumulyativ, keyingi o'sish eski
+        # yo'qolishni «yopib» qo'yardi — P0-3 jim bo'lgan kun P0-5 ning o'z ⚠️/✅ i ko'rinadi
+        out["hamkor"].add((u._name_key(c["loyiha"]), u._pm_kalit(c["pm"])))
         nomi = f"{c['loyiha']} ({c['pm']}, {cur_m})"
         x, qism = None, []
         if r is not None and eski is not None:

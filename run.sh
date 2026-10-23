@@ -99,16 +99,18 @@ fi
 
 [ "$SEND_ERR" = "1" ] && alert "send bosqichi yiqildi (hisobot $DATA_DIR/snapshots/$TODAY/report.md da turibdi)"
 
-# Retention: 30 kundan eski snapshot papkalarini o'chirish (papka nomi bo'yicha)
+# Retention: 40 kundan eski snapshot papkalarini o'chirish (papka nomi bo'yicha).
+# 40 = 31 kunlik oy + undiruv_izohsiz ASOS_MAX_KUN (7) + zaxira: P0-5 oy hodisalarini har kuni oy
+# asosidan (1-sanadan oldingi oxirgi snapshot) qayta quradi — asos oy oxirigacha o'chmasligi shart.
 # date -v : BSD/macOS, date -d : GNU/Linux — ikkalasi ham qo'llanadi
-CUTOFF=$(date -v-30d +%F 2>/dev/null || date -d "30 days ago" +%F)
+CUTOFF=$(date -v-40d +%F 2>/dev/null || date -d "40 days ago" +%F)
 for d in "$DATA_DIR"/snapshots/*/; do
   [ -d "$d" ] || continue
   n=$(basename "$d")
   [[ "$n" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
   if [[ "$n" < "$CUTOFF" ]]; then
     rm -rf "$d"
-    echo "retention: $n o'chirildi (>30 kun)"
+    echo "retention: $n o'chirildi (>40 kun)"
   fi
 done
 
