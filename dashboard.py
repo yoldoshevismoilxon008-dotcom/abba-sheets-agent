@@ -53,6 +53,18 @@ def foiz2(x):
     return math.floor(x * 100 + 1e-6) / 100 if isinstance(x, float) else x
 
 
+def matn_vaqt(s):
+    """Surilib turadigan jadvaldagi «Yangilangan» vaqti MATN bo'lib yozilsin.
+
+    KPI va Undiruv jadvallari PM/loyiha soniga qarab suriladi, vaqt esa ma'lumot bilan
+    bitta ustunga (KPI'da «Aktiv») tushadi. USER_ENTERED vaqtni sana deb taniydi va
+    o'sha katakka sana formatini qo'yadi; ws.clear() faqat qiymatni o'chiradi, format
+    qoladi. Keyinroq shu katakka tushgan son sana bo'lib ko'rinardi (Aktiv=10 →
+    «1900-01-09 0:00», 12.11). Boshidagi «'» qiymatni matnga aylantiradi va katakda
+    ko'rinmaydi. Umumiy'dagi «Yangilangan» o'z ustunida turadi — u yerda sana qoladi."""
+    return "'" + s
+
+
 def sheet_stats(snap):
     """Snapshot'dagi joriy oy watch tabidan PM statistikasi."""
     for rng in snap.get("watch_ranges", []):
@@ -149,7 +161,7 @@ def build(day):
          "Kechikish %", "Kechikish komp.", "Fix", "Prognoz jami"],
     ] + kpi_prog + [
         [],
-        ["Yangilangan", time.strftime("%Y-%m-%d %H:%M")],
+        ["Yangilangan", matn_vaqt(now)],
     ]
 
     return {"umumiy": umumiy, "trend": trend_rows, "audit": audit_tab, "kpi": kpi_tab,
@@ -172,7 +184,7 @@ def build_undiruv(day, now):
         # KPI bloki va push bilan bir xil ogohlantirish
         out = [["UNDIRUV — ⚠️ joriy oy tabi yo'q", "", "", "", "", "", ""]]
         out += [[n, "", "", "", "", "", ""] for n in undiruvmod.izoh_satrlari(view.get("notes") or [])]
-        out.append(["Yangilangan", now, "", "", "", "", ""])
+        out.append(["Yangilangan", matn_vaqt(now), "", "", "", "", ""])
         return out
     if not rows:
         sx = undiruvmod.sarlavha_izohlari(view.get("notes"))
@@ -183,7 +195,7 @@ def build_undiruv(day, now):
         # ochilgan, bo'sh) — qaysi tab ekanini izoh satrining o'zi aytadi
         out = [["UNDIRUV — ⚠️ tab sarlavhasi o'qilmadi (izoh quyida)", "", "", "", "", "", ""]]
         out += [[n, "", "", "", "", "", ""] for n in undiruvmod.izoh_satrlari(view.get("notes") or [])]
-        out.append(["Yangilangan", now, "", "", "", "", ""])
+        out.append(["Yangilangan", matn_vaqt(now), "", "", "", "", ""])
         return out
     today = date.fromisoformat(day)
 
@@ -236,7 +248,7 @@ def build_undiruv(day, now):
         if q and not q.get("jadvalda"):
             out.append([f"📝 Ega qarori: {r['loyiha']} +{q['summa']} ({q.get('oy', '')} qoldig'i) — "
                         f"jadvalda hali yo'q, JAMI shunga farq qiladi", "", "", "", "", "", ""])
-    out.append(["Yangilangan", now, "", "", "", "", ""])
+    out.append(["Yangilangan", matn_vaqt(now), "", "", "", "", ""])
     return out
 
 
