@@ -10,6 +10,9 @@ APP="$(cd "$DIR/../.." && pwd)"
 . "$DIR/repo.conf"
 
 CLONE="$HOME/.abba-hisobotlar"
+# Bu klonni com.abba.hisobot-nazorat ham o'qiydi (hisobot_nazorat.py): bugungi «hisobot <sana>»
+# commit'i va FETCH_HEAD vaqti (oxirgi muvaffaqiyatli pull). Klon yo'li yoki pull usuli o'zgarsa,
+# o'sha nazoratni ham yangilang.
 VAULT="$HOME/claude-brain/abba-sheets-agent/hisobotlar"
 LOG="$APP/data/logs/reports-pull.log"
 mkdir -p "$APP/data/logs"

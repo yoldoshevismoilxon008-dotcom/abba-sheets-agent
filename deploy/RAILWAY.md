@@ -19,6 +19,7 @@ Bot va 09:00 kunlik pipeline **Railway'da**; Mac'da faqat vault sinxronizatsiyas
 | PM undiruv push (`pm_push`) | **Railway** | 09:30 | faqat supervisor'da — `run.sh` uni chaqirmaydi, Mac'da bu bosqich umuman mavjud emas |
 | Hisobotlar repo'ga push | **Railway** | pipeline'dan keyin | `push_reports.py`; `run.sh` da chaqiruv yo'q, shuning uchun `abba-hisobotlar` dagi har commit — Railway tirikligining isboti |
 | `com.abba.reports-pull` | Mac | har 10 daq | hisobotlar repo → vault rsync |
+| `com.abba.hisobot-nazorat` | Mac | har 10 daq (09:30 dan keyin ishlaydi) | Railway'ning **tashqi** nazorati (14.11.2026): bugungi `hisobot <sana>` commit'i yo'q bo'lsa — macOS + Telegram ogohlantirish, kuniga bir marta. Pastdagi «Tashqi nazorat» bo'limiga qarang |
 | `com.abba.brain-push` | Mac | har 10 daq | vault → GitHub (`claude-brain`) |
 | `com.abba.tg-kunlik` | Mac | 08:30 | **boshqa loyiha** (`~/.abba-tg-audit`), bu repoga aloqasi yo'q |
 | `com.abba.sheets-agent` | ❌ disabled | — | 07.09.2026 da o'chirildi |
@@ -40,9 +41,10 @@ Cutover'dan keyin Mac joblari **yoqilgan qolib ketgan** edi — ikki nusxa paral
 ```bash
 launchctl list | grep abba
 ```
-Kutilgan chiqish — aynan **uchta** qator:
+Kutilgan chiqish — aynan **to'rtta** qator (tartib har xil bo'lishi mumkin):
 ```
 -	0	com.abba.reports-pull
+-	0	com.abba.hisobot-nazorat
 -	0	com.abba.tg-kunlik
 -	0	com.abba.brain-push
 ```
@@ -68,6 +70,39 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.abba.sheets-agent.pl
 ```
 Rollback'dan oldin Railway tomonni to'xtating (bot tokenini olib tashlab redeploy
 yoki deploy'ni o'chirish) — aks holda yana 409 boshlanadi.
+
+### Tashqi nazorat — `com.abba.hisobot-nazorat` (14.11.2026)
+
+Railway servisi o'chsa, o'zi haqida xabar bera olmaydi: 🩺 ham, 12:00 xabari ham Railway
+ichidan ketadi. 13.11 da aynan shunday bo'lgan: Railway servisni 12.11 20:50 da to'xtatgan,
+hodisa faqat qo'lda tekshiruvda topilgan. Shuning uchun Mac Railway'ni tashqaridan
+tekshiradi:
+
+- **Nima tekshiriladi:** `~/.abba-hisobotlar` klonida bugungi `hisobot YYYY-MM-DD` commit'i
+  (`push_reports.py` yozadi, muallif `abba-sheets-agent`). Klonni `com.abba.reports-pull`
+  tortadi, nazorat unga yozmaydi. Klon qachon tortilgani FETCH_HEAD vaqtidan olinadi.
+- **Qachon:** har 10 daqiqada, lekin 09:30 dan keyingina (Asia/Tashkent). Run har kuni bo'ladi,
+  shuning uchun dam olish kunlari ham tekshiriladi. Mac 09:30 da uxlab qolgan bo'lsa,
+  tekshiruv uyg'ongandan keyin bo'ladi.
+- **Natija:**
+  - commit yo'q va klon 09:30 dan keyin tortilgan → ⚠️ «bugun run bo'lmadi», kuniga bir marta;
+  - keyin commit kelsa → ✅ «keldi», bir marta;
+  - klon ~2 soat (Mac uyg'oq paytida) tortilmasa → ⚠️ «tekshirib bo'lmadi».
+- **Kanallar:** macOS bildirishnomasi + Telegram. Telegram tokeni `~/abba-sheets-agent/.env`
+  dagi `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` dan olinadi, Railway'dagi bilan bir xil
+  bot. Token eskirgan bo'lsa (4xx), o'sha kuni qayta urinilmaydi, macOS esa baribir chiqadi.
+- **Fayllar:** skript `deploy/railway/hisobot_nazorat.py`. U `~/.abba-nazorat/` ga **nusxa**
+  qilinadi, shuning uchun asosiy nusxa orqada qolsa yoki tozalansa ham nazorat ishlaydi.
+  O'sha yerda log (`nazorat.log`), kunlik holat (`holat.json`) va `MANBA` turadi.
+- **Cheklov:** Mac o'chiq bo'lsa yoki kun bo'yi uyquda qolsa, ogohlantirish uyg'onguncha kelmaydi.
+
+```bash
+bash deploy/railway/nazorat_install.sh            # o'rnatish / yangilash (skript o'zgarsa qayta)
+/usr/bin/python3 ~/.abba-nazorat/hisobot_nazorat.py --sinov   # kanallarga sinov xabari
+/usr/bin/python3 deploy/railway/hisobot_nazorat.py --hozir 2026-11-13T09:40 --quruq \
+  --holat /tmp/h.json                             # soxta sana: nima yuborilardi
+bash deploy/railway/nazorat_install.sh --ochir    # o'chirish
+```
 
 ## Nima tayyor (kod tomonida)
 
