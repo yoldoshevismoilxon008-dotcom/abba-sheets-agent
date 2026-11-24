@@ -248,6 +248,30 @@ bo'lsa avval `launchctl bootout`, keyin qidiring.
 qachon ikki marta ishlanmaydi; birinchi ishga tushishda eski backlog tashlab
 yuboriladi (restart'da eski xabarlar qayta o'qilmaydi).
 
+## 🗓 WOW ai — kunlik reja va hisobot (`wow_kunlik.py`)
+
+Bot (Telegram nomi **WOW ai**) har kuni ertalab **09:00–12:00** va kechqurun
+**19:00–21:00** da har soat so'raydi (javob berilmaguncha): ertalab — «bugun qanday
+ishlar qilasiz?», kechqurun — «nimalar qildingiz?» (ertalabki reja bilan).
+
+1. Javob — **matn yoki ovoz** (`stt.py`: whisper.cpp + o'zbekcha rubaistt). Bir nechta
+   xabar mumkin: har biri jadvalga qo'shiladi yoki uni tuzatadi («3-ni o'chir»).
+2. `claude -p` (`prompts/wow-kunlik.md`) jadval tuzadi: ovozda buzilgan atama va loyiha
+   nomlarini oxirgi snapshot'dagi «Smm main» ro'yxati bilan tuzatadi; botga savol bo'lsa —
+   odatiy Q&A'ga yo'naltiradi. Claude ishlamasa — qatorlar bo'yicha oddiy bo'lish (⚠️ bilan).
+3. `wow_jadval.py` — Google Sheets ko'rinishidagi PNG jadval (Pillow + `assets/fonts` Inter).
+4. Preview + **✅ Yuborish / ❌ Bekor**. ✅ bosilganda yoki qoralama 15 daqiqa jim tursa,
+   rasm egasining akkauntidan (`userbot_sender.send_photo`) boshliq lichkasiga ketadi.
+   Yuborilmasa — rasm egaga keladi, «🔁 Qayta urinish» tugmasi bilan.
+
+Buyruqlar: `/kunlik` (holat) · `/ertalab` · `/kechqurun` (hozir yozish; `qayta` —
+yuborilganini yangilash) · `/dam` (bugun so'ramaslik) · `/boshliq @username Ism`
+(qabul qiluvchi; sinov — `/boshliq me`) · `/kunlik avto 15|off` · `/kunlik on|off`.
+
+Holat — `DATA/wow_kunlik/<sana>.json`, sozlama — `DATA/wow_kunlik/sozlama.json` (volume).
+Repo public: qabul qiluvchi kontakti kodda emas, faqat `/boshliq` bilan volume'ga yoziladi.
+Yangi env shart emas (userbot — mavjud `TG_SESSION_STRING`, `TG_API_ID`, `TG_API_HASH`).
+
 ## 🖥 VPS'ga ko'chirish (deploy/)
 
 Tizim server-portable: `deploy/deploy.sh root@IP` — to'liq o'rnatish (paketlar,

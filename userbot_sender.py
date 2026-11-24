@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""PM undiruv eslatmalarini EGANING shaxsiy Telegram akkauntidan yuborish
-(Telethon userbot) — ega ongli ravishda tanlagan yetkazish kanali.
+"""PM undiruv eslatmalarini va WOW ai kunlik reja/hisobot rasmini EGANING shaxsiy
+Telegram akkauntidan yuborish (Telethon userbot) — ega ongli ravishda tanlagan kanal.
 
 QAT'IY CHEKLOVLAR:
-  - FAQAT send_message. Boshqa hech qanday akkaunt-aksiya yo'q (o'qish, join,
-    delete, kontakt qo'shish — hech narsa).
+  - FAQAT yuborish: send_message (PM eslatmalari) va send_file (send_photo — WOW ai
+    kunlik jadvali, bitta qabul qiluvchiga). Boshqa hech qanday akkaunt-aksiya yo'q
+    (o'qish, join, delete, kontakt qo'shish — hech narsa).
   - Bitta chiqishda maks MAX_SENDS xabar; xabarlar orasi 4-6s (flood-safety).
+  - Bitta jarayonda bir vaqtda bitta ulanish (_CLIENT_LOCK): 09:30 PM push va kunlik
+    jadval bir sessiya bilan parallel ulanmasin.
   - Session: /data/undiruv_user.session — TG_SESSION_B64 env'dan startup'da
     yoziladi (fayl bo'lsa TEGILMAYDI). Login LOKAL scripts/tg_login.py bilan.
 """
@@ -13,6 +16,7 @@ import base64
 import os
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,6 +28,7 @@ SESSION = DATA / "undiruv_user.session"
 
 MAX_SENDS = 4          # kuniga maksimal chiqish xabari (4 PM)
 SLEEP_RANGE = (4, 6)   # xabarlar orasidagi pauza, soniya
+_CLIENT_LOCK = threading.Lock()   # bir jarayonda bitta ulanish (PM push + WOW jadval)
 
 
 from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
@@ -108,34 +113,68 @@ def send_messages(items, sleep_range=SLEEP_RANGE):
     from telethon.sync import TelegramClient
 
     results = []
-    client = TelegramClient(
-        _make_session(), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
-        device_model="abba-sheets-agent", system_version="railway",
-    )
-    try:
-        client.connect()
-        if not client.is_user_authorized():
-            raise SessionInvalid(
-                "session yaroqsiz (akkauntdan chiqarilgan?) — tg_login.py bilan qayta yarating"
-            )
-        for i, (slot, to, text) in enumerate(items):
-            try:
-                entity = "me" if to == "me" else str(to).strip()
-                client.send_message(entity, text, link_preview=False)
-                results.append((slot, True, ""))
-                log(f"yuborildi: {slot} → {entity if entity == 'me' else entity[:4] + '…'}")
-            except Exception as e:
-                err = f"{type(e).__name__}: {str(e)[:150]}"
-                results.append((slot, False, err))
-                log(f"XATO: {slot} yuborilmadi — {err}")
-            if i + 1 < len(items):
-                time.sleep(random.uniform(*sleep_range))
-    finally:
+    with _CLIENT_LOCK:
+        client = TelegramClient(
+            _make_session(), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
+            device_model="abba-sheets-agent", system_version="railway",
+        )
         try:
-            client.disconnect()
-        except Exception:
-            pass
+            client.connect()
+            if not client.is_user_authorized():
+                raise SessionInvalid(
+                    "session yaroqsiz (akkauntdan chiqarilgan?) — tg_login.py bilan qayta yarating"
+                )
+            for i, (slot, to, text) in enumerate(items):
+                try:
+                    entity = "me" if to == "me" else str(to).strip()
+                    client.send_message(entity, text, link_preview=False)
+                    results.append((slot, True, ""))
+                    log(f"yuborildi: {slot} → {entity if entity == 'me' else entity[:4] + '…'}")
+                except Exception as e:
+                    err = f"{type(e).__name__}: {str(e)[:150]}"
+                    results.append((slot, False, err))
+                    log(f"XATO: {slot} yuborilmadi — {err}")
+                if i + 1 < len(items):
+                    time.sleep(random.uniform(*sleep_range))
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
     return results
+
+
+def send_photo(to, path, caption=""):
+    """WOW ai: bitta rasm (oddiy matnli caption bilan) — kunlik reja/hisobot jadvali.
+    to: @username / +telefon / "me" (Saved Messages — sinov). FAQAT send_file.
+    Xatoda exception (SessionInvalid — auth; boshqasi — yuborish xatosi): chaqiruvchi egaga
+    rasmni o'zi forward qilishni taklif qiladi."""
+    ok0, why = available()
+    if not ok0:
+        raise SessionInvalid(why)
+
+    from telethon.sync import TelegramClient
+
+    entity = "me" if str(to).strip().lower() == "me" else str(to).strip()
+    with _CLIENT_LOCK:
+        client = TelegramClient(
+            _make_session(), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
+            device_model="abba-sheets-agent", system_version="railway",
+        )
+        try:
+            client.connect()
+            if not client.is_user_authorized():
+                raise SessionInvalid(
+                    "session yaroqsiz (akkauntdan chiqarilgan?) — tg_login.py bilan qayta yarating"
+                )
+            # parse_mode=None — caption oddiy matn (vazifadagi * _ ` belgilar formatga aylanmasin)
+            client.send_file(entity, str(path), caption=str(caption)[:1024], parse_mode=None)
+            log(f"rasm yuborildi → {entity if entity == 'me' else entity[:4] + '…'}")
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

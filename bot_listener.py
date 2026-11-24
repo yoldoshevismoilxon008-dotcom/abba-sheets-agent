@@ -123,8 +123,14 @@ Qoidalar:
   hammasi DATA'dan."""
 
 HELP = (
-    "🤖 **Abba Sheets Q&A**\n"
-    "Oddiy tilda savol yozing — PM KPI va SMM sheet'larining joriy holati "
+    "🤖 **WOW ai**\n"
+    "🗓 **Kunlik reja va hisobot:** ertalab 09–12 va kechqurun 19–21 da har soat so'rayman "
+    "(javob berguningizcha). Ovozli xabar yoki matn bilan javob bering — Sheets ko'rinishidagi "
+    "jadval qilaman, ✅ bosilganda (yoki 15 daqiqa jimlikdan keyin) sizning akkauntingizdan "
+    "boshliqqa lichkada ketadi. Tuzatish — shunchaki yozing («3-ni o'chir», «yana: …»).\n"
+    "/kunlik — holat va sozlamalar · /ertalab · /kechqurun — hozir yozish · /dam — bugun "
+    "so'ramaslik · /boshliq @username Ism — qabul qiluvchi\n\n"
+    "📊 **Sheets Q&A:** oddiy tilda savol yozing — PM KPI va SMM sheet'larining joriy holati "
     "asosida javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani "
     "batafsilroq\" kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar "
     "(solishtirish, trend, oylik natijalar) infografik PDF bo'lib keladi.\n\n"
@@ -2068,7 +2074,58 @@ def handle_with_watchdog(upd, timeout=None):
     return "ok"
 
 
+def handle_callback(cq):
+    """Inline tugma bosilishi (hozircha faqat WOW ai kunlik: «wow:…»). XAVFSIZLIK: faqat
+    egasining chatidagi xabar tugmasi va egasining o'zi — aks holda jim (log)."""
+    chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
+    sender = str((cq.get("from") or {}).get("id") or "")
+    if str(chat) != str(CHAT_ID) or sender not in owner_ids():
+        log(f"IGNORE: callback from.id={sender or '?'} chat_id={chat}")
+        try:
+            api("answerCallbackQuery", {"callback_query_id": cq.get("id")})
+        except Exception:
+            pass
+        return "cb-ignored"
+    try:
+        import wow_kunlik
+
+        r = wow_kunlik.callback(cq)
+    except Exception as e:
+        log(f"XATO wow_kunlik.callback: {type(e).__name__}: {str(e)[:200]}")
+        r = None
+    if r is None:
+        try:
+            api("answerCallbackQuery", {"callback_query_id": cq.get("id")})
+        except Exception:
+            pass
+        return "cb-unknown"
+    log(f"TUGMA: {str(cq.get('data'))[:40]!r} → {r}")
+    return r
+
+
+def _wow_kunlik(msg):
+    """WOW ai kunlik reja/hisobot: so'rov yuborilib javob kutilayotgan bo'lsa yoki qoralama
+    ochiq bo'lsa — matn/ovoz jadvalga ketadi. Savol deb topilsa — odatiy Q&A. None — bizniki
+    emas (oqim davom etadi). Xato bo'lsa ham None: xabar yo'qolmasin, Q&A javob bersin."""
+    try:
+        import wow_kunlik
+
+        slot = wow_kunlik.ushlaydimi(msg)
+        if not slot:
+            return None
+        natija, matn = wow_kunlik.xabarni_ishlash(msg, slot)
+    except Exception as e:
+        log(f"XATO wow_kunlik: {type(e).__name__}: {str(e)[:200]}")
+        return None
+    if natija == "savol" and matn:
+        do_question(matn)
+        return "wow-savol"
+    return f"wow-{natija}"
+
+
 def handle_update(upd):
+    if upd.get("callback_query"):
+        return handle_callback(upd["callback_query"])
     msg = upd.get("message") or {}
     chat = (msg.get("chat") or {}).get("id")
     if chat is None:
@@ -2098,6 +2155,10 @@ def handle_update(upd):
     if yordamchi_xabari(msg):
         log("yordamchi xabari — o'tkazildi (javobni yordamchi beradi)")
         return "yordamchi"
+    r = _wow_kunlik(msg)
+    if r:
+        log(f"WOW kunlik: {r}")
+        return r
     if msg.get("voice") or msg.get("audio"):
         return handle_voice(msg)
     if msg.get("document") or msg.get("photo"):
@@ -2130,6 +2191,17 @@ def handle_update(upd):
         reset_history()
         send_retry("🧹 Suhbat konteksti tozalandi — yangi mavzudan boshlaymiz.", attempts=2)
         return "reset"
+    if text.startswith("/"):                # WOW ai: /kunlik /ertalab /kechqurun /dam /boshliq
+        try:
+            import wow_kunlik
+
+            r = wow_kunlik.buyruq(text, msg)
+        except Exception as e:
+            log(f"XATO wow_kunlik.buyruq: {type(e).__name__}: {str(e)[:200]}")
+            send_retry(f"⚠️ Kunlik buyruq xatosi: {type(e).__name__}", attempts=2)
+            return "wow-xato"
+        if r:
+            return r
     if low.startswith("/hisobot"):
         do_hisobot()
         return "hisobot"
@@ -2486,7 +2558,10 @@ def main():
         try:
             r = api(
                 "getUpdates",
-                {"offset": last + 1, "timeout": POLL_TIMEOUT},
+                # callback_query — WOW ai kunlik jadval tugmalari (✅/❌/⏭/🏖). Ro'yxat aniq
+                # berilmasa Telegram oldingi sozlamani ishlatadi — tugmalar jim yo'qolmasin.
+                {"offset": last + 1, "timeout": POLL_TIMEOUT,
+                 "allowed_updates": ["message", "callback_query"]},
                 timeout=POLL_TIMEOUT + 15,
             )
             if r.status_code == 409:

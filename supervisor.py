@@ -12,6 +12,8 @@ Boot tartibi:
      boot catch-up o'sha kungi ishni 3 soat ichida bajaradi (daily_last_run.txt)
   4. bot_listener.main() — asosiy thread. Yiqilsa process o'ladi → Railway
      restart policy qayta ko'taradi (launchd KeepAlive ekvivalenti).
+  5. WOW ai kunlik reja/hisobot (wow_kunlik.py): 09–12 va 19–21 har soat so'rov,
+     har daqiqada avto-yuborish tekshiruvi, boot'da o'tib ketgan so'rov.
 
 Kunlik pipeline'dan keyin hisobotlar repo'ga push (push_reports.py, env bo'lsa).
 """
@@ -413,6 +415,22 @@ def run_push_chat():
         log(f"XATO: chat push yiqildi — {type(e).__name__}: {e}")
 
 
+def wow_jobs(sched):
+    """WOW ai kunlik reja/hisobot vazifalari (wow_kunlik.py)."""
+    import wow_kunlik
+
+    for slot in ("ertalab", "kechqurun"):
+        soat = wow_kunlik.SLOTLAR[slot]["soatlar"]
+        sched.add_job(
+            wow_kunlik.sorov_job, "cron", args=[slot], hour=f"{soat[0]}-{soat[-1]}", minute=0,
+            misfire_grace_time=1800, coalesce=True, max_instances=1, id=f"wow-{slot}",
+        )
+    sched.add_job(wow_kunlik.avto_job, "interval", minutes=1, max_instances=1, coalesce=True,
+                  id="wow-avto")
+    # restart/deploy so'rov vaqtiga to'g'ri kelsa — o'tib ketgan so'rov (fonda, bot bloklanmaydi)
+    sched.add_job(wow_kunlik.boot, id="wow-boot", misfire_grace_time=None)
+
+
 def main():
     log(f"boshlandi (DATA_DIR={DATA})")
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
@@ -466,13 +484,21 @@ def main():
         run_push_chat, "interval", minutes=10,
         max_instances=1, coalesce=True,
     )
+    # WOW ai kunlik reja/hisobot: ertalab 09–12 va kechqurun 19–21 har soat (javob
+    # berilmaguncha), qoralama jim tursa avto-yuborish — har daqiqada tekshiriladi.
+    # Yangi modul yiqilsa ham bot va kunlik hisobot ishlashda davom etadi.
+    try:
+        wow_jobs(sched)
+    except Exception as e:                       # noqa: BLE001
+        log(f"XATO: WOW kunlik rejalashtirilmadi — {type(e).__name__}: {e}")
     catchup = boot_catchup()
     if catchup:
         # trigger'siz — darhol, fon thread'ida; misfire_grace_time=None: start kechiksa ham o'tkazilmaydi
         sched.add_job(catchup, id="catchup", misfire_grace_time=None)
     sched.start()
     log("scheduler tayyor: 09:00 pipeline + 09:30 PM undiruv + 12:00 TG-kunlik nazorat + "
-        "har 10daq vault sinxron + chat push (Asia/Tashkent)")
+        "har 10daq vault sinxron + chat push + WOW kunlik (09–12, 19–21 har soat; avto har "
+        "daqiqa) (Asia/Tashkent)")
 
     import bot_listener
 
