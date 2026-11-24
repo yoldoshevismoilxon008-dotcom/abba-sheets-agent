@@ -1,4 +1,4 @@
-"""WOW ai — kunlik reja (ertalab) va hisobot (kechqurun) → boshliqqa.
+"""WoW — kunlik reja (ertalab) va hisobot (kechqurun) → boshliqqa.
 
 Tarmoq, Claude, STT va userbot soxta: Telegram chaqiruvlari yoziladi, soat qo'lda suriladi.
 pytest tests/test_wow_kunlik.py
@@ -601,4 +601,4 @@ def test_bot_listener_wow_buyruqlari(s, monkeypatch):
     monkeypatch.setattr(chat_log, "append_cmd", lambda *a: None)
     assert bl.handle_update({"update_id": 6, "message": _msg("/kunlik")}) == "wow-holat"
     assert bl.handle_update({"update_id": 7, "message": _msg("/ertalab")}) == "wow-ertalab-sent"
-    assert "WOW ai" in bl.HELP and "/kunlik" in bl.HELP
+    assert "WoW" in bl.HELP and "/kunlik" in bl.HELP

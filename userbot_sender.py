@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""PM undiruv eslatmalarini va WOW ai kunlik reja/hisobot rasmini EGANING shaxsiy
+"""PM undiruv eslatmalarini va WoW kunlik reja/hisobot rasmini EGANING shaxsiy
 Telegram akkauntidan yuborish (Telethon userbot) — ega ongli ravishda tanlagan kanal.
 
 QAT'IY CHEKLOVLAR:
-  - FAQAT yuborish: send_message (PM eslatmalari) va send_file (send_photo — WOW ai
+  - FAQAT yuborish: send_message (PM eslatmalari) va send_file (send_photo — WoW
     kunlik jadvali, bitta qabul qiluvchiga). Boshqa hech qanday akkaunt-aksiya yo'q
     (o'qish, join, delete, kontakt qo'shish — hech narsa).
   - Bitta chiqishda maks MAX_SENDS xabar; xabarlar orasi 4-6s (flood-safety).
@@ -145,7 +145,7 @@ def send_messages(items, sleep_range=SLEEP_RANGE):
 
 
 def send_photo(to, path, caption=""):
-    """WOW ai: bitta rasm (oddiy matnli caption bilan) — kunlik reja/hisobot jadvali.
+    """WoW: bitta rasm (oddiy matnli caption bilan) — kunlik reja/hisobot jadvali.
     to: @username / +telefon / "me" (Saved Messages — sinov). FAQAT send_file.
     Xatoda exception (SessionInvalid — auth; boshqasi — yuborish xatosi): chaqiruvchi egaga
     rasmni o'zi forward qilishni taklif qiladi."""

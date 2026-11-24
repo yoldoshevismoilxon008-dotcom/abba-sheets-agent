@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WOW ai — kunlik reja/hisobotni Google Sheets ko'rinishidagi PNG jadvalga chizish.
+"""WoW — kunlik reja/hisobotni Google Sheets ko'rinishidagi PNG jadvalga chizish.
 
 Pillow + Inter shrifti (assets/fonts, OFL) — brauzersiz, deterministik va tez (~0,1 s).
 Rasmda emoji yo'q (Inter'da glif yo'q): holat rangli «pill» bilan ko'rsatiladi.
@@ -89,7 +89,7 @@ def xulosa_matn(jadval, hisobot):
     return " · ".join(qism)
 
 
-def chiz(sarlavha, ost_sarlavha, jadval, hisobot=False, belgi="WOW ai"):
+def chiz(sarlavha, ost_sarlavha, jadval, hisobot=False, belgi="WoW"):
     """jadval: [{"ish", "izoh", "holat"}]. hisobot=True — «Holat» ustuni (kechki hisobot).
     «Izoh» ustuni faqat kamida bitta qatorda izoh bo'lsa chiziladi (sodda bo'lsin)."""
     f_title = _font("Bold", 40)

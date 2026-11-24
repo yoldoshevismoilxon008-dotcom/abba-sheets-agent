@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WOW ai — kunlik reja (ertalab) va kunlik hisobot (kechqurun) → boshliq lichkasiga.
+"""WoW — kunlik reja (ertalab) va kunlik hisobot (kechqurun) → boshliq lichkasiga.
 
 Oqim:
   • Ertalab 09:00, 10:00, 11:00, 12:00 — «Bugun qanday ishlar qilasiz?» (javob berilmaguncha).
@@ -1072,7 +1072,7 @@ def holat_matni(now=None):
     bosh = sz.get("boshliq")
     nomi = sz.get("boshliq_nomi") or ""
     daq = _avto_daq(sz)
-    L = ["🗓 <b>WOW ai — kunlik reja va hisobot</b>",
+    L = ["🗓 <b>WoW — kunlik reja va hisobot</b>",
          f"Bugun: {_sana_yorliq(sana)}" + (" · 🏖 dam" if st.get("dam") else ""),
          f"• Ertalab (09–12, har soat): {_slot_holat_matn('ertalab', st['ertalab'], now)}",
          f"• Kechqurun (19–21, har soat): {_slot_holat_matn('kechqurun', st['kechqurun'], now)}",

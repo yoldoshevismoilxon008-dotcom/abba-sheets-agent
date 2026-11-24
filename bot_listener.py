@@ -123,7 +123,7 @@ Qoidalar:
   hammasi DATA'dan."""
 
 HELP = (
-    "🤖 **WOW ai**\n"
+    "🤖 **WoW**\n"
     "🗓 **Kunlik reja va hisobot:** ertalab 09–12 va kechqurun 19–21 da har soat so'rayman "
     "(javob berguningizcha). Ovozli xabar yoki matn bilan javob bering — Sheets ko'rinishidagi "
     "jadval qilaman, ✅ bosilganda (yoki 15 daqiqa jimlikdan keyin) sizning akkauntingizdan "
@@ -2075,7 +2075,7 @@ def handle_with_watchdog(upd, timeout=None):
 
 
 def handle_callback(cq):
-    """Inline tugma bosilishi (hozircha faqat WOW ai kunlik: «wow:…»). XAVFSIZLIK: faqat
+    """Inline tugma bosilishi (hozircha faqat WoW kunlik: «wow:…»). XAVFSIZLIK: faqat
     egasining chatidagi xabar tugmasi va egasining o'zi — aks holda jim (log)."""
     chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
     sender = str((cq.get("from") or {}).get("id") or "")
@@ -2104,7 +2104,7 @@ def handle_callback(cq):
 
 
 def _wow_kunlik(msg):
-    """WOW ai kunlik reja/hisobot: so'rov yuborilib javob kutilayotgan bo'lsa yoki qoralama
+    """WoW kunlik reja/hisobot: so'rov yuborilib javob kutilayotgan bo'lsa yoki qoralama
     ochiq bo'lsa — matn/ovoz jadvalga ketadi. Savol deb topilsa — odatiy Q&A. None — bizniki
     emas (oqim davom etadi). Xato bo'lsa ham None: xabar yo'qolmasin, Q&A javob bersin."""
     try:
@@ -2191,7 +2191,7 @@ def handle_update(upd):
         reset_history()
         send_retry("🧹 Suhbat konteksti tozalandi — yangi mavzudan boshlaymiz.", attempts=2)
         return "reset"
-    if text.startswith("/"):                # WOW ai: /kunlik /ertalab /kechqurun /dam /boshliq
+    if text.startswith("/"):                # WoW: /kunlik /ertalab /kechqurun /dam /boshliq
         try:
             import wow_kunlik
 
@@ -2558,7 +2558,7 @@ def main():
         try:
             r = api(
                 "getUpdates",
-                # callback_query — WOW ai kunlik jadval tugmalari (✅/❌/⏭/🏖). Ro'yxat aniq
+                # callback_query — WoW kunlik jadval tugmalari (✅/❌/⏭/🏖). Ro'yxat aniq
                 # berilmasa Telegram oldingi sozlamani ishlatadi — tugmalar jim yo'qolmasin.
                 {"offset": last + 1, "timeout": POLL_TIMEOUT,
                  "allowed_updates": ["message", "callback_query"]},

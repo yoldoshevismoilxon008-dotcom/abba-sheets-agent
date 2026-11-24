@@ -12,7 +12,7 @@ Boot tartibi:
      boot catch-up o'sha kungi ishni 3 soat ichida bajaradi (daily_last_run.txt)
   4. bot_listener.main() — asosiy thread. Yiqilsa process o'ladi → Railway
      restart policy qayta ko'taradi (launchd KeepAlive ekvivalenti).
-  5. WOW ai kunlik reja/hisobot (wow_kunlik.py): 09–12 va 19–21 har soat so'rov,
+  5. WoW kunlik reja/hisobot (wow_kunlik.py): 09–12 va 19–21 har soat so'rov,
      har daqiqada avto-yuborish tekshiruvi, boot'da o'tib ketgan so'rov.
 
 Kunlik pipeline'dan keyin hisobotlar repo'ga push (push_reports.py, env bo'lsa).
@@ -416,7 +416,7 @@ def run_push_chat():
 
 
 def wow_jobs(sched):
-    """WOW ai kunlik reja/hisobot vazifalari (wow_kunlik.py)."""
+    """WoW kunlik reja/hisobot vazifalari (wow_kunlik.py)."""
     import wow_kunlik
 
     for slot in ("ertalab", "kechqurun"):
@@ -484,7 +484,7 @@ def main():
         run_push_chat, "interval", minutes=10,
         max_instances=1, coalesce=True,
     )
-    # WOW ai kunlik reja/hisobot: ertalab 09–12 va kechqurun 19–21 har soat (javob
+    # WoW kunlik reja/hisobot: ertalab 09–12 va kechqurun 19–21 har soat (javob
     # berilmaguncha), qoralama jim tursa avto-yuborish — har daqiqada tekshiriladi.
     # Yangi modul yiqilsa ham bot va kunlik hisobot ishlashda davom etadi.
     try:
