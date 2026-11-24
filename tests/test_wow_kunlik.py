@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import kalitlar  # noqa: E402
 import wow_kunlik as wk  # noqa: E402
 
 TZ = ZoneInfo("Asia/Tashkent")
@@ -531,15 +532,37 @@ def test_boshliq_caption_1024_dan_oshmaydi():
     assert len(c) <= 1024 and c.endswith("to'liq ro'yxat rasmda")
 
 
+def test_kalit_buyrugi_lugat_va_loyihalar(s):
+    kalitlar.FAYLLAR[0].write_text("## Odamlar\n- **Bekzod** — dizayner\n## Atamalar\n"
+                                   "- **kassachilar** — to'lov qabul qiluvchilar\n", encoding="utf-8")
+    assert wk.buyruq("/kalit") == "wow-kalit"
+    t = s.matnlar()[-1]
+    assert "<b>Odamlar</b>\n• Bekzod — dizayner" in t and "• kassachilar — to'lov qabul qiluvchilar" in t
+    assert "«Smm main»): 2 ta\nLivardi, Orzu" in t and "kalit-sozlar.md" in t
+
+
+def test_kalit_buyrugi_lugatsiz_va_uzun_royxat(s):
+    wk.buyruq("/kalit")
+    assert "Lug'at topilmadi" in s.matnlar()[-1]
+    kalitlar.FAYLLAR[0].write_text(
+        "## O\n" + "".join(f"- **Ism{i}** — {'x' * 150}\n" for i in range(60)), encoding="utf-8")
+    t = wk.kalit_matni()
+    assert len(t) < 4096 and "… yana" in t and "Livardi, Orzu" in t
+
+
 def test_malum_nomlar_snapshotdan(tmp_path, monkeypatch):
     monkeypatch.setattr(wk, "SNAPSHOTS", tmp_path)
     monkeypatch.setattr(wk, "_NOMLAR_KESH", {"t": 0.0, "nomlar": []})
     kun = tmp_path / "2026-11-22"
     kun.mkdir()
+    # fetch.py shakli: har range — {"actual_range", "values"} (ro'yxat emas — 24.11 gacha
+    # shu sababli main page'dagi loyiha nomlari umuman olinmagan)
     (kun / "a.json").write_text(json.dumps({"name": "SMM proektlar", "ranges": {
-        "'Smm main'!A1:BZ1000": [["", ""], ["Proektlar nomi", "Ish xolati"],
-                                 ["Eski loyiha", "Yakunlangan"], ["Livardi", "Aktiv"],
-                                 ["livardi", "aktiv"], ["", ""]]}}), encoding="utf-8")
+        "'Smm main'!A1:BZ1000": {"actual_range": "'Smm main'!A1:AE992", "values": [
+            ["", "filtr"], ["№", "Proektlar nomi", "Ball system", "Ish xolati"],
+            ["1", "Eski loyiha", "0", "Pauzada"], ["2", "Livardi", "41,2", "Aktive va pullik"],
+            ["3", "livardi", "", "Aktive va tekin"], ["", ""], ["", "53", "", "58"]]}}}),
+        encoding="utf-8")
     (kun / "b.json").write_text(json.dumps({"name": "Zubair PM KPI", "ranges": {}}),
                                 encoding="utf-8")
     assert wk.malum_nomlar() == ["Zubair", "Livardi", "Eski loyiha"]

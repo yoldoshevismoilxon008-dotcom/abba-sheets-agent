@@ -19,9 +19,19 @@ JORIY JADVAL (oldingi xabarlardan tuzilgan; bo'sh bo'lishi mumkin):
 ERTALABKI REJA (faqat hisobot rejimida):
 {{REJA}}
 
-MA'LUM NOMLAR (loyihalar, mijozlar, xodimlar). Ovozdan noto'g'ri eshitilgan nomni FAQAT shu
-ro'yxatdagi aniq mos keladigan nom bilan tuzat; mos kelmasa — eshitilganicha qoldir:
+MA'LUM NOMLAR — main page («Smm main» varag'i) dagi loyihalar (aktivlari birinchi) va PM'lar.
+Xabardagi loyiha nomi ro'yxatdagi BITTA nomga o'xshasa (ovozda buzilgan, bo'linib yoki
+qo'shilib eshitilgan, oxiri tushib qolgan, kichik harf bilan) — jadvalga ro'yxatdagi yozilishi
+bilan ko'chir. Ikki va undan ortiq nomga o'xshasa yoki hech biriga o'xshamasa — eshitilganicha
+qoldir. Ro'yxat faqat imlo uchun: xabarda aytilmagan loyihani jadvalga QO'SHMA.
 {{NOMLAR}}
+
+EGASINING KALIT SO'ZLARI — o'zi yozgan lug'at: kim kim, qaysi so'z nimani anglatadi.
+- Ism tilga olinsa — shu ro'yxatdagi yozilishda yoz («zubayr» → «Zubair»); «aka» bo'lsa saqla.
+- Lavozim va ma'no — xabarni to'g'ri tushunish uchun; egasi aytmagan lavozimni jadvalga qo'shma.
+- Atama jadvalda egasi aytganicha qoladi (to'g'ri imlo bilan), ma'nosiga qarab tushuniladi.
+- Lug'at faqat tushunish va imlo uchun: xabarda aytilmagan odamni jadvalga QO'SHMA.
+{{KALITLAR}}
 
 ISH ATAMALARI (ovozda ko'p buziladi — kontekst aniq bo'lsa shu shaklda yoz): PM (pin, piem,
 pi em), SMM, TZ (tezet, texnik topshiriq), KP (kape), KPI, reels (rils, rez), stories, target,
@@ -43,9 +53,11 @@ QOIDALAR:
    holatni QO'SHMA va taxmin qilma. Aniqlovchi so'zlarni tushirib qoldirma («yangi PM bilan
    uchrashuv» → «Yangi PM bilan uchrashuv», «PM bilan uchrashuv» emas). Ish kuni kontekstida
    «soat 1–7» — kunduzgi vaqt (13:00–19:00); bu haqda so'rama.
-3. Har qator — bitta aniq ish, qisqa (≤ 15 so'z), ish nomi shaklida: «Orzu: reels TZ berish».
-   Loyiha yoki mijoz nomi aytilgan bo'lsa — boshida «Nom: ...». Bir gapda bir nechta ish
-   bo'lsa — alohida qatorlarga ajrat. «Bugun», «keyin», «ee», «shunaqa», «xullas» kabi
+3. Har qator — bitta aniq ish, qisqa (≤ 15 so'z), ish nomi shaklida. Loyiha yoki mijoz nomi
+   aytilgan bo'lsa — qator «<Loyiha>: <ish>» shaklida, boshida LOYIHA nomi («<Loyiha>: reels TZ
+   berish», «<Loyiha>: <ism> bilan ko'rib chiqish»; «<ism>: <Loyiha>…» emas) — odam ismi va
+   atama ish matnida qoladi. Bir gapda bir nechta loyiha yoki ish bo'lsa — har biriga alohida
+   qator (holati har xil bo'lishi mumkin). «Bugun», «keyin», «ee», «shunaqa», «xullas» kabi
    to'ldiruvchi so'zlar jadvalga kirmaydi.
 4. Ovozli xabar avtomatik transkripsiya qilingan — xatolar bo'lishi mumkin («bo gyan» =
    «bo'lgan», «tezet» = «TZ», «kape» = «KP»). Ma'nosi aniq bo'lsa — to'g'ri o'zbekcha imlo

@@ -8,8 +8,9 @@ Oqim:
   • Javob — matn yoki ovoz (stt.py: whisper.cpp + o'zbekcha rubaistt). Bir nechta xabar
     bo'lishi mumkin: har biri joriy jadvalga qo'shiladi yoki uni tuzatadi
     («3-ni o'chir», «Livardi emas, Livarti»).
-  • Claude jadval tuzadi (ma'lum loyiha va xodim nomlari bilan noto'g'ri eshitilgan nomlarni
-    tuzatadi) → Sheets ko'rinishidagi PNG jadval (wow_jadval.py) egaga preview bo'lib keladi.
+  • Claude jadval tuzadi: loyiha nomlari main page'dan («Smm main») ko'chiriladi, ism va
+    atamalar egasining lug'atidan (kalitlar.py, /kalit) → Sheets ko'rinishidagi PNG jadval
+    (wow_jadval.py) egaga preview bo'lib keladi.
   • ✅ bosilganda — yoki qoralama AVTO_DAQ daqiqa jim tursa — jadval egasining shaxsiy
     akkauntidan (userbot_sender.send_photo) boshliq lichkasiga ketadi.
 
@@ -39,6 +40,7 @@ PROMPT = BASE / "prompts" / "wow-kunlik.md"
 TZ = "Asia/Tashkent"
 
 from maxfiy import redact, safe_exc  # noqa: E402  (log'da token/sir yo'q)
+import kalitlar  # noqa: E402
 
 SLOTLAR = {
     "ertalab": {"soatlar": (9, 10, 11, 12), "rejim": "reja", "sarlavha": "Kunlik reja"},
@@ -50,7 +52,7 @@ MAX_QATOR = 30
 MAX_YUBORISH = 6               # bir slotga bir kunda boshliqqa ko'pi bilan (qayta urinishlar bilan)
 VOICE_MAX_SEC = 180
 CLAUDE_TIMEOUT = 240
-BUYRUQLAR = ("/kunlik", "/ertalab", "/kechqurun", "/dam", "/boshliq")
+BUYRUQLAR = ("/kunlik", "/ertalab", "/kechqurun", "/dam", "/boshliq", "/kalit")
 HAFTA = ("dushanba", "seshanba", "chorshanba", "payshanba", "juma", "shanba", "yakshanba")
 HOLAT_BELGI = {"bajarildi": "✅", "jarayonda": "⏳", "bajarilmadi": "❌", "ertaga": "➡️", "": "▫️"}
 # Tartib muhim (birinchi mos kelgani olinadi): inkor → qisman → keyinga → bajarildi.
@@ -342,6 +344,8 @@ def _loyiha_nomlari(rows):
             if len(r) <= j or not str(r[j]).strip():
                 continue
             nom = str(r[j]).strip()
+            if re.fullmatch(r"[\d\s.,%$]+", nom):        # jadval ostidagi jami qatori («53»)
+                continue
             holat = str(r[k]).strip().lower() if k is not None and len(r) > k else ""
             (aktiv if any(w in holat for w in ("aktiv", "ishla", "jarayon", "davom")) else qolgan)\
                 .append(nom)
@@ -377,9 +381,9 @@ def malum_nomlar(limit=150):
             m = re.match(r"(.+?)\s+PM KPI", str(d.get("name") or ""))
             if m:
                 nomlar.insert(0, m.group(1).strip())
-            for key, rows in (d.get("ranges") or {}).items():
-                if str(key).startswith("'Smm main'!") and isinstance(rows, list):
-                    nomlar += _loyiha_nomlari(rows)
+            for key, rng in (d.get("ranges") or {}).items():     # fetch.py: {actual_range, values}
+                if str(key).startswith("'Smm main'!") and isinstance(rng, dict):
+                    nomlar += _loyiha_nomlari(rng.get("values") or [])
         if nomlar:
             break
     out, bor = [], set()
@@ -402,6 +406,7 @@ def _prompt(rejim, joriy, reja, nomlar, kiritma, tur, sana):
         "JORIY": json.dumps(joriy, ensure_ascii=False) if joriy else "(bo'sh)",
         "REJA": json.dumps(reja, ensure_ascii=False) if reja else "(yo'q)",
         "NOMLAR": ", ".join(nomlar) if nomlar else "(yo'q)",
+        "KALITLAR": kalitlar.prompt_matni(),
         "TUR": "ovozli xabar transkripti" if tur == "ovoz" else "matn",
         "KIRITMA": kiritma,
     }
@@ -946,6 +951,8 @@ def boot(now=None):
     """Supervisor startup'da bir marta: uzilib qolgan «yuborilmoqda» → «xato» (qayta urinish
     tugmasi bilan), bugungi so'rov restart/deploy tufayli o'tib ketgan bo'lsa — hozir so'rash."""
     try:
+        if not kalitlar.royxat():           # yuklansa royxat() o'zi log qiladi
+            log(f"kalit so'zlar topilmadi (vault: {kalitlar.NISBIY})")
         now = now or hozir()
         sana = now.date().isoformat()
         with _LOCK:
@@ -1116,7 +1123,33 @@ def holat_matni(now=None):
          "/ertalab qayta · /kechqurun qayta — yuborilganini yangilab qayta yuborish",
          "/dam — bugun so'ramaslik",
          "/boshliq @username Ism — qabul qiluvchi (sinov: <code>/boshliq me</code>)",
+         "/kalit — kalit so'zlar (ismlar, atamalar, loyihalar)",
          "/kunlik avto 15 | avto off · /kunlik off | on"]
+    return "\n".join(L)
+
+
+def kalit_matni(limit=3500):
+    """/kalit — bot nimalarni «biladi»: egasining lug'ati va main page'dagi nomlar."""
+    royxat = kalitlar.royxat()
+    L = ["🔑 <b>Kalit so'zlar</b> — ovozni tanish va jadval tuzishda ishlataman"]
+    n, oldingi = len(L[0]), None
+    for i, (bolim, kalit, mano) in enumerate(royxat):
+        qator = ([f"\n<b>{esc(bolim)}</b>"] if bolim != oldingi and bolim else []) + \
+                [f"• {esc(kalit)} — {esc(mano)}"]
+        n += sum(len(q) + 1 for q in qator)
+        if n > limit:
+            L.append(f"… yana {len(royxat) - i} ta")
+            break
+        L += qator
+        oldingi = bolim
+    if not royxat:
+        L.append("\n⚠️ Lug'at topilmadi — vault hali sinxronlanmagan bo'lishi mumkin (/vault_stat).")
+    nomlar = malum_nomlar()
+    L.append(f"\n<b>Loyiha va PM nomlari</b> (main page — «Smm main»): {len(nomlar)} ta")
+    if nomlar:
+        L.append(esc(", ".join(nomlar[:12])) + (", …" if len(nomlar) > 12 else ""))
+    L.append("\nO'zgartirish: Obsidian → <code>abba-sheets-agent/kalit-sozlar.md</code> "
+             "(botga ~20 daqiqada yetadi)")
     return "\n".join(L)
 
 
@@ -1148,6 +1181,9 @@ def buyruq(text, msg=None, now=None):
     now = now or hozir()
     if msg:
         _ismni_eslab(msg)
+    if cmd == "/kalit":
+        xabar(kalit_matni())
+        return "wow-kalit"
     if cmd == "/boshliq":
         if not args:
             sz = sozlama()

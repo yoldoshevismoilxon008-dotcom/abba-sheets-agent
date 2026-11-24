@@ -129,7 +129,8 @@ HELP = (                                  # «{BOT}» — help_matni() botning T
     "jadval qilaman, ✅ bosilganda (yoki 15 daqiqa jimlikdan keyin) sizning akkauntingizdan "
     "boshliqqa lichkada ketadi. Tuzatish — shunchaki yozing («3-ni o'chir», «yana: …»).\n"
     "/kunlik — holat va sozlamalar · /ertalab · /kechqurun — hozir yozish · /dam — bugun "
-    "so'ramaslik · /boshliq @username Ism — qabul qiluvchi\n\n"
+    "so'ramaslik · /boshliq @username Ism — qabul qiluvchi · /kalit — kalit so'zlar (ismlar, "
+    "atamalar, loyihalar)\n\n"
     "📊 **Sheets Q&A:** oddiy tilda savol yozing — PM KPI va SMM sheet'larining joriy holati "
     "asosida javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani "
     "batafsilroq\" kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar "
@@ -2203,7 +2204,7 @@ def handle_update(upd):
         reset_history()
         send_retry("🧹 Suhbat konteksti tozalandi — yangi mavzudan boshlaymiz.", attempts=2)
         return "reset"
-    if text.startswith("/"):                # kunlik reja: /kunlik /ertalab /kechqurun /dam /boshliq
+    if text.startswith("/"):                # kunlik reja: /kunlik /ertalab /kechqurun /dam /boshliq /kalit
         try:
             import wow_kunlik
 

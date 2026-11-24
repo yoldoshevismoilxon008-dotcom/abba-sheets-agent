@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Ovozli xabarlar: STT (whisper.cpp + o'zbekcha rubaistt modeli) va TTS (edge-tts).
 
-STT: Telegram OGG/Opus → ffmpeg 16kHz mono WAV → whisper-cli → matn.
+STT: Telegram OGG/Opus → ffmpeg 16kHz mono WAV → whisper-cli → matn (egasining kalit
+so'zlari — kalitlar.py — whisper'ga --prompt bo'lib beriladi).
 Model: DATA/models/ggml-rubaistt.bin — yo'q bo'lsa MODEL_URL env'dan yuklab
 olinadi (HF resolve-link yoki GDrive direct; private HF uchun MODEL_TOKEN).
 TTS: edge-tts (uz-UZ-SardorNeural / MadinaNeural) → MP3 → OGG/Opus voice.
@@ -18,6 +19,8 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+
+import kalitlar
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
@@ -277,17 +280,19 @@ def transcribe(src_path, sekund=None):
         if r.returncode != 0 or not wav.exists():
             raise RuntimeError(f"ffmpeg xato: {r.stderr[-200:]}")
         threads, timeout = whisper_threads(), _timeout(sekund)
+        cmd = [whisper_bin(), "-m", str(MODEL_PATH), "-f", str(wav),
+               "-l", "uz", "-nt", "--no-prints", "-t", str(threads)]
+        lugat = kalitlar.whisper_royxati()      # egasining ismlari/atamalari to'g'ri yozilsin
+        if lugat:
+            cmd += ["--prompt", ", ".join(lugat) + "."]
         t0 = time.monotonic()
         try:
-            r = subprocess.run(
-                [whisper_bin(), "-m", str(MODEL_PATH), "-f", str(wav),
-                 "-l", "uz", "-nt", "--no-prints", "-t", str(threads)],
-                capture_output=True, text=True, timeout=timeout,
-            )
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             log(f"whisper {timeout}s da tugamadi ({threads} thread, ovoz {sekund or '?'} s)")
             raise RuntimeError(f"whisper {timeout} s da tugamadi") from None
-        log(f"whisper: ovoz {sekund or '?'} s → {time.monotonic() - t0:.1f} s ({threads} thread)")
+        log(f"whisper: ovoz {sekund or '?'} s → {time.monotonic() - t0:.1f} s "
+            f"({threads} thread, {len(lugat)} kalit so'z)")
         if r.returncode != 0:
             raise RuntimeError(f"whisper xato (kod {r.returncode}): {r.stderr[-200:]}")
         text = " ".join(l.strip() for l in r.stdout.splitlines() if l.strip())

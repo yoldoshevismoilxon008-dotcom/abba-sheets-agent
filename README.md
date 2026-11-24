@@ -256,16 +256,22 @@ ishlar qilasiz?», kechqurun — «nimalar qildingiz?» (ertalabki reja bilan).
 
 1. Javob — **matn yoki ovoz** (`stt.py`: whisper.cpp + o'zbekcha rubaistt). Bir nechta
    xabar mumkin: har biri jadvalga qo'shiladi yoki uni tuzatadi («3-ni o'chir»).
-2. `claude -p` (`prompts/wow-kunlik.md`) jadval tuzadi: ovozda buzilgan atama va loyiha
-   nomlarini oxirgi snapshot'dagi «Smm main» ro'yxati bilan tuzatadi; botga savol bo'lsa —
-   odatiy Q&A'ga yo'naltiradi. Claude ishlamasa — qatorlar bo'yicha oddiy bo'lish (⚠️ bilan).
+2. `claude -p` (`prompts/wow-kunlik.md`) jadval tuzadi: ovozda buzilgan loyiha nomini oxirgi
+   snapshot'dagi «Smm main» ro'yxatidagi yozilishi bilan ko'chiradi (qator boshida loyiha);
+   botga savol bo'lsa — odatiy Q&A'ga yo'naltiradi. Claude ishlamasa — qatorlar bo'yicha
+   oddiy bo'lish (⚠️ bilan).
+   **Kalit so'zlar** (`kalitlar.py`, `/kalit`): egasining lug'ati — odamlar (ism — kimligi) va
+   atamalar (so'z — ma'nosi). Ism va lavozimlar public repo'da emas: private Obsidian vault'dagi
+   `abba-sheets-agent/kalit-sozlar.md` (vault_sync → `DATA/vault`), formati
+   `## Bo'lim` + `- **Kalit** — ma'nosi`. Kalitlar whisper'ga `--prompt` bo'lib, lug'at esa
+   Claude'ga beriladi.
 3. `wow_jadval.py` — Google Sheets ko'rinishidagi PNG jadval (Pillow + `assets/fonts` Inter).
 4. Preview + **✅ Yuborish / ❌ Bekor**. ✅ bosilganda yoki qoralama 15 daqiqa jim tursa,
    rasm egasining akkauntidan (`userbot_sender.send_photo`) boshliq lichkasiga ketadi.
    Yuborilmasa — rasm egaga keladi, «🔁 Qayta urinish» tugmasi bilan.
 
 Buyruqlar: `/kunlik` (holat) · `/ertalab` · `/kechqurun` (hozir yozish; `qayta` —
-yuborilganini yangilash) · `/dam` (bugun so'ramaslik) · `/boshliq @username Ism`
+yuborilganini yangilash) · `/dam` (bugun so'ramaslik) · `/kalit` (kalit so'zlar) · `/boshliq @username Ism`
 (qabul qiluvchi; sinov — `/boshliq me`) · `/kunlik avto 15|off` · `/kunlik on|off`.
 
 Holat — `DATA/wow_kunlik/<sana>.json`, sozlama — `DATA/wow_kunlik/sozlama.json` (volume).
