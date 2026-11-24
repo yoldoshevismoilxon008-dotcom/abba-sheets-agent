@@ -217,8 +217,53 @@ def ensure_model_async():
 
 # ---------- STT ----------
 
-def transcribe(src_path):
-    """Ovoz fayli (ogg/opus/mp3/...) → o'zbekcha matn."""
+CGROUP = Path("/sys/fs/cgroup")
+WHISPER_MAX_THREADS = 4      # bot, claude -p va chromium uchun ham CPU qolsin
+
+
+def _cpu_kvota():
+    """Konteynerga HAQIQATAN ajratilgan CPU soni: cgroup v2 cpu.max → v1 cfs_quota →
+    sched_getaffinity → os.cpu_count. None — aniqlab bo'lmadi."""
+    try:
+        q, p = (CGROUP / "cpu.max").read_text().split()[:2]
+        if q != "max" and int(p) > 0:
+            return int(q) / int(p)
+    except (OSError, ValueError):
+        pass
+    try:
+        q = int((CGROUP / "cpu" / "cpu.cfs_quota_us").read_text())
+        p = int((CGROUP / "cpu" / "cpu.cfs_period_us").read_text())
+        if q > 0 and p > 0:
+            return q / p
+    except (OSError, ValueError):
+        pass
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count()
+
+
+def whisper_threads():
+    """whisper.cpp thread soni (24.11 hodisasi): ilgari os.cpu_count()-1 olinardi. Konteynerda
+    u HOST yadrolarini qaytaradi (Railway'da o'nlab); ggml thread'lari spin-wait qiladi va 8 vCPU
+    kvotasida bir-birini kutib qoladi — 3 s ovoz 10 daqiqada ham tugamadi, shu vaqt bot javob
+    bermadi. Endi: WHISPER_THREADS env → kvota−1, ko'pi bilan WHISPER_MAX_THREADS."""
+    env = os.environ.get("WHISPER_THREADS", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    cpu = int(_cpu_kvota() or 4)
+    return max(1, min(WHISPER_MAX_THREADS, cpu - 1 if cpu >= 3 else cpu))
+
+
+def _timeout(sekund):
+    """Uzunlikka qarab: 3 s ovoz — 90 s, 3 daqiqalik — 600 s gacha (ilgari doim 600 s)."""
+    if not sekund:
+        return 300
+    return int(max(90, min(600, 60 + 4 * float(sekund))))
+
+
+def transcribe(src_path, sekund=None):
+    """Ovoz fayli (ogg/opus/mp3/...) → o'zbekcha matn. sekund — ovoz uzunligi (timeout uchun)."""
     ok, why = stt_ready()
     if not ok:
         raise RuntimeError(why)
@@ -231,12 +276,18 @@ def transcribe(src_path):
         )
         if r.returncode != 0 or not wav.exists():
             raise RuntimeError(f"ffmpeg xato: {r.stderr[-200:]}")
-        r = subprocess.run(
-            [whisper_bin(), "-m", str(MODEL_PATH), "-f", str(wav),
-             "-l", "uz", "-nt", "--no-prints",
-             "-t", str(max(2, (os.cpu_count() or 4) - 1))],
-            capture_output=True, text=True, timeout=600,
-        )
+        threads, timeout = whisper_threads(), _timeout(sekund)
+        t0 = time.monotonic()
+        try:
+            r = subprocess.run(
+                [whisper_bin(), "-m", str(MODEL_PATH), "-f", str(wav),
+                 "-l", "uz", "-nt", "--no-prints", "-t", str(threads)],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            log(f"whisper {timeout}s da tugamadi ({threads} thread, ovoz {sekund or '?'} s)")
+            raise RuntimeError(f"whisper {timeout} s da tugamadi") from None
+        log(f"whisper: ovoz {sekund or '?'} s → {time.monotonic() - t0:.1f} s ({threads} thread)")
         if r.returncode != 0:
             raise RuntimeError(f"whisper xato (kod {r.returncode}): {r.stderr[-200:]}")
         text = " ".join(l.strip() for l in r.stdout.splitlines() if l.strip())

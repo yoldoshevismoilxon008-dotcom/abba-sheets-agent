@@ -213,7 +213,7 @@ def _ovoz(maxfiy, tmp):
         return out
 
     with _soxta(bl, "DATA", Path(tmp)), _soxta(stt, "stt_ready", lambda: (True, "")), \
-            _soxta(stt, "transcribe", lambda p: "smm parollar"), _soxta(stt, "tts_enabled", lambda: True), \
+            _soxta(stt, "transcribe", lambda p, **k: "smm parollar"), _soxta(stt, "tts_enabled", lambda: True), \
             _soxta(stt, "tts", soxta_tts), _soxta(design, "download", lambda *a: str(Path(tmp) / "v.ogg")), \
             _soxta(bl, "send_status", lambda t: 1), _soxta(bl, "delete_status", lambda m: None), \
             _soxta(bl, "send_retry", lambda *a, **k: True), _soxta(bl, "typing", lambda: None), \

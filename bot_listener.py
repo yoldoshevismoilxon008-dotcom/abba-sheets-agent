@@ -1422,7 +1422,7 @@ def handle_voice(msg):
     path = None
     try:
         path = design.download(TOKEN, v["file_id"], "voice.ogg")
-        text = stt.transcribe(path)
+        text = stt.transcribe(path, sekund=dur)
     except Exception as e:
         log(f"STT xato: {type(e).__name__}: {str(e)[:200]}")
         if not edit_status(mid, "🎤 Transkripsiya xatosi — keyinroq urinib ko'ring."):

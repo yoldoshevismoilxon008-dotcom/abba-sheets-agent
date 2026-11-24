@@ -741,7 +741,7 @@ def _ovozdan_matn(v):
 
         token, _ = _tg()
         path = design.download(token, v["file_id"], "kunlik.ogg")
-        matn = stt.transcribe(path)
+        matn = stt.transcribe(path, sekund=int(v.get("duration") or 0))
     except Exception as e:                              # noqa: BLE001
         log(f"STT xato: {type(e).__name__}: {str(e)[:200]}")
         t = "🎤 Ovozni tushunib bo'lmadi — qayta yuboring yoki matn bilan yozing."

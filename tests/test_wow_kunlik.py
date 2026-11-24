@@ -433,7 +433,7 @@ def test_ovoz_transkript_jadvalga(s, monkeypatch):
     import stt
 
     monkeypatch.setattr(stt, "stt_ready", lambda: (True, ""))
-    monkeypatch.setattr(stt, "transcribe", lambda p: "bugun livardi reja keyin gili tezet")
+    monkeypatch.setattr(stt, "transcribe", lambda p, **k: "bugun livardi reja keyin gili tezet")
 
     def _dl(token, file_id, name):
         p = wk.DIR / "v.ogg"
