@@ -84,7 +84,7 @@ def _bot(chat_id, owners=None):
 def test_s2_shaxsiy_chat_egasi_avtomatik():
     with _bot(555) as sent:
         assert bl.handle_update(_upd(555, 555)) == "help"
-    assert sent and sent[0] == bl.HELP
+    assert sent and sent[0] == bl.help_matni()
 
 
 def test_s2_guruhda_owner_ids_yoq_bolsa_hech_kim_buyruq_bermaydi():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WoW — kunlik reja/hisobotni Google Sheets ko'rinishidagi PNG jadvalga chizish.
+"""Kunlik reja/hisobotni Google Sheets ko'rinishidagi PNG jadvalga chizish.
 
 Pillow + Inter shrifti (assets/fonts, OFL) — brauzersiz, deterministik va tez (~0,1 s).
 Rasmda emoji yo'q (Inter'da glif yo'q): holat rangli «pill» bilan ko'rsatiladi.
@@ -89,9 +89,10 @@ def xulosa_matn(jadval, hisobot):
     return " · ".join(qism)
 
 
-def chiz(sarlavha, ost_sarlavha, jadval, hisobot=False, belgi="WoW"):
+def chiz(sarlavha, ost_sarlavha, jadval, hisobot=False, belgi=""):
     """jadval: [{"ish", "izoh", "holat"}]. hisobot=True — «Holat» ustuni (kechki hisobot).
-    «Izoh» ustuni faqat kamida bitta qatorda izoh bo'lsa chiziladi (sodda bo'lsin)."""
+    «Izoh» ustuni faqat kamida bitta qatorda izoh bo'lsa chiziladi (sodda bo'lsin).
+    belgi — o'ng yuqoridagi kichik yozuv (bot nomi; bo'sh bo'lsa chizilmaydi)."""
     f_title = _font("Bold", 40)
     f_sub = _font("Regular", 24)
     f_belgi = _font("SemiBold", 20)
@@ -213,5 +214,6 @@ if __name__ == "__main__":
     ]
     out = sys.argv[1] if len(sys.argv) > 1 else "wow-jadval-namuna.png"
     Path(out).write_bytes(chiz("Kunlik hisobot", "Ismoilxon · 23.11.2026, dushanba",
-                               namuna, hisobot=True))
+                               namuna, hisobot=True, belgi=sys.argv[2] if len(sys.argv) > 2
+                               else "Bot"))
     print(out)

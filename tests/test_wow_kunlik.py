@@ -1,4 +1,4 @@
-"""WoW — kunlik reja (ertalab) va hisobot (kechqurun) → boshliqqa.
+"""Kunlik reja (ertalab) va hisobot (kechqurun) → boshliqqa.
 
 Tarmoq, Claude, STT va userbot soxta: Telegram chaqiruvlari yoziladi, soat qo'lda suriladi.
 pytest tests/test_wow_kunlik.py
@@ -76,6 +76,8 @@ def s(monkeypatch, tmp_path):
     monkeypatch.setattr(chat_log, "append_cmd", lambda *a, **k: None)
     sx.vaqt = datetime(2026, 11, 23, 9, 0, tzinfo=TZ)
     monkeypatch.setattr(wk, "hozir", lambda: sx.vaqt)
+    monkeypatch.setattr(wk, "_NOM_KESH", {"t": 0.0, "nom": ""})
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)     # bot_nomi() tarmoqqa chiqmasin
     return sx
 
 
@@ -601,4 +603,50 @@ def test_bot_listener_wow_buyruqlari(s, monkeypatch):
     monkeypatch.setattr(chat_log, "append_cmd", lambda *a: None)
     assert bl.handle_update({"update_id": 6, "message": _msg("/kunlik")}) == "wow-holat"
     assert bl.handle_update({"update_id": 7, "message": _msg("/ertalab")}) == "wow-ertalab-sent"
-    assert "WoW" in bl.HELP and "/kunlik" in bl.HELP
+    assert "/kunlik" in bl.HELP
+
+
+# ---------------- bot nomi: kodda emas, Telegram'dan ----------------
+
+def test_bot_nomi_telegramdan_keshlanadi_va_zaxiraga_tushadi(s, monkeypatch):
+    chaqiruvlar = []
+    javoblar = {"getMyName": {"name": "WALL-E"}, "getMe": {"first_name": "Eski"}}
+
+    def api(method, payload):
+        chaqiruvlar.append(method)
+        return javoblar.get(method)
+
+    monkeypatch.setattr(wk, "_api", api)
+    assert wk.bot_nomi() == "Bot" and chaqiruvlar == []         # tokensiz — tarmoq yo'q
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    assert wk.bot_nomi() == "WALL-E" and chaqiruvlar == ["getMyName"]   # getMe emas — u keshlanadi
+    assert wk.bot_nomi() == "WALL-E" and chaqiruvlar == ["getMyName"]   # 10 daqiqa kesh
+    wk._NOM_KESH["t"] = -10_000.0                               # kesh eskirdi
+    javoblar["getMyName"] = None                                # getMyName ishlamadi → getMe
+    assert wk.bot_nomi() == "Eski"
+    wk._NOM_KESH["t"] = -10_000.0
+    javoblar["getMe"] = None                                    # hammasi ishlamadi → oxirgi nom
+    assert wk.bot_nomi() == "Eski"
+
+
+def test_nom_yordam_holat_va_jadval_rasmida(s, monkeypatch):
+    import bot_listener as bl
+    import wow_jadval
+
+    monkeypatch.setattr(wk, "bot_nomi", lambda: "WALL-E")
+    yordam = bl.help_matni()
+    assert yordam.startswith("🤖 **WALL-E**") and "{BOT}" not in yordam
+    assert "<b>WALL-E — kunlik reja va hisobot</b>" in wk.holat_matni()
+    belgilar = []
+    asl = wow_jadval.chiz
+    monkeypatch.setattr(wow_jadval, "chiz", lambda *a, **k: belgilar.append(k.get("belgi"))
+                        or asl(*a, **k))
+    assert wk.rasm_png(SANA, "ertalab", REJA["jadval"]).startswith(b"\x89PNG")
+    assert belgilar == ["WALL-E"]
+
+
+def test_bot_listener_yordam_nom_bilan(monkeypatch):
+    import bot_listener as bl
+
+    monkeypatch.setattr(wk, "bot_nomi", lambda: (_ for _ in ()).throw(RuntimeError("tarmoq")))
+    assert bl.help_matni().startswith("🤖 **Bot**")            # nom o'qilmasa ham yordam chiqadi

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""WoW — kunlik reja (ertalab) va kunlik hisobot (kechqurun) → boshliq lichkasiga.
+"""Kunlik reja (ertalab) va kunlik hisobot (kechqurun) → boshliq lichkasiga.
+Bot nomi kodda yo'q — bot_nomi() uni Telegram'dan o'qiydi (24.11 dan «WALL-E»).
 
 Oqim:
   • Ertalab 09:00, 10:00, 11:00, 12:00 — «Bugun qanday ishlar qilasiz?» (javob berilmaguncha).
@@ -203,6 +204,32 @@ def _ismni_eslab(msg):
 def _tg():
     return (os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
             os.environ.get("TELEGRAM_CHAT_ID", "").strip())
+
+
+_NOM_KESH = {"t": 0.0, "nom": ""}
+NOM_TTL = 600                  # s — nom o'zgarsa ko'pi bilan 10 daqiqada hamma joyga yetadi
+
+
+def bot_nomi():
+    """Botning Telegram'dagi joriy nomi (yordam sarlavhasi, /kunlik, jadval rasmidagi belgi).
+    Nom FAQAT Telegram'da o'zgartiriladi — setMyName yoki BotFather → Edit Name; kod va deploy
+    shart emas. Avval getMyName: getMe.first_name keshlanib eski nomni qaytarishi mumkin
+    (24.11 da 7+ daqiqa shunday bo'ldi). Telegram javob bermasa — oxirgi ma'lum nom."""
+    import time
+
+    if _NOM_KESH["nom"] and time.monotonic() - _NOM_KESH["t"] < NOM_TTL:
+        return _NOM_KESH["nom"]
+    nom = ""
+    if _tg()[0]:                            # tokensiz (testlar, lokal) — tarmoqqa chiqilmaydi
+        for method in ("getMyName", "getMe"):
+            res = _api(method, {})
+            if isinstance(res, dict):
+                nom = str(res.get("name") or res.get("first_name") or "").strip()
+            if nom:
+                break
+    if nom:
+        _NOM_KESH.update(t=time.monotonic(), nom=nom[:64])
+    return _NOM_KESH["nom"] or "Bot"
 
 
 def _api(method, payload):
@@ -476,7 +503,8 @@ def rasm_png(sana, slot, jadval, yangilangan=False):
     ism = (sozlama().get("ism") or "").strip()
     ost = (f"{ism} · " if ism else "") + _sana_yorliq(sana)
     sarlavha = SLOTLAR[slot]["sarlavha"] + (" (yangilangan)" if yangilangan else "")
-    return wow_jadval.chiz(sarlavha, ost, jadval, hisobot=(slot == "kechqurun"))
+    return wow_jadval.chiz(sarlavha, ost, jadval, hisobot=(slot == "kechqurun"),
+                           belgi=bot_nomi())
 
 
 def boshliq_caption(sana, slot, jadval, yangilangan=False):
@@ -1072,7 +1100,7 @@ def holat_matni(now=None):
     bosh = sz.get("boshliq")
     nomi = sz.get("boshliq_nomi") or ""
     daq = _avto_daq(sz)
-    L = ["🗓 <b>WoW — kunlik reja va hisobot</b>",
+    L = [f"🗓 <b>{esc(bot_nomi())} — kunlik reja va hisobot</b>",
          f"Bugun: {_sana_yorliq(sana)}" + (" · 🏖 dam" if st.get("dam") else ""),
          f"• Ertalab (09–12, har soat): {_slot_holat_matn('ertalab', st['ertalab'], now)}",
          f"• Kechqurun (19–21, har soat): {_slot_holat_matn('kechqurun', st['kechqurun'], now)}",

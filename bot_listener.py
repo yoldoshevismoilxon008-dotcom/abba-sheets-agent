@@ -122,8 +122,8 @@ Qoidalar:
 - trend.points'da ma'lumot yo'q kunga null yoz. summary'da to'qima raqam bo'lmasin —
   hammasi DATA'dan."""
 
-HELP = (
-    "🤖 **WoW**\n"
+HELP = (                                  # «{BOT}» — help_matni() botning Telegram'dagi nomini qo'yadi
+    "🤖 **{BOT}**\n"
     "🗓 **Kunlik reja va hisobot:** ertalab 09–12 va kechqurun 19–21 da har soat so'rayman "
     "(javob berguningizcha). Ovozli xabar yoki matn bilan javob bering — Sheets ko'rinishidagi "
     "jadval qilaman, ✅ bosilganda (yoki 15 daqiqa jimlikdan keyin) sizning akkauntingizdan "
@@ -160,6 +160,18 @@ HELP = (
     "«/y_» bilan boshlanadigan buyruqlar va 🔖 belgili kartalar — Abba yordamchi (shaxsiy "
     "Telegram agent) niki: /y_yordam"
 )
+
+def help_matni():
+    """HELP + botning joriy nomi. Nom faqat Telegram'da o'zgartiriladi (setMyName yoki BotFather),
+    kod va deploy shart emas — wow_kunlik.bot_nomi() uni o'qiydi (10 daqiqa kesh)."""
+    try:
+        import wow_kunlik
+
+        nom = wow_kunlik.bot_nomi()
+    except Exception:                       # noqa: BLE001 — yordam matni hech qachon yiqilmasin
+        nom = "Bot"
+    return HELP.replace("{BOT}", nom)
+
 
 # abba-hisobotlar/yordamchi (shaxsiy Telegram agent) ham SHU botdan xabar yuboradi, lekin botning
 # update'larini O'QIMAYDI (ikki o'quvchi bo'lsa — 409 / xabarlar bo'linib ketadi): egasining buyruqlarini
@@ -2075,7 +2087,7 @@ def handle_with_watchdog(upd, timeout=None):
 
 
 def handle_callback(cq):
-    """Inline tugma bosilishi (hozircha faqat WoW kunlik: «wow:…»). XAVFSIZLIK: faqat
+    """Inline tugma bosilishi (hozircha faqat kunlik reja/hisobot: «wow:…»). XAVFSIZLIK: faqat
     egasining chatidagi xabar tugmasi va egasining o'zi — aks holda jim (log)."""
     chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
     sender = str((cq.get("from") or {}).get("id") or "")
@@ -2104,7 +2116,7 @@ def handle_callback(cq):
 
 
 def _wow_kunlik(msg):
-    """WoW kunlik reja/hisobot: so'rov yuborilib javob kutilayotgan bo'lsa yoki qoralama
+    """Kunlik reja/hisobot: so'rov yuborilib javob kutilayotgan bo'lsa yoki qoralama
     ochiq bo'lsa — matn/ovoz jadvalga ketadi. Savol deb topilsa — odatiy Q&A. None — bizniki
     emas (oqim davom etadi). Xato bo'lsa ham None: xabar yo'qolmasin, Q&A javob bersin."""
     try:
@@ -2185,13 +2197,13 @@ def handle_update(upd):
         except Exception:
             pass
     if low.startswith("/help") or low.startswith("/start"):
-        send_retry(HELP, attempts=2)
+        send_retry(help_matni(), attempts=2)
         return "help"
     if low.startswith("/yangi"):
         reset_history()
         send_retry("🧹 Suhbat konteksti tozalandi — yangi mavzudan boshlaymiz.", attempts=2)
         return "reset"
-    if text.startswith("/"):                # WoW: /kunlik /ertalab /kechqurun /dam /boshliq
+    if text.startswith("/"):                # kunlik reja: /kunlik /ertalab /kechqurun /dam /boshliq
         try:
             import wow_kunlik
 
@@ -2541,7 +2553,7 @@ def handle_update(upd):
         threading.Thread(target=_vault_job, daemon=True).start()
         return "vault-sync"
     if text.startswith("/"):
-        send_retry("Bunday buyruq yo'q. " + HELP, attempts=2)
+        send_retry("Bunday buyruq yo'q. " + help_matni(), attempts=2)
         return "unknown-cmd"
     do_question(text)
     return "answered"
@@ -2558,7 +2570,7 @@ def main():
         try:
             r = api(
                 "getUpdates",
-                # callback_query — WoW kunlik jadval tugmalari (✅/❌/⏭/🏖). Ro'yxat aniq
+                # callback_query — kunlik jadval tugmalari (✅/❌/⏭/🏖). Ro'yxat aniq
                 # berilmasa Telegram oldingi sozlamani ishlatadi — tugmalar jim yo'qolmasin.
                 {"offset": last + 1, "timeout": POLL_TIMEOUT,
                  "allowed_updates": ["message", "callback_query"]},

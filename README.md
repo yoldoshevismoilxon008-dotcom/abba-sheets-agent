@@ -248,9 +248,9 @@ bo'lsa avval `launchctl bootout`, keyin qidiring.
 qachon ikki marta ishlanmaydi; birinchi ishga tushishda eski backlog tashlab
 yuboriladi (restart'da eski xabarlar qayta o'qilmaydi).
 
-## 🗓 WoW — kunlik reja va hisobot (`wow_kunlik.py`)
+## 🗓 Kunlik reja va hisobot (`wow_kunlik.py`)
 
-Bot (Telegram nomi **WoW**) har kuni ertalab **09:00–12:00** va kechqurun
+Bot (nomi faqat Telegram'da — `setMyName` yoki BotFather; kod uni `getMyName` dan o'qiydi, hozir **WALL-E**) har kuni ertalab **09:00–12:00** va kechqurun
 **19:00–21:00** da har soat so'raydi (javob berilmaguncha): ertalab — «bugun qanday
 ishlar qilasiz?», kechqurun — «nimalar qildingiz?» (ertalabki reja bilan).
 
