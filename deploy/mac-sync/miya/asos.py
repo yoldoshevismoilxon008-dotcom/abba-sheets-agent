@@ -317,6 +317,19 @@ def avto_izoh(nima: str) -> str:
 
 # ---------------------------------------------------------------- yozuvchi
 
+_JADVAL_HAVOLA = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
+
+
+def jadval_havolalari(matn: str) -> str:
+    """Obsidian jadvalida `[[yo'l|nom]]` dagi `|` ustunni buzadi — jadval qatorlarida `\\|` bo'ladi."""
+    qatorlar = []
+    for q in matn.split("\n"):
+        if q.lstrip().startswith("|"):
+            q = _JADVAL_HAVOLA.sub(lambda m: f"[[{m.group(1)}\\|{m.group(2)}]]", q)
+        qatorlar.append(q)
+    return "\n".join(qatorlar)
+
+
 def _bizniki(matn: str, yol: str) -> bool:
     bosh = "\n".join(matn.splitlines()[:40])
     if yol.endswith(".base"):
@@ -357,6 +370,8 @@ class Yozuvchi:
             raise ValueError(f"ruxsat etilmagan yo'l: {rel}")
         if not matn.endswith("\n"):
             matn += "\n"
+        if rel.endswith(".md"):
+            matn = jadval_havolalari(matn)
         p = self.vault / rel
         eski = None
         if p.exists():

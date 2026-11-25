@@ -244,7 +244,7 @@ def test_walle_kun(muhit, monkeypatch):
     assert "undiruv qoldig'i qancha?" in t
     fm = asos.fm_oqi(t)
     assert fm["target_obunachi"] == "3497" and fm["wow"] == "2"
-    assert "[[wall-e/kunlar/2026-11-24|2026-11-24]]" in (v / "wall-e" / "INDEX.md").read_text(encoding="utf-8")
+    assert "[[wall-e/kunlar/2026-11-24\\|2026-11-24]]" in (v / "wall-e" / "INDEX.md").read_text(encoding="utf-8")
 
 
 def test_kod_remote_tozalanadi():
@@ -274,3 +274,10 @@ def test_hublar_bosh_sahifa(muhit):
     assert "[[claude/sessiyalar/2026-11/a|A]]" in t and "![[tizim/Claude sessiyalari.base]]" in t
     base = (muhit["vault"] / "tizim" / "Claude sessiyalari.base").read_text(encoding="utf-8")
     assert base.startswith(asos.BELGI_BASE)
+
+
+def test_jadvaldagi_havola_quvuri():
+    m = "| [[kod/a|A]] | x |\n- [[kod/a|A]] ro'yxatda\n"
+    r = asos.jadval_havolalari(m)
+    assert r.splitlines()[0] == "| [[kod/a\\|A]] | x |"
+    assert r.splitlines()[1] == "- [[kod/a|A]] ro'yxatda"
