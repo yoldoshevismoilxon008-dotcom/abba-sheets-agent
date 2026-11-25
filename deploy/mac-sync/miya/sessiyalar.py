@@ -415,7 +415,7 @@ def yozuv_matni(s: dict, rel: str, vault: Path, artifact_nomlari: dict | None = 
     if narx:
         qism = []
         if isinstance(narx_usd, (int, float)):
-            qism.append(f"${narx_usd:,.2f} (API narxi bo'yicha hisob)")
+            qism.append(f"${narx_usd:,.2f} API narxi bo'yicha (obunada alohida to'lanmaydi)")
         if narx.get("totalLinesAdded") is not None:
             qism.append(f"+{narx.get('totalLinesAdded')} / −{narx.get('totalLinesRemoved', 0)} qator")
         if qism:

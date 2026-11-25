@@ -71,9 +71,11 @@ def claude_index(yozuvchi: asos.Yozuvchi, sh: dict, oylar: list, sorov_oylar: di
          + asos.wikilink("claude/skillar/INDEX", f"{skill_soni} ta")
          + " · **Artifactlar:** " + asos.wikilink("claude/artifactlar", f"{art_soni} ta")
          + " · **Sozlamalar:** " + asos.wikilink("claude/sozlamalar", "hook, mod, MCP"),
-         f"- **Sessiyalar hajmi (API narxi bo'yicha hisob):** ${narx:,.0f}",
-         "- Claude transkriptlari diskda ~10 kun saqlanadi; yig'uvchi har soatda ularni shu yerga "
-         "ko'chiradi, keyin o'chib ketsa ham yozuv qoladi.\n"]
+         f"- **Sessiyalar hajmi:** API narxi bo'yicha ${narx:,.0f} (obunada alohida to'lanmaydi — "
+         "ishning og'irligini solishtirish uchun)",
+         "- Claude transkriptlari diskda ~30 kun saqlanadi (qayta ochilgan sessiyalar qoladi); "
+         "yig'uvchi har soatda ularni shu yerga ko'chiradi — manba o'chsa ham yozuv qoladi. "
+         "Faol sessiya 45 daqiqa jim turgach yoziladi.\n"]
     q.append("## Oylar\n")
     q.append("| Oy | Sessiyalar | Terminal so'rovlari |\n|---|---|---|")
     hamma_oy = sorted(set(oylar) | set(sorov_oylar), reverse=True)
