@@ -35,6 +35,9 @@ CLONE = DATA / "vault"
 STATE = DATA / "vault_sync_state.json"
 
 META_MIN = 1500              # bundan KICHIK faylga Claude metadata chaqirilmaydi
+# Miya yig'uvchisi (Mac, deploy/mac-sync/miya) yozgan avtomatik yozuvlar: sarlavha va mazmun
+# allaqachon tuzilgan, ba'zilari har soat yangilanadi → Claude metadata chaqirilmaydi.
+AVTO_BELGI = "manba: miya-avto"
 GIT_TIMEOUT = 300
 # .kbignore'siz ham HAR DOIM chetlab o'tiladigan texnik papka/fayllar
 ALWAYS_IGNORE = (".git", ".obsidian", ".trash")
@@ -174,6 +177,19 @@ def _save_state(st):
 
 # ---------------------------------------------------------------- reconcile
 
+def _avto_yozuvmi(p):
+    """Frontmatter'ida AVTO_BELGI bor fayl (miya yig'uvchisi yozgan) — True."""
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            bosh = f.read(4096)
+    except OSError:
+        return False
+    if not bosh.startswith("---"):
+        return False
+    oxiri = bosh.find("\n---", 3)
+    return AVTO_BELGI in (bosh[:oxiri] if oxiri > 0 else bosh)
+
+
 def _source_for(rel):
     """chat/ bilan boshlansa → 'chat', aks holda → 'vault' (B2.2)."""
     return "chat" if rel.replace("\\", "/").startswith("chat/") else "vault"
@@ -209,7 +225,7 @@ def _reconcile(clone):
     md_files = sorted(p for p in clone.rglob("*.md") if p.is_file())
     total = len(md_files)
     today = date.today()
-    ingested = unchanged = errors = aged = 0
+    ingested = unchanged = errors = aged = superseded = 0
     skipped_dirs = set()
     present = set()          # bazaga tushgan fayllar (origin) — o'chirilganini aniqlash uchun
 
@@ -227,7 +243,9 @@ def _reconcile(clone):
         present.add(rel)
         try:
             r = kb.ingest_file(p, source=src, origin=rel, vault_path=rel,
-                               meta_min_chars=META_MIN)
+                               meta_min_chars=(10 ** 9 if _avto_yozuvmi(p) else META_MIN))
+            # tahrirlangan faylning eski versiyalari qidiruvda qolmasin (bir fayl = bitta faol hujjat)
+            superseded += kb.forget_old_versions(src, rel, r.get("uid"))
             if r.get("status") == "unchanged":
                 unchanged += 1
             else:
@@ -252,7 +270,8 @@ def _reconcile(clone):
         "last_success_ts": kb._now(),
         "last_error": None,
         "counts": {"files": total, "ingested": ingested, "unchanged": unchanged,
-                   "archived": archived, "aged_chat": aged, "errors": errors},
+                   "archived": archived, "superseded": superseded, "aged_chat": aged,
+                   "errors": errors},
         "skipped_dirs": sorted(skipped_dirs),
     }
     _save_state(st)

@@ -667,6 +667,30 @@ def forget_origin(source, origin):
     return n
 
 
+def forget_old_versions(source, origin, keep_uid):
+    """Shu source+origin'ning keep_uid'dan BOSHQA faol versiyalarini arxivlaydi.
+    Sabab: vault fayllari kontent-manzilli uid bilan saqlanadi (ingest_file) — fayl
+    tahrirlanganda yangi hujjat qo'shiladi, eskisi esa faol qolib qidiruvga aralashardi
+    (holat.md, kunlik, chat). Scoped: faqat aniq bitta origin. Qaytadi: arxivlangan soni."""
+    if not keep_uid:
+        return 0
+    init_db()
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE docs SET archived=1, updated_at=? "
+            "WHERE source=? AND origin=? AND uid<>? AND archived=0",
+            (_now(), source, origin, keep_uid),
+        )
+        conn.commit()
+        n = cur.rowcount
+    finally:
+        conn.close()
+    if n:
+        _safe_log_ingest(source, origin, "archived", 0, None)
+    return n
+
+
 def _like_escape(s):
     """LIKE meta-belgilarini (\\ % _) neytrallaydi — '%' bilan ommaviy arxivlashning oldi."""
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

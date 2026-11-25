@@ -192,6 +192,49 @@ def test_meta_gate_small_no_claude():
     assert calls["n"] == 1
 
 
+def test_meta_gate_miya_avto_no_claude():
+    """Miya yig'uvchisi yozuvi (frontmatter: manba: miya-avto) katta bo'lsa ham Claude'siz."""
+    clone = setup()
+    kbignore(clone)
+    calls = {"n": 0}
+
+    def counting(prompt, effort="low"):
+        calls["n"] += 1
+        return '{"title":"T","lang":"uz","tags":[],"summary":"s"}'
+
+    kb._ask_claude = counting
+    write(clone, "claude/sessiyalar/2026-11/a.md",
+          "---\nturi: claude-sessiya\nmanba: miya-avto\n---\n# Sessiya\n\n" + "so'rov natija " * 300)
+    write(clone, "bilim/big.md", "# Katta\n\n" + "manba: miya-avto matnda, frontmatter'da emas " * 60)
+    r = vs.run()
+    assert r["counts"]["ingested"] == 2
+    assert calls["n"] == 1                       # faqat bilim/big.md (belgi frontmatter'da emas)
+
+
+def test_edited_file_keeps_single_active_version():
+    """Tahrirlangan fayl: eski versiya arxivlanadi — bir origin = bitta faol hujjat."""
+    clone = setup()
+    kbignore(clone)
+    write(clone, "abba-sheets-agent/holat.md", "# Holat\n\nBirinchi versiya: eski fakt.")
+    vs.run()
+    write(clone, "abba-sheets-agent/holat.md", "# Holat\n\nIkkinchi versiya: yangi fakt.")
+    r = vs.run()
+    assert r["counts"]["superseded"] == 1
+    conn = kb._connect()
+    try:
+        faol = conn.execute("SELECT COUNT(*) FROM docs WHERE origin=? AND archived=0",
+                            ("abba-sheets-agent/holat.md",)).fetchone()[0]
+        jami = conn.execute("SELECT COUNT(*) FROM docs WHERE origin=?",
+                            ("abba-sheets-agent/holat.md",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert faol == 1 and jami == 2
+    hits = kb.search("eski fakt", k=5) if hasattr(kb, "search") else []
+    assert not any("Birinchi versiya" in (h.get("text") or "") for h in hits if isinstance(h, dict))
+    # uchinchi yurish: o'zgarish yo'q → hech narsa arxivlanmaydi
+    assert vs.run()["counts"]["superseded"] == 0
+
+
 def test_kbignore_matcher():
     """.kbignore matcher: bare nom, anchored yo'l, glob, inkor."""
     pats = ["odam/", "kunlik/shaxsiy/", "*.private.md", "!kunlik/shaxsiy/keep.md"]
