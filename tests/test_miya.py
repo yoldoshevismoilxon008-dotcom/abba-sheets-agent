@@ -158,7 +158,10 @@ def test_sessiya_yozuvi_va_idempotent(muhit, monkeypatch):
     monkeypatch.setattr(asos, "HOME", Path("/Users/x"))
     _sessiya(muhit["claude"], sirli="parol: Maxfiy123456")
     y = asos.Yozuvchi(muhit["vault"])
-    r = sessiyalar.yigish(y)
+    assert sessiyalar.yigish(y)["hisob"] == {"faol": 1}      # hozirgina yozilgan — hali faol
+    assert not (muhit["vault"] / "claude").exists()
+    kech = __import__("time").time() + 3600
+    r = sessiyalar.yigish(y, hozir=kech)
     assert r["hisob"] == {"yangi": 1}
     fayllar = list((muhit["vault"] / "claude" / "sessiyalar" / "2026-11").glob("*.md"))
     assert len(fayllar) == 1 and fayllar[0].name.startswith("2026-11-20 Demo sessiya")
@@ -167,10 +170,10 @@ def test_sessiya_yozuvi_va_idempotent(muhit, monkeypatch):
     assert "LISTONLY111" not in t and "NASHR222" in t
     assert "`1a2b3c4`" in t and "Hisobot tayyor" in t
     # ikkinchi yurish: transkript o'zgarmagan → o'tkaziladi
-    assert sessiyalar.yigish(asos.Yozuvchi(muhit["vault"]))["hisob"] == {"o'tkazildi": 1}
+    assert sessiyalar.yigish(asos.Yozuvchi(muhit["vault"]), hozir=kech)["hisob"] == {"o'tkazildi": 1}
     # holat yo'qolsa ham dublikat yaratilmaydi
     (Path(os.environ["MIYA_STATE"]) / "sessiyalar.json").unlink()
-    assert sessiyalar.yigish(asos.Yozuvchi(muhit["vault"]))["hisob"] == {"ozgarmagan": 1}
+    assert sessiyalar.yigish(asos.Yozuvchi(muhit["vault"]), hozir=kech)["hisob"] == {"ozgarmagan": 1}
     assert len(list((muhit["vault"] / "claude" / "sessiyalar" / "2026-11").glob("*.md"))) == 1
 
 

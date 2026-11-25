@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections import Counter, OrderedDict
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from . import asos
 
 TURI = "claude-sessiya"
 PAPKA = "claude/sessiyalar"
+JIM_DAQIQA = 45     # sessiya shuncha daqiqa jim turgach yoziladi (faol sessiya har soat qayta yozilmasin)
 
 _YOZISH_TOOLLARI = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 _ART_URL = re.compile(r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
@@ -468,16 +470,24 @@ def transkriptlar(claude: Path | None = None):
     return [f for _, f in sorted(eng_yangi.values(), key=lambda x: str(x[1]))]
 
 
-def yigish(yozuvchi: asos.Yozuvchi, hammasi: bool = False, artifact_nomlari: dict | None = None) -> dict:
-    """Yangi/o'zgargan sessiyalarni yozadi. Qaytadi: {sessiyalar: [meta...], hisob}."""
+def yigish(yozuvchi: asos.Yozuvchi, hammasi: bool = False, artifact_nomlari: dict | None = None,
+           hozir: float | None = None) -> dict:
+    """Yangi/o'zgargan sessiyalarni yozadi. Qaytadi: {holat, hisob}.
+    Faol sessiya (transkript oxirgi JIM_DAQIQA ichida o'zgargan) keyingi yurishga qoldiriladi:
+    yozuv sessiya to'xtagach bir marta paydo bo'ladi — git va WALL-E bazasi har soat
+    o'zgarmaydi. --hammasi bu cheklovni chetlab o'tadi."""
     holat = asos.holat_oqi("sessiyalar")
     vault = yozuvchi.vault
     band = {v.get("rel") for v in holat.values() if isinstance(v, dict)}
     hisob = Counter()
+    hozir = hozir if hozir is not None else time.time()
     for f in transkriptlar():
         try:
             st = f.stat()
         except OSError:
+            continue
+        if not hammasi and hozir - st.st_mtime < JIM_DAQIQA * 60:
+            hisob["faol"] += 1
             continue
         sid = f.stem
         eski = holat.get(sid) or {}
