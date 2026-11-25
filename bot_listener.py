@@ -156,6 +156,8 @@ HELP = (                                  # «{BOT}» — help_matni() botning T
     "(PDF/DOCX/TXT/CSV/XLSX yuborsangiz — avtomatik bazaga tushadi)\n"
     "/vault_sync — Obsidian vault sinxronini hozir ishga tushirish · "
     "/vault_stat — vault sinxron holati\n"
+    "/miya — ikkinchi miyadan kun xulosasi: reja/hisobot, 09:00, target, Claude ishlari "
+    "(/miya kecha · /miya 24.11)\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
     "/help — shu yordam\n\n"
     "«/y_» bilan boshlanadigan buyruqlar va 🔖 belgili kartalar — Abba yordamchi (shaxsiy "
@@ -2204,6 +2206,15 @@ def handle_update(upd):
         reset_history()
         send_retry("🧹 Suhbat konteksti tozalandi — yangi mavzudan boshlaymiz.", attempts=2)
         return "reset"
+    if (low.split() or [""])[0].split("@")[0] == "/miya":   # ikkinchi miya: kun xulosasi (vault ko'zgusidan)
+        try:
+            import miya_buyruq
+
+            send_retry(miya_buyruq.javob(text), attempts=2, is_html=True)
+        except Exception as e:
+            log(f"XATO /miya: {type(e).__name__}: {str(e)[:200]}")
+            send_retry(f"⚠️ /miya xatosi: {type(e).__name__}", attempts=2)
+        return "miya"
     if text.startswith("/"):                # kunlik reja: /kunlik /ertalab /kechqurun /dam /boshliq /kalit
         try:
             import wow_kunlik
