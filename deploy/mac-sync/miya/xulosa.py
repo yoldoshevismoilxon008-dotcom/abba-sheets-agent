@@ -7,8 +7,12 @@ belgilangan soatda chiqadi. Jadval yo'qolsa ham, soatlik yig'ish o'sha soatdan k
 yurishda yuboradi. Mac uyquda bo'lsa — uyg'ongach, lekin faqat shu kun ichida (ertasi kuni
 eskisi yuborilmaydi).
 
+Xulosaga hali yozilmagan faol sessiyalar ham kiradi (sessiyalar.bugungi_faol — faqat o'qiladi).
+Soatdan oldingi sinov (`--xulosa-yubor`) kechki xulosani bekor qilmaydi.
+
   python3 -m miya --xulosa on|off [--soat 21:30]   # state/xulosa.json + launchd jadvali
   python3 -m miya --xulosa-korish                  # matnni yubormasdan ko'rish
+  python3 -m miya --xulosa-yubor                   # hozir yuborish (sinov)
 
 Token va chat_id ~/abba-sheets-agent/.env dan (target hisoboti bilan bir xil); hech qayerga
 yozilmaydi va logga chiqmaydi.
@@ -21,12 +25,13 @@ import os
 import plistlib
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from . import asos
+from . import asos, sessiyalar
 
 ENV = asos.HOME / "abba-sheets-agent" / ".env"
 JADVAL = "com.abba.miya-xulosa"
@@ -42,9 +47,8 @@ def sozlama() -> dict:
 def sozla(yoqilgan: bool, soat: str | None = None) -> dict:
     d = asos.holat_oqi("xulosa")
     d["yoqilgan"] = yoqilgan
-    if soat:
-        datetime.strptime(soat, "%H:%M")
-        d["soat"] = soat
+    if soat:      # «9:30» → «09:30»: kerakmi() vaqtni satr sifatida solishtiradi
+        d["soat"] = datetime.strptime(soat.strip(), "%H:%M").strftime("%H:%M")
     asos.holat_yoz("xulosa", d)
     return sozlama()
 
@@ -70,10 +74,11 @@ def tayyormi() -> bool:
 
 # ---------------------------------------------------------------- launchd jadvali
 
-def _joy() -> Path:
-    """Yig'uvchi o'rnatilgan papka: launchd shu yerdan `python3 -m miya` qiladi."""
+def _joy() -> Path | None:
+    """Yig'uvchi o'rnatilgan papka (launchd shu yerdan `python3 -m miya` qiladi). O'rnatilmagan
+    bo'lsa None: jadval repo/worktree'ga bog'lanmasin — u o'chsa, jadval jimgina buziladi."""
     o = asos.HOME / ".abba-miya"
-    return o if (o / "miya").is_dir() else Path(__file__).resolve().parent.parent
+    return o if (o / "miya").is_dir() else None
 
 
 def jadval_plist(soat: str, joy: Path) -> dict:
@@ -100,12 +105,16 @@ def jadval_yangila(s: dict | None = None) -> str:
     p = la / f"{JADVAL}.plist"
     domen = f"gui/{os.getuid()}"
     subprocess.run(["launchctl", "bootout", f"{domen}/{JADVAL}"], capture_output=True)
-    if not s["yoqilgan"]:
+    joy = _joy()
+    if not s["yoqilgan"] or joy is None:
         p.unlink(missing_ok=True)
-        return "launchd jadvali yo'q (xulosa o'chiq)"
+        if not s["yoqilgan"]:
+            return "launchd jadvali yo'q (xulosa o'chiq)"
+        return ("⚠️ yig'uvchi o'rnatilmagan (~/.abba-miya/miya yo'q) — avval "
+                "`bash deploy/mac-sync/miya_install.sh`, jadval o'shanda qo'yiladi")
     la.mkdir(parents=True, exist_ok=True)
     with open(p, "wb") as f:
-        plistlib.dump(jadval_plist(s["soat"], _joy()), f)
+        plistlib.dump(jadval_plist(s["soat"], joy), f)
     xato = ""
     for _ in range(3):          # bootout'dan keyin launchd ba'zan bir zum band bo'ladi
         r = subprocess.run(["launchctl", "bootstrap", domen, str(p)], capture_output=True, text=True)
@@ -145,7 +154,8 @@ def bugungi_yozuvlar(vault: Path, kun: str) -> dict:
 
 def matn(sh: dict, vault: Path, kun: str) -> str:
     e = html.escape
-    sesslar = [v for v in sh.values() if isinstance(v, dict) and v.get("rel") and kun in (v.get("sana") or [])]
+    sesslar = [v for v in sh.values() if isinstance(v, dict) and (v.get("rel") or v.get("faol"))
+               and kun in (v.get("sana") or [])]
     q = [f"🧠 <b>Ikkinchi miya — {kun[8:10]}.{kun[5:7]}</b>", ""]
     if sesslar:
         commit = sum(int(v.get("commitlar") or 0) for v in sesslar)
@@ -181,7 +191,12 @@ def matn(sh: dict, vault: Path, kun: str) -> str:
     return "\n".join(q)
 
 
-def yubor(text: str) -> bool:
+def xabar(sh: dict, vault: Path, kun: str) -> str:
+    """Yuboriladigan matn: holat + hali yozilmagan bugungi faol sessiyalar."""
+    return matn(sessiyalar.bugungi_faol(sh, kun), vault, kun)
+
+
+def yubor(text: str, urinish: int = 4, kutish: float = 15.0) -> bool:
     env = _env()
     token, chat = env.get("TELEGRAM_BOT_TOKEN"), env.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
@@ -189,14 +204,28 @@ def yubor(text: str) -> bool:
         return False
     data = urllib.parse.urlencode({"chat_id": chat, "text": text, "parse_mode": "HTML",
                                    "disable_web_page_preview": "true"}).encode()
-    try:
-        with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data=data,
-                                    timeout=40) as r:
-            ok = json.loads(r.read().decode("utf-8", "replace")).get("ok") is True
-    except Exception as ex:      # tarmoq xatosi — keyingi yig'ishda qayta urinadi
-        asos.log(f"xulosa: yuborilmadi ({type(ex).__name__})")
-        return False
-    return ok
+    for i in range(urinish):
+        try:
+            with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data=data,
+                                        timeout=40) as r:
+                return json.loads(r.read().decode("utf-8", "replace")).get("ok") is True
+        except urllib.error.HTTPError as ex:     # Telegram rad etdi — sababi logga (URL'da token bor, u yozilmaydi)
+            try:
+                sabab = json.loads(ex.read().decode("utf-8", "replace")).get("description") or ""
+            except Exception:
+                sabab = ""
+            asos.log(f"xulosa: Telegram rad etdi ({ex.code}: {asos.bir_qator(sabab, 160)})")
+            return False
+        except urllib.error.URLError as ex:      # so'rov ketmadi: DNS/tarmoq hali yo'q (Mac endi uyg'ongan)
+            if i + 1 < urinish:
+                time.sleep(kutish)
+                continue
+            asos.log(f"xulosa: yuborilmadi — tarmoq yo'q ({type(ex.reason).__name__})")
+            return False
+        except Exception as ex:      # javob kelmadi — keyingi yig'ishda qayta urinadi
+            asos.log(f"xulosa: yuborilmadi ({type(ex).__name__})")
+            return False
+    return False
 
 
 def kerakmi(hozir: datetime | None = None) -> bool:
@@ -210,15 +239,19 @@ def kerakmi(hozir: datetime | None = None) -> bool:
     return hozir.strftime("%H:%M") >= s["soat"]
 
 
-def ishla(sh: dict, vault: Path, majburiy: bool = False) -> str:
-    """Kerak bo'lsa yuboradi. Qaytadi: 'yuborildi' | 'kerak emas' | 'xato'."""
-    hozir = datetime.now(asos.TZ)
-    if not majburiy and not kerakmi(hozir):
+def ishla(sh: dict, vault: Path, majburiy: bool = False, hozir: datetime | None = None) -> str:
+    """Kerak bo'lsa yuboradi. Qaytadi: 'yuborildi' | 'kerak emas' | 'xato'.
+    Kun faqat rejadagi yuborishda belgilanadi: soatdan oldingi sinov (--xulosa-yubor) kechki
+    xulosani bekor qilmaydi, soatdan keyingi qo'lda yuborish esa soatlik yurishda takrorlanmaydi."""
+    hozir = hozir or datetime.now(asos.TZ)
+    rejali = kerakmi(hozir)          # soat o'tgan va bugun hali yuborilmagan
+    if not majburiy and not rejali:
         return "kerak emas"
     kun = hozir.strftime("%Y-%m-%d")
-    if yubor(matn(sh, vault, kun)):
-        d = asos.holat_oqi("xulosa")
-        d["oxirgi"] = kun
-        asos.holat_yoz("xulosa", d)
+    if yubor(xabar(sh, vault, kun)):
+        if rejali:
+            d = asos.holat_oqi("xulosa")
+            d["oxirgi"] = kun
+            asos.holat_yoz("xulosa", d)
         return "yuborildi"
     return "xato"

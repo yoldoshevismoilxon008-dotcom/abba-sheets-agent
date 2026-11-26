@@ -125,9 +125,15 @@ def main(argv=None) -> int:
     ap.add_argument("--xulosa-yubor", action="store_true", help="xulosani hozir yuborish")
     ap.add_argument("--xulosa-korish", action="store_true", help="xulosa matnini yubormasdan ko'rish")
     a = ap.parse_args(argv)
+    if a.soat and not a.xulosa:
+        ap.error("--soat faqat --xulosa on|off bilan birga ishlaydi (masalan: --xulosa on --soat 21:30)")
 
     if a.xulosa:
-        s = xulosa.sozla(a.xulosa == "on", a.soat)
+        try:
+            s = xulosa.sozla(a.xulosa == "on", a.soat)
+        except ValueError:
+            print(f"miya: soat HH:MM ko'rinishida bo'lsin (masalan 21:30), berilgani: {a.soat}")
+            return 2
         print(f"xulosa: {'yoqilgan' if s['yoqilgan'] else 'o‘chiq'}, soat {s['soat']}")
         print(xulosa.jadval_yangila(s))
         if s["yoqilgan"] and not xulosa.tayyormi():
@@ -135,7 +141,7 @@ def main(argv=None) -> int:
                   "xulosa yuborilmaydi")
         return 0
     if a.xulosa_korish:
-        print(xulosa.matn(asos.holat_oqi("sessiyalar"), asos.vault(), asos.bugun()))
+        print(xulosa.xabar(asos.holat_oqi("sessiyalar"), asos.vault(), asos.bugun()))
         return 0
     if a.obsidian_och:
         obsidian.sozla()
@@ -154,7 +160,11 @@ def main(argv=None) -> int:
             y = r["yozuvchi"]
             xs = "-"
             if not a.quruq and not faqat:
-                xs = xulosa.ishla(r["sh"], y.vault, majburiy=a.xulosa_yubor)
+                try:
+                    xs = xulosa.ishla(r["sh"], y.vault, majburiy=a.xulosa_yubor)
+                except Exception as e:      # xulosa xatosi yig'ish natijasini (log, holat) buzmasin
+                    xs = f"xato ({type(e).__name__})"
+                    asos.log(f"xulosa XATO: {type(e).__name__}: {e}\n{traceback.format_exc(limit=4)}")
     except RuntimeError as e:
         print(f"miya: {e}")
         return 0

@@ -21,6 +21,7 @@ import json
 import re
 import time
 from collections import Counter, OrderedDict
+from datetime import datetime
 from pathlib import Path
 
 from . import asos
@@ -259,7 +260,8 @@ def sessiya_oqi(yol: Path) -> dict | None:
     s["loyiha"] = loyiha_nomi(s["asosiy_cwd"])
     if not s["sarlavha"]:
         s["sarlavha"] = (s.get("ai_sarlavha") or s["agent_nomi"]
-                         or asos.qisqart(s["turlar"][0]["sorov"], 70))
+                         or asos.qisqart(asos.redakt(s["turlar"][0]["sorov"]), 70))
+    s["sarlavha"] = asos.redakt(s["sarlavha"])     # holat, frontmatter, fayl nomi va xulosaga sirsiz
     return s
 
 
@@ -527,3 +529,28 @@ def yigish(yozuvchi: asos.Yozuvchi, hammasi: bool = False, artifact_nomlari: dic
     if not yozuvchi.quruq:
         asos.holat_yoz("sessiyalar", holat)
     return {"holat": holat, "hisob": dict(hisob)}
+
+
+def bugungi_faol(holat: dict, kun: str) -> dict:
+    """`holat` nusxasi + `kun` da o'zgargan, lekin holatda hali aks etmagan (faol) sessiyalar.
+    Faqat kechki xulosa uchun: transkript o'qiladi xolos, yozuv va holat fayliga tegilmaydi —
+    45 daqiqa qoidasi (JIM_DAQIQA) o'z joyida qoladi."""
+    natija = dict(holat)
+    for f in transkriptlar():
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if datetime.fromtimestamp(st.st_mtime, asos.TZ).strftime("%Y-%m-%d") != kun:
+            continue
+        eski = holat.get(f.stem) or {}
+        if eski.get("imzo") == [int(st.st_mtime), st.st_size]:
+            continue                      # holatda aynan shu ko'rinishida bor
+        try:
+            s = sessiya_oqi(f)
+        except Exception:
+            continue
+        if s:
+            natija[f.stem] = {**eski, "faol": True, "sarlavha": s["sarlavha"], "sana": _sanalar(s),
+                              "commitlar": len(s["commitlar"]), "artifactlar": list(s["artifactlar"])}
+    return natija

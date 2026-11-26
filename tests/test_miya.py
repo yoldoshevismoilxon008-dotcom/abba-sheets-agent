@@ -274,6 +274,15 @@ def test_xulosa_jadval_plist(tmp_path):
     plistlib.loads(plistlib.dumps(d))      # yaroqli plist
 
 
+def test_xulosa_soat_normallashadi(muhit):
+    assert xulosa.sozla(True, "9:05")["soat"] == "09:05"     # kerakmi() satrlarni solishtiradi
+    assert not xulosa.kerakmi(datetime(2026, 11, 27, 9, 4, tzinfo=asos.TZ))
+    assert xulosa.kerakmi(datetime(2026, 11, 27, 9, 6, tzinfo=asos.TZ))
+    with pytest.raises(ValueError):
+        xulosa.sozla(True, "25:00")
+    assert xulosa.sozlama()["soat"] == "09:05"
+
+
 def test_xulosa_matn_bugungi_yozuvlar(muhit):
     v = muhit["vault"]
     bugun = datetime(2026, 11, 26, 15, 0, tzinfo=asos.TZ).timestamp()
@@ -296,6 +305,145 @@ def test_xulosa_matn_bugungi_yozuvlar(muhit):
     assert "obsidian://open?vault=vault&amp;file=BOSH-SAHIFA" in m
     for teg in ("b", "code"):               # Telegram HTML: hamma teg yopiq
         assert m.count(f"<{teg}>") == m.count(f"</{teg}>")
+
+
+def test_xulosa_faol_sessiya_kiradi(muhit, monkeypatch):
+    # xulosa soatidagi yig'ish 45 daqiqalik faol sessiyani yozmaydi — YUBORILGAN xulosa baribir uni ko'rsatsin
+    yuborilgan = []
+    monkeypatch.setattr(xulosa, "yubor", lambda t: yuborilgan.append(t) or True)
+    xulosa.sozla(True, "21:30")
+    sid = _sessiya(muhit["claude"])
+    f = next((muhit["claude"] / "projects").rglob(f"{sid}.jsonl"))
+    hozir = datetime(2026, 11, 20, 21, 30, tzinfo=asos.TZ)
+    os.utime(f, (hozir.timestamp() - 600, hozir.timestamp() - 600))      # 10 daqiqa jim
+    r = sessiyalar.yigish(asos.Yozuvchi(muhit["vault"]), hozir=hozir.timestamp())
+    assert r["hisob"].get("faol") == 1 and sid not in r["holat"]
+    assert xulosa.ishla(r["holat"], muhit["vault"], hozir=hozir) == "yuborildi"
+    assert "1 sessiya" in yuborilgan[0] and "Demo sessiya" in yuborilgan[0]
+    # kecha yozilgan (imzo eskirgan), bugun davom etgan sessiya ham kiradi
+    eski = {sid: {"rel": "claude/sessiyalar/2026-11/x.md", "sarlavha": "Demo sessiya",
+                  "sana": ["2026-11-19"], "imzo": [0, 0]}}
+    assert "Demo sessiya" in xulosa.xabar(eski, muhit["vault"], "2026-11-20")
+    assert sid not in asos.holat_oqi("sessiyalar")             # faqat o'qildi: holatga yozilmadi
+    assert not list(muhit["vault"].rglob("claude/sessiyalar/*/*.md"))
+
+
+def test_xulosa_sinov_kechkisini_bekor_qilmaydi(muhit, monkeypatch):
+    yuborilgan = []
+    monkeypatch.setattr(xulosa, "yubor", lambda t: yuborilgan.append(t) or True)
+    xulosa.sozla(True, "21:30")
+
+    def soat(h, m, kun=26):
+        return datetime(2026, 11, kun, h, m, tzinfo=asos.TZ)
+    assert xulosa.ishla({}, muhit["vault"], majburiy=True, hozir=soat(16, 0)) == "yuborildi"
+    assert xulosa.sozlama()["oxirgi"] == ""                      # sinov kunni band qilmadi
+    assert xulosa.ishla({}, muhit["vault"], hozir=soat(21, 30)) == "yuborildi"
+    assert xulosa.sozlama()["oxirgi"] == "2026-11-26"
+    assert xulosa.ishla({}, muhit["vault"], hozir=soat(22, 36)) == "kerak emas"
+    assert len(yuborilgan) == 2
+    # ertasi: 21:30 dagisi ketmadi, egasi 21:45 da qo'lda yubordi — soatlik yurish takrorlamasin
+    assert xulosa.ishla({}, muhit["vault"], majburiy=True, hozir=soat(21, 45, 27)) == "yuborildi"
+    assert xulosa.sozlama()["oxirgi"] == "2026-11-27"
+    assert xulosa.ishla({}, muhit["vault"], hozir=soat(22, 13, 27)) == "kerak emas"
+    assert len(yuborilgan) == 3
+
+
+def test_xulosa_yubor_tarmoqni_kutadi(muhit, monkeypatch):
+    import io
+    import socket
+    import types
+    import urllib.error
+    monkeypatch.setattr(xulosa, "_env", lambda: {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1"})
+    kutishlar, urinish = [], []
+    monkeypatch.setattr(xulosa, "time", types.SimpleNamespace(sleep=kutishlar.append))
+
+    def ochuvchi(*xatolar):
+        def urlopen(url, data=None, timeout=None):
+            urinish.append(1)
+            if len(urinish) <= len(xatolar):
+                raise xatolar[len(urinish) - 1]
+            return io.BytesIO(b'{"ok": true}')
+        return urlopen
+
+    # Mac uyg'ongan, Wi-Fi hali ulanmagan: so'rov ketmagan — kutib, qayta urinadi
+    tarmoqsiz = urllib.error.URLError(OSError("tarmoq yo'q"))
+    monkeypatch.setattr(xulosa.urllib.request, "urlopen", ochuvchi(tarmoqsiz, tarmoqsiz))
+    assert xulosa.yubor("salom") is True and len(urinish) == 3 and kutishlar == [15.0, 15.0]
+    # Telegram rad etdi yoki javob yo'lda uzildi (xabar yetgan bo'lishi mumkin) — qayta urinmaydi
+    for xato in (urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b'{"description": "x"}')),
+                 socket.timeout("javob kelmadi"), ConnectionResetError()):
+        urinish.clear()
+        monkeypatch.setattr(xulosa.urllib.request, "urlopen", ochuvchi(xato))
+        assert xulosa.yubor("salom") is False and len(urinish) == 1
+
+
+def test_sessiya_sarlavhasi_redakt(muhit):
+    tok = "ghp_" + "a" * 36
+    uzun = "Q" * 30 + "x9" * 175          # uzun base64'simon sir — sarlavha 70 belgida kesiladi
+
+    def sarlavha(n, sorov, nom=None):
+        sid = f"bbbbbbbb-1111-2222-3333-44444444444{n}"
+        p = muhit["claude"] / "projects" / "-Users-x-p" / f"{sid}.jsonl"
+        yozuv = [{"type": "custom-title", "customTitle": nom, "sessionId": sid}] if nom else []
+        yozuv.append({"type": "user", "turnOrigin": "human", "origin": {"kind": "human"}, "sessionId": sid,
+                      "timestamp": "2026-11-20T05:00:00Z", "cwd": "/Users/x/p",
+                      "message": {"role": "user", "content": sorov}})
+        _jsonl(p, yozuv)
+        return sessiyalar.sessiya_oqi(p)["sarlavha"]
+    s1 = sarlavha(1, f"token {tok} bilan push qil")
+    s2 = sarlavha(2, "salom", nom=f"Push {tok}")                       # qo'lda qo'yilgan sarlavha ham
+    s3 = sarlavha(3, f"Bu sessiya stringini saqla: {uzun}")            # avval redakt, keyin kesish
+    assert "[MAXFIY]" in s1 and tok not in s1
+    assert "[MAXFIY]" in s2 and tok not in s2
+    assert "[MAXFIY]" in s3 and uzun[:30] not in s3
+
+
+def test_xulosa_jadval_ornatilmaganda_qoyilmaydi(tmp_path, monkeypatch):
+    import plistlib
+    import types
+    monkeypatch.setattr(asos, "HOME", tmp_path)
+    buyruqlar = []
+    monkeypatch.setattr(xulosa, "subprocess", types.SimpleNamespace(
+        run=lambda args, **k: buyruqlar.append(args) or types.SimpleNamespace(returncode=0, stderr="", stdout="")))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.abba.miya-xulosa.plist"
+    s = {"yoqilgan": True, "soat": "21:30"}
+    assert "o'rnatilmagan" in xulosa.jadval_yangila(s)               # repo/worktree'ga bog'lanmaydi
+    assert not plist.exists() and not any("bootstrap" in a for a in buyruqlar)
+    (tmp_path / ".abba-miya" / "miya").mkdir(parents=True)
+    assert "21:30" in xulosa.jadval_yangila(s)
+    assert plistlib.loads(plist.read_bytes())["WorkingDirectory"] == str(tmp_path / ".abba-miya")
+    assert "o'chiq" in xulosa.jadval_yangila({"yoqilgan": False, "soat": "21:30"}) and not plist.exists()
+
+
+def test_main_soat_xulosasiz_xato(muhit):
+    from miya import __main__ as kirish
+    with pytest.raises(SystemExit) as e:
+        kirish.main(["--soat", "21:30"])
+    assert e.value.code == 2 and xulosa.sozlama()["yoqilgan"] is False
+
+
+def test_main_xulosa_xatosi_logni_buzmaydi(muhit, monkeypatch):
+    from miya import __main__ as kirish
+    y = asos.Yozuvchi(muhit["vault"])
+    monkeypatch.setattr(kirish, "yig", lambda **k: {"yozuvchi": y, "natijalar": {}, "xatolar": {}, "sh": {}})
+
+    def portlash(*a, **k):
+        raise RuntimeError("sinov")
+    monkeypatch.setattr(xulosa, "ishla", portlash)
+    assert kirish.main([]) == 0
+    log = (muhit["tmp"] / "miya.log").read_text(encoding="utf-8")
+    assert "xulosa=xato (RuntimeError)" in log and "xulosa XATO" in log
+
+
+def test_main_xulosa_korish_faol_sessiyani_korsatadi(muhit, monkeypatch, capsys):
+    from miya import __main__ as kirish
+    sid = _sessiya(muhit["claude"])
+    f = next((muhit["claude"] / "projects").rglob(f"{sid}.jsonl"))
+    ts = datetime(2026, 11, 20, 21, 20, tzinfo=asos.TZ).timestamp()
+    os.utime(f, (ts, ts))
+    monkeypatch.setattr(asos, "bugun", lambda: "2026-11-20")
+    assert kirish.main(["--xulosa-korish"]) == 0
+    assert "Demo sessiya" in capsys.readouterr().out
 
 
 def test_hublar_bosh_sahifa(muhit):
