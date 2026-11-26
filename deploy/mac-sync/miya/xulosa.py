@@ -1,8 +1,15 @@
 """Kechki «🧠 Miya xulosasi» — WALL-E orqali egaga bitta Telegram xabar.
 
-Kuniga bir marta, belgilangan soatdan keyingi birinchi yig'ishda (standart 21:30). Mac
-uyquda bo'lsa — uyg'ongach, lekin faqat shu kun ichida (ertasi kuni eskisi yuborilmaydi).
-Yoqish/o'chirish: `python3 -m miya --xulosa on|off [--soat 21:30]` → state/xulosa.json.
+Kuniga bir marta, belgilangan soatda (standart 21:30). Asosiy yig'ish har soatda ishlaydi, lekin
+uning daqiqasi Mac uyg'ongan paytga qarab suriladi (masalan, har soatning 13-daqiqasi). Shuning
+uchun `--xulosa on` launchd'ga alohida `com.abba.miya-xulosa` jadvalini qo'yadi, xulosa aynan
+belgilangan soatda chiqadi. Jadval yo'qolsa ham, soatlik yig'ish o'sha soatdan keyingi birinchi
+yurishda yuboradi. Mac uyquda bo'lsa — uyg'ongach, lekin faqat shu kun ichida (ertasi kuni
+eskisi yuborilmaydi).
+
+  python3 -m miya --xulosa on|off [--soat 21:30]   # state/xulosa.json + launchd jadvali
+  python3 -m miya --xulosa-korish                  # matnni yubormasdan ko'rish
+
 Token va chat_id ~/abba-sheets-agent/.env dan (target hisoboti bilan bir xil); hech qayerga
 yozilmaydi va logga chiqmaydi.
 """
@@ -10,6 +17,10 @@ from __future__ import annotations
 
 import html
 import json
+import os
+import plistlib
+import subprocess
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -18,6 +29,8 @@ from pathlib import Path
 from . import asos
 
 ENV = asos.HOME / "abba-sheets-agent" / ".env"
+JADVAL = "com.abba.miya-xulosa"
+PY = "/usr/bin/python3"
 
 
 def sozlama() -> dict:
@@ -49,7 +62,88 @@ def _env() -> dict:
     return natija
 
 
-def matn(sh: dict, hisob: dict, vault: Path, kun: str) -> str:
+def tayyormi() -> bool:
+    """.env da token va chat_id bormi (qiymatlarning o'zi hech qayerga chiqmaydi)."""
+    e = _env()
+    return bool(e.get("TELEGRAM_BOT_TOKEN") and e.get("TELEGRAM_CHAT_ID"))
+
+
+# ---------------------------------------------------------------- launchd jadvali
+
+def _joy() -> Path:
+    """Yig'uvchi o'rnatilgan papka: launchd shu yerdan `python3 -m miya` qiladi."""
+    o = asos.HOME / ".abba-miya"
+    return o if (o / "miya").is_dir() else Path(__file__).resolve().parent.parent
+
+
+def jadval_plist(soat: str, joy: Path) -> dict:
+    """Xulosa soatida bitta to'liq yig'ish (kunning oxirgi sessiyalari ham kirsin), keyin xulosa.
+    RunAtLoad yo'q: yoqilgan zahoti yuborib yubormasin."""
+    s, d = (int(x) for x in soat.split(":"))
+    return {
+        "Label": JADVAL,
+        "ProgramArguments": [PY, "-m", "miya"],
+        "WorkingDirectory": str(joy),
+        "EnvironmentVariables": {"PYTHONDONTWRITEBYTECODE": "1"},
+        "StartCalendarInterval": {"Hour": s, "Minute": d},
+        "Nice": 10,
+        "LowPriorityIO": True,
+        "StandardOutPath": str(joy / "launchd.log"),
+        "StandardErrorPath": str(joy / "launchd.log"),
+    }
+
+
+def jadval_yangila(s: dict | None = None) -> str:
+    """Sozlamaga moslab launchd jadvalini qo'yadi yoki olib tashlaydi."""
+    s = s or sozlama()
+    la = asos.HOME / "Library" / "LaunchAgents"
+    p = la / f"{JADVAL}.plist"
+    domen = f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", f"{domen}/{JADVAL}"], capture_output=True)
+    if not s["yoqilgan"]:
+        p.unlink(missing_ok=True)
+        return "launchd jadvali yo'q (xulosa o'chiq)"
+    la.mkdir(parents=True, exist_ok=True)
+    with open(p, "wb") as f:
+        plistlib.dump(jadval_plist(s["soat"], _joy()), f)
+    xato = ""
+    for _ in range(3):          # bootout'dan keyin launchd ba'zan bir zum band bo'ladi
+        r = subprocess.run(["launchctl", "bootstrap", domen, str(p)], capture_output=True, text=True)
+        if r.returncode == 0:
+            return f"launchd {JADVAL}: har kuni {s['soat']} da"
+        xato = (r.stderr or r.stdout).strip()
+        time.sleep(1)
+    asos.log(f"xulosa jadvali qo'yilmadi: {asos.bir_qator(xato, 200)}")
+    return "⚠️ launchd jadvali qo'yilmadi (log) — xulosa soatlik yig'ish bilan chiqadi"
+
+
+# ---------------------------------------------------------------- matn
+
+def bugungi_yozuvlar(vault: Path, kun: str) -> dict:
+    """`kun` (Toshkent vaqti) da o'zgargan .md yozuvlar: yig'uvchining avto sahifalari soni va
+    qolganlari (kunlik, bilim, loyihalar — Claude, egasi yoki boshqa avtomatika yozgan), yangisi oldin."""
+    avto, boshqa = 0, []
+    for ildiz, papkalar, fayllar in os.walk(vault):
+        papkalar[:] = [x for x in papkalar if not x.startswith(".") and x != "ilovalar"]
+        for f in fayllar:
+            if not f.endswith(".md"):
+                continue
+            p = Path(ildiz) / f
+            try:
+                mt = p.stat().st_mtime
+            except OSError:
+                continue
+            if datetime.fromtimestamp(mt, asos.TZ).strftime("%Y-%m-%d") != kun:
+                continue
+            rel = p.relative_to(vault).as_posix()
+            if any(rel == j or (j.endswith("/") and rel.startswith(j)) for j in asos.AVTO_JOYLAR):
+                avto += 1
+            else:
+                boshqa.append((mt, rel[:-3]))
+    return {"avto": avto, "boshqa": [r for _, r in sorted(boshqa, reverse=True)]}
+
+
+def matn(sh: dict, vault: Path, kun: str) -> str:
     e = html.escape
     sesslar = [v for v in sh.values() if isinstance(v, dict) and v.get("rel") and kun in (v.get("sana") or [])]
     q = [f"🧠 <b>Ikkinchi miya — {kun[8:10]}.{kun[5:7]}</b>", ""]
@@ -72,11 +166,18 @@ def matn(sh: dict, hisob: dict, vault: Path, kun: str) -> str:
         if fm.get("chat_xabarlar") not in (None, "", "0"):
             qism.append(f"{fm['chat_xabarlar']} savol")
         q.append("🤖 <b>WALL-E:</b> " + " · ".join(qism))
-    yangi = hisob.get("yangi", 0)
-    yang = hisob.get("yangilandi", 0)
-    q.append(f"📥 <b>Miya:</b> {yangi} yangi, {yang} yangilangan yozuv")
+    b = bugungi_yozuvlar(vault, kun)
+    if b["boshqa"] or b["avto"]:
+        q.append(f"📥 <b>Miyaga bugun:</b> {len(b['boshqa'])} yozuv"
+                 + (f" (+{b['avto']} avto sahifa)" if b["avto"] else ""))
+        q.extend(f"  • {e(r)}" for r in b["boshqa"][:5])
+        if len(b["boshqa"]) > 5:
+            q.append(f"  • … yana {len(b['boshqa']) - 5} ta")
+    else:
+        q.append("📥 <b>Miyaga bugun:</b> yangi yozuv yo'q")
     q.append("")
-    q.append("Obsidian'da: <code>obsidian://open?path=" + e(urllib.parse.quote(str(vault / "BOSH-SAHIFA.md"))) + "</code>")
+    q.append("Obsidian'da: <code>obsidian://open?vault=" + e(urllib.parse.quote(vault.name))
+             + "&amp;file=BOSH-SAHIFA</code>")
     return "\n".join(q)
 
 
@@ -109,13 +210,13 @@ def kerakmi(hozir: datetime | None = None) -> bool:
     return hozir.strftime("%H:%M") >= s["soat"]
 
 
-def ishla(sh: dict, hisob: dict, vault: Path, majburiy: bool = False) -> str:
+def ishla(sh: dict, vault: Path, majburiy: bool = False) -> str:
     """Kerak bo'lsa yuboradi. Qaytadi: 'yuborildi' | 'kerak emas' | 'xato'."""
     hozir = datetime.now(asos.TZ)
     if not majburiy and not kerakmi(hozir):
         return "kerak emas"
     kun = hozir.strftime("%Y-%m-%d")
-    if yubor(matn(sh, hisob, vault, kun)):
+    if yubor(matn(sh, vault, kun)):
         d = asos.holat_oqi("xulosa")
         d["oxirgi"] = kun
         asos.holat_yoz("xulosa", d)

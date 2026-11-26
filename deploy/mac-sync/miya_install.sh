@@ -19,8 +19,9 @@ PY=/usr/bin/python3
 
 if [ "${1:-}" = "--ochir" ]; then
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  rm -f "$PLIST"
-  echo "OK: $LABEL o'chirildi. Vault'dagi yozuvlar va $DEST joyida qoldi."
+  launchctl bootout "gui/$(id -u)/$LABEL-xulosa" 2>/dev/null || true
+  rm -f "$PLIST" "$HOME/Library/LaunchAgents/$LABEL-xulosa.plist"
+  echo "OK: $LABEL va $LABEL-xulosa o'chirildi. Vault'dagi yozuvlar va $DEST joyida qoldi."
   exit 0
 fi
 
@@ -87,6 +88,9 @@ PLIST
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "OK: $LABEL o'rnatildi ($(head -1 "$DEST/MANBA")). Har soatda ishlaydi; birinchi yig'ish hozir boshlandi."
+# Kechki xulosa jadvali ($LABEL-xulosa) sozlamaga moslanadi: yoqilgan bo'lsa qayta qo'yiladi
+(cd "$DEST" && PYTHONDONTWRITEBYTECODE=1 "$PY" -c \
+  'from miya import xulosa; print("xulosa:", xulosa.jadval_yangila())') || true
 echo "Holat sahifasi: ~/claude-brain/tizim/miya-holati.md · log: $DEST/miya.log"
 
 if [ "${1:-}" = "--obsidian" ]; then

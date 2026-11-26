@@ -263,6 +263,41 @@ def test_xulosa_vaqti(muhit):
     assert not xulosa.kerakmi(datetime(2026, 11, 26, 22, 0, tzinfo=asos.TZ))
 
 
+def test_xulosa_jadval_plist(tmp_path):
+    import plistlib
+    d = xulosa.jadval_plist("21:30", tmp_path)
+    assert d["Label"] == "com.abba.miya-xulosa"
+    assert d["StartCalendarInterval"] == {"Hour": 21, "Minute": 30}
+    assert d["ProgramArguments"][-2:] == ["-m", "miya"]
+    assert d["WorkingDirectory"] == str(tmp_path)
+    assert "RunAtLoad" not in d          # yoqilgan zahoti yuborib yubormasin
+    plistlib.loads(plistlib.dumps(d))      # yaroqli plist
+
+
+def test_xulosa_matn_bugungi_yozuvlar(muhit):
+    v = muhit["vault"]
+    bugun = datetime(2026, 11, 26, 15, 0, tzinfo=asos.TZ).timestamp()
+    kecha = datetime(2026, 11, 25, 15, 0, tzinfo=asos.TZ).timestamp()
+
+    def yoz(rel, ts):
+        p = v / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x", encoding="utf-8")
+        os.utime(p, (ts, ts))
+    yoz("kunlik/2026-11-26.md", bugun)
+    yoz("bilim/eski.md", kecha)
+    yoz("claude/sessiyalar/2026-11/a.md", bugun)
+    yoz("BOSH-SAHIFA.md", bugun)
+    yoz(".obsidian/x.md", bugun)
+    yoz("loyiha/ilovalar/x.md", bugun)
+    m = xulosa.matn({}, v, "2026-11-26")
+    assert "1 yozuv (+2 avto sahifa)" in m
+    assert "kunlik/2026-11-26" in m and "bilim/eski" not in m and "ilovalar" not in m
+    assert "obsidian://open?vault=vault&amp;file=BOSH-SAHIFA" in m
+    for teg in ("b", "code"):               # Telegram HTML: hamma teg yopiq
+        assert m.count(f"<{teg}>") == m.count(f"</{teg}>")
+
+
 def test_hublar_bosh_sahifa(muhit):
     y = asos.Yozuvchi(muhit["vault"])
     sh = {"s1": {"rel": "claude/sessiyalar/2026-11/a.md", "sarlavha": "A", "boshi": "2026-11-20 10:00",

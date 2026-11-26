@@ -5,7 +5,8 @@
   python3 -m miya --hammasi       # keshga qaramay hamma sessiya/kunni qayta yozish
   python3 -m miya --faqat sessiyalar,skillar
   python3 -m miya --obsidian-och  # vault'ni Obsidian'da ochish (ro'yxatda bo'lmasa qo'shiladi)
-  python3 -m miya --xulosa on --soat 21:30   # kechki Telegram xulosasini yoqish
+  python3 -m miya --xulosa on --soat 21:30   # kechki Telegram xulosasini yoqish (+ launchd jadvali)
+  python3 -m miya --xulosa-korish # xulosa matnini yubormasdan ko'rish
   python3 -m miya --xulosa-yubor  # xulosani hozir yuborish (sinov)
 
 Hech bir manba xatosi butun yig'ishni to'xtatmaydi: xato logga va tizim/miya-holati.md ga yoziladi.
@@ -122,11 +123,19 @@ def main(argv=None) -> int:
     ap.add_argument("--xulosa", choices=("on", "off"), help="kechki Telegram xulosasi")
     ap.add_argument("--soat", help="xulosa soati, HH:MM (standart 21:30)")
     ap.add_argument("--xulosa-yubor", action="store_true", help="xulosani hozir yuborish")
+    ap.add_argument("--xulosa-korish", action="store_true", help="xulosa matnini yubormasdan ko'rish")
     a = ap.parse_args(argv)
 
     if a.xulosa:
         s = xulosa.sozla(a.xulosa == "on", a.soat)
         print(f"xulosa: {'yoqilgan' if s['yoqilgan'] else 'o‘chiq'}, soat {s['soat']}")
+        print(xulosa.jadval_yangila(s))
+        if s["yoqilgan"] and not xulosa.tayyormi():
+            print("⚠️ ~/abba-sheets-agent/.env da TELEGRAM_BOT_TOKEN yoki TELEGRAM_CHAT_ID yo'q — "
+                  "xulosa yuborilmaydi")
+        return 0
+    if a.xulosa_korish:
+        print(xulosa.matn(asos.holat_oqi("sessiyalar"), asos.vault(), asos.bugun()))
         return 0
     if a.obsidian_och:
         obsidian.sozla()
@@ -145,7 +154,7 @@ def main(argv=None) -> int:
             y = r["yozuvchi"]
             xs = "-"
             if not a.quruq and not faqat:
-                xs = xulosa.ishla(r["sh"], dict(y.hisob), y.vault, majburiy=a.xulosa_yubor)
+                xs = xulosa.ishla(r["sh"], y.vault, majburiy=a.xulosa_yubor)
     except RuntimeError as e:
         print(f"miya: {e}")
         return 0
