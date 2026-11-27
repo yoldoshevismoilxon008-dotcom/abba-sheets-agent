@@ -20,6 +20,11 @@ Repo PUBLIC — boshliq kontakti kodda emas: «/boshliq @username Ism» buyrug'i
 Xabar oqimi (bot_listener): ushlaydimi(msg) → slot bo'lsa xabarni_ishlash(msg, slot);
 «savol» qaytsa — odatiy Q&A. Inline tugmalar: callback(cq). Buyruqlar: buyruq(text, msg).
 Rejalovchi (supervisor): sorov_job(slot) har soatda, avto_job() har daqiqada, boot() bir marta.
+
+Vazifa navbati (vazifa.py, 27.11): ertalabki so'rovdan keyin navbatdagi ishlar «buni ham bugun
+qilasizmi?» deb so'raladi; «Ha» deyilgani rejaga qo'shiladi (qator_qosh yoki reja birinchi
+yozilganda _jadvalga), kechki hisobot yuborilgach navbat yopiladi/qaytadi. Navbat yiqilsa ham
+kunlik oqim ishlayveradi (_navbat_* — try/except).
 """
 import json
 import os
@@ -84,9 +89,12 @@ def hozir():
 # ---------------- holat (kun fayli) va sozlama ----------------
 
 def _bosh_slot():
+    # korildi — egasiga yetib borgan oxirgi preview'dagi jadval izi (_jadval_izi): avto-yuborish
+    # faqat jadval shu izga teng bo'lsa (egasi oxirgi o'zgarishni ko'rgan bo'lsa)
     return {"holat": "yangi", "sorovlar": [], "pauza": False, "jadval": [], "kirishlar": [],
             "preview_mid": None, "xabarlar": [], "oxirgi": None, "ishlanmoqda": None,
-            "yuborildi": None, "xato": None, "yuborish_soni": 0, "yangilangan": False}
+            "yuborildi": None, "xato": None, "yuborish_soni": 0, "yangilangan": False,
+            "korildi": None}
 
 
 def _bosh_kun(sana):
@@ -444,6 +452,73 @@ def _toza(s, n):
     return re.sub(r"\s+", " ", str(s or "")).strip()[:n]
 
 
+def _norm_matn(s):
+    t = str(s or "").lower().translate(_APOSTROF)
+    t = re.sub(r"[^\w\s']", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+# Oy nomlari (lotin/kirill) — «oktyabr hisoboti» ≠ «noyabr hisoboti». Qo'shimcha faqat ro'yxatdagi
+# (aks holda «marta», «mayli» oy bo'lib qolardi).
+_OY_OZAK = {"yanvar": 1, "fevral": 2, "mart": 3, "aprel": 4, "may": 5, "iyun": 6, "iyul": 7,
+            "avgust": 8, "sentabr": 9, "sentyabr": 9, "oktabr": 10, "oktyabr": 10, "noyabr": 11,
+            "dekabr": 12, "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "май": 5, "мая": 5,
+            "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12}
+_OY_QOSHIMCHA = ("", "da", "dagi", "gacha", "dan", "ga", "ni", "ning", "oyi", "lik", "ь", "я",
+                 "е", "ю", "ьда")
+
+
+def _oylar(t):
+    out = set()
+    for soz in t.split():
+        for ozak, n in _OY_OZAK.items():
+            if soz.startswith(ozak) and soz[len(ozak):] in _OY_QOSHIMCHA:
+                out.add(n)
+    return out
+
+
+def _loyiha_old(s):
+    """«<Loyiha>: <ish>» — ikki nuqtagacha qism (normallashgan) yoki None."""
+    s = str(s or "")
+    if ":" not in s:
+        return None
+    old = _norm_matn(s.split(":", 1)[0])
+    return old if 0 < len(old) <= 60 else None
+
+
+def matn_oxshash(a, b):
+    """Ikki ish matni BITTA ishmi (navbat ↔ jadval qatori, navbatdagi takror). Qat'iy: loyiha
+    prefiksi («X:») ikkalasida bo'lsa — teng; raqamlar va oy nomlari — teng; keyin matnlar
+    normallashganda teng, so'zlari bir xil yoki deyarli bir xil yozilgan (so'z soni teng).
+    Qism/kengaytma («TZ yozish» ↔ «TZ yozish va yuborish») — boshqa ish. Shubhada — «o'xshamaydi»:
+    kechki hisobotda ish hech qachon xato bilan «bajarildi» deb topilmasin."""
+    import difflib
+
+    x, y = _norm_matn(a), _norm_matn(b)
+    if not x or not y:
+        return False
+    px, py = _loyiha_old(a), _loyiha_old(b)
+    if px and py and px != py:
+        return False
+    if set(re.findall(r"\d+", x)) != set(re.findall(r"\d+", y)) or _oylar(x) != _oylar(y):
+        return False
+    if x == y:
+        return True
+    tx, ty = x.split(), y.split()
+    if sorted(tx) == sorted(ty):
+        return True
+    return len(tx) == len(ty) and difflib.SequenceMatcher(None, x, y).ratio() >= 0.92
+
+
+def _jadval_izi(jadval):
+    """Jadval mazmunining qisqa izi (preview ↔ yuboriladigan jadval bir xilmi)."""
+    import hashlib
+
+    xom = json.dumps([[r.get("ish", ""), r.get("izoh", ""), r.get("holat", "")]
+                      for r in jadval or []], ensure_ascii=False)
+    return hashlib.sha1(xom.encode("utf-8")).hexdigest()[:16]
+
+
 def tekshir(d, slot):
     """Claude JSON'ini tekshiradi va me'yorlaydi: {"savol", "jadval", "izoh"}."""
     if not isinstance(d, dict):
@@ -579,6 +654,7 @@ def preview_yubor(sana, slot, izoh="", ai_xato=None):
         st = yukla(sana)
         s = st[slot]
         jadval = list(s["jadval"])
+        iz = _jadval_izi(jadval)
         eski = s.get("preview_mid")
         caption = _preview_caption(sana, slot, s, izoh, ai_xato)
         yangilangan = bool(s.get("yangilangan"))
@@ -596,10 +672,18 @@ def preview_yubor(sana, slot, izoh="", ai_xato=None):
             s = st[slot]
             s["preview_mid"] = mid
             s["xabarlar"] = (s["xabarlar"] + [mid])[-40:]
+            s["korildi"] = iz                  # egasi aynan shu jadvalni ko'rdi (avto shunga qaraydi)
             saqla(st)
         if eski and eski != mid:
             ochir(eski)
     return mid
+
+
+def preview_eskirgan(sana, slot):
+    """Qoralama egasi ko'rgan oxirgi preview'dan keyin o'zgarganmi (masalan, restart oralig'ida)."""
+    with _LOCK:
+        s = yukla(sana)[slot]
+        return s["holat"] == "qoralama" and s.get("korildi") != _jadval_izi(s["jadval"])
 
 
 # ---------------- so'rov (ertalab / kechqurun) ----------------
@@ -622,6 +706,11 @@ def _sorov_matni(slot, st, n, soat_hozir=9):
         if reja:
             L.append("\nErtalabki rejangiz:")
             L += [f"{i}. {esc(r['ish'])}" for i, r in enumerate(reja, 1)]
+        qosh = _navbat_kechki(st.get("sana"), reja)    # navbatdan «Ha», lekin rejada yo'q
+        if qosh:
+            L.append("\nNavbatdan bugunga olganlaringiz:")
+            L += [f"• {esc(m)}" for m in qosh]
+        if reja or qosh:
             L.append("\nQaysilari bajarildi, qaysilari qoldi, yana nima qildingiz — "
                      "ovoz yoki matn bilan ayting.")
         else:
@@ -673,8 +762,9 @@ def sorov(slot, qolda=False, now=None):
         return "xato"
     tugma = [("⏭ Keyinroq", f"wow:keyin:{sana}:{slot}"), ("🏖 Bugun dam", f"wow:dam:{sana}:{slot}")]
     qator = [tugma]
-    if slot == "kechqurun" and st["ertalab"]["jadval"]:
+    if slot == "kechqurun" and _kechki_reja(st):
         qator.insert(0, [("✅ Rejadagi hammasi bajarildi", f"wow:hammasi:{sana}:{slot}")])
+    _navbat_kutish_bekor()                 # yangi so'rov — «/vazifa» kutishi javobni olmasin
     mid = xabar(matn, _kb(*qator))
     if mid:
         with _LOCK:
@@ -682,6 +772,8 @@ def sorov(slot, qolda=False, now=None):
             st[slot]["xabarlar"] = (st[slot]["xabarlar"] + [mid])[-40:]
             saqla(st)
     log(f"so'rov: {slot} #{n + 1} ({'qo‘lda' if qolda else 'jadval'}) → {'ok' if mid else 'XATO'}")
+    if mid and slot == "ertalab":
+        _navbat_sorovi(sana, now)          # vazifa navbati: «buni ham bugun qilasizmi?» (kuniga 1)
     return "sent" if mid else "send-fail"
 
 
@@ -725,13 +817,15 @@ def ushlaydimi(msg, now=None):
     return None
 
 
-def _ovozdan_matn(v):
-    """Ovoz → matn. (matn, status_mid) yoki None (sabab egaga aytilgan)."""
+def _ovozdan_matn(v, uzun=None):
+    """Ovoz → matn. (matn, status_mid) yoki None (sabab egaga aytilgan). uzun — uzun ovozda
+    «bo'lib yuboring (…)» qavsidagi izoh (vazifa navbati o'zinikini beradi)."""
     import stt
 
     if int(v.get("duration") or 0) > VOICE_MAX_SEC:
+        izoh = uzun or "har biri jadvalga qo'shiladi"
         xabar(f"🎤 Ovozli xabar {VOICE_MAX_SEC // 60} daqiqadan oshmasin — bo'lib yuboring "
-              "(har biri jadvalga qo'shiladi).")
+              f"({izoh}).")
         return None
     ok, why = stt.stt_ready()
     if not ok:
@@ -798,8 +892,13 @@ def _jadvalga(sana, slot, matn, tur, now):
         s["ishlanmoqda"] = hozir().isoformat(timespec="seconds")
         s["oxirgi"] = s["ishlanmoqda"]
         joriy = [dict(r) for r in s["jadval"]]
-        reja = [dict(r) for r in st["ertalab"]["jadval"]] if slot == "kechqurun" else []
+        # kechqurun: ertalabki reja + navbatdan bugunga olingan, lekin rejada yo'q ishlar
+        reja = _kechki_reja(st) if slot == "kechqurun" else []
         saqla(st)
+    # Vazifa navbati: bugun «Ha» deyilgan ishlar — reja birinchi marta yozilganda, xabardan reja
+    # chiqsa, jadval oxiriga qo'shiladi (Claude'ga berilmaydi: «ok», «hozir yozaman» kabi xabar
+    # faqat navbat ishlaridan iborat qoralama ochib, uni boshliqqa avto-yubormasin)
+    navbat = _navbat_rejaga(sana) if slot == "ertalab" and not joriy else []
     ai_xato = None
     try:
         natija = jadval_yangila(slot, joriy, matn, tur, reja, malum_nomlar(), sana)
@@ -823,14 +922,23 @@ def _jadvalga(sana, slot, matn, tur, now):
             xabar(f"{SLOTLAR[slot]['sarlavha']} allaqachon yuborilgan. Yangilangan versiya: "
                   f"/{slot} qayta")
             return "ok", matn
-        s["jadval"] = natija["jadval"]
+        jadval = list(natija["jadval"])
+        qoshildi = 0
+        for m in navbat:                        # egasi ertalab «Ha» degan navbat ishlari
+            if len(jadval) < MAX_QATOR and not any(matn_oxshash(m, r["ish"]) for r in jadval):
+                jadval.append({"ish": _toza(m, 300), "izoh": "", "holat": ""})
+                qoshildi += 1
+        s["jadval"] = jadval
         s["kirishlar"] = (s["kirishlar"] + [{"vaqt": now.strftime("%H:%M"), "tur": tur,
                                              "matn": matn[:2000]}])[-20:]
         s["holat"] = "qoralama"
         s["oxirgi"] = hozir().isoformat(timespec="seconds")   # avto-yuborish sanog'i shundan
         st["faol"] = slot
         saqla(st)
-    preview_yubor(sana, slot, natija.get("izoh") or "", ai_xato)
+    izoh = natija.get("izoh") or ""
+    if qoshildi:
+        izoh = (izoh + " " if izoh else "") + f"Navbatdan {qoshildi} ta ish qo'shildi."
+    preview_yubor(sana, slot, izoh, ai_xato)
     log(f"{slot}: qoralama yangilandi ({len(natija['jadval'])} qator, {tur}"
         f"{', AI zaxira' if ai_xato else ''})")
     return "ok", matn
@@ -854,11 +962,15 @@ def _arxiv(sana, slot, jadval):
         pass
 
 
-def yubor(sana, slot, sabab="qo'lda"):
+def yubor(sana, slot, sabab="qo'lda", now=None):
     """Qoralamani egasining akkauntidan boshliqqa yuboradi. Ikki marta yuborilmaydi:
-    holat lock ostida «yuborilmoqda»ga o'tadi. Qaytadi: yuborildi | xato | boshliq-yoq |
-    limit | bosh | <boshqa holat>."""
-    boshliq = (sozlama().get("boshliq") or "").strip()
+    holat lock ostida «yuborilmoqda»ga o'tadi. Avto-yuborish (sabab="avto") lock ostida qayta
+    tekshiriladi: jadval egasi ko'rgan oxirgi preview'dagidek bo'lishi (korildi) va jimlik
+    haqiqatan AVTO_DAQ bo'lishi shart — avto_job snapshot'idan keyin qator qo'shilgan bo'lishi
+    mumkin. Qaytadi: yuborildi | xato | boshliq-yoq | limit | bosh | korilmagan | kutish |
+    <boshqa holat>."""
+    sz = sozlama()
+    boshliq = (sz.get("boshliq") or "").strip()
     with _LOCK:
         st = yukla(sana)
         s = st[slot]
@@ -870,6 +982,14 @@ def yubor(sana, slot, sabab="qo'lda"):
             return "boshliq-yoq"
         if s["yuborish_soni"] >= MAX_YUBORISH:
             return "limit"
+        if sabab == "avto":
+            if s.get("korildi") != _jadval_izi(s["jadval"]):
+                return "korilmagan"
+            t = now or hozir()
+            ox, ish = _vaqt(s.get("oxirgi")), _vaqt(s.get("ishlanmoqda"))
+            if (ox and t - ox < timedelta(minutes=_avto_daq(sz))) or \
+                    (ish and (t - ish).total_seconds() < ISHLANMOQDA_ESKI):
+                return "kutish"
         s["holat"] = "yuborilmoqda"
         s["yuborish_soni"] += 1
         jadval = [dict(r) for r in s["jadval"]]
@@ -915,6 +1035,8 @@ def yubor(sana, slot, sabab="qo'lda"):
     if not tahrir(preview_mid, t):
         xabar(t)
     _arxiv(sana, slot, jadval)
+    if slot == "kechqurun":
+        _navbat_kechki_yakun(sana, jadval)  # navbat: bajarilgani yopiladi, qolgani qaytadi
     return "yuborildi"
 
 
@@ -942,16 +1064,35 @@ def avto_job(now=None):
                     continue                        # yangi xabar ishlanyapti — kutamiz
                 oxirgi = _vaqt(s.get("oxirgi"))
                 if oxirgi and now - oxirgi >= timedelta(minutes=daq):
-                    yuborildi.append((kun, slot, yubor(kun, slot, sabab="avto")))
+                    r = yubor(kun, slot, sabab="avto", now=now)
+                    if r == "korilmagan":
+                        _qayta_korsat(kun, slot, now)
+                    yuborildi.append((kun, slot, r))
         return yuborildi
     except Exception as e:                              # noqa: BLE001
         log(f"XATO avto_job: {type(e).__name__}: {e}")
         return []
 
 
+def _qayta_korsat(sana, slot, now=None):
+    """Avto-yuborish vaqti kelgan, lekin jadval egasi ko'rgan preview'dan keyin o'zgargan
+    (masalan, restart preview'dan oldin uzgan): avval yangi preview, sanoq qaytadan."""
+    with _LOCK:
+        st = yukla(sana)
+        s = st[slot]
+        if s["holat"] != "qoralama":
+            return
+        s["oxirgi"] = (now or hozir()).isoformat(timespec="seconds")
+        saqla(st)
+    log(f"{slot}: jadval preview'dan keyin o'zgargan — avval yangi preview")
+    preview_yubor(sana, slot, izoh="Jadval oxirgi ko'rinishdan keyin o'zgargan — tekshiring.")
+
+
 def boot(now=None):
     """Supervisor startup'da bir marta: uzilib qolgan «yuborilmoqda» → «xato» (qayta urinish
-    tugmasi bilan), bugungi so'rov restart/deploy tufayli o'tib ketgan bo'lsa — hozir so'rash."""
+    tugmasi bilan), bugungi so'rov restart/deploy tufayli o'tib ketgan bo'lsa — hozir so'rash.
+    Kechki hisobot yuborilgan bo'lsa — vazifa navbati u bilan qayta solishtiriladi (yuborish va
+    solishtiruv orasida uzilish bo'lgan bo'lsa ham; takror chaqiruv holatni o'zgartirmaydi)."""
     try:
         if not kalitlar.royxat():           # yuklansa royxat() o'zi log qiladi
             log(f"kalit so'zlar topilmadi (vault: {kalitlar.NISBIY})")
@@ -966,6 +1107,12 @@ def boot(now=None):
                     ozgardi = True
             if ozgardi:
                 saqla(st)
+        for kun in (sana, (now.date() - timedelta(days=1)).isoformat()):
+            if _kun_fayl(kun).exists():
+                with _LOCK:
+                    kech = yukla(kun)["kechqurun"]
+                if kech["holat"] == "yuborildi":
+                    _navbat_kechki_yakun(kun, kech["jadval"])
         if not _yoqilgan() or st.get("dam"):
             return None
         for slot, cfg in SLOTLAR.items():
@@ -1052,7 +1199,7 @@ def callback(cq):
     if amal == "hammasi":
         with _LOCK:
             st = yukla(sana)
-            reja, s = st["ertalab"]["jadval"], st["kechqurun"]
+            reja, s = _kechki_reja(st), st["kechqurun"]      # navbatdan olinganlar ham
             ok = bool(reja) and slot == "kechqurun" and s["holat"] in ("kutilmoqda", "qoralama")
             if ok:
                 s["jadval"] = [{"ish": r["ish"], "izoh": r.get("izoh", ""), "holat": "bajarildi"}
@@ -1118,15 +1265,19 @@ def holat_matni(now=None):
                                "sizning akkauntingizdan, lichkaga" if bosh else
                                "⚠️ belgilanmagan — <code>/boshliq @username Ism</code>"),
          "Avto-yuborish: " + (f"qoralama {daq} daqiqa jim tursa" if daq else "o'chiq (faqat ✅)"),
-         "Holat: " + ("yoqilgan ✅" if _yoqilgan(sz) else "o'chiq (/kunlik on)"),
-         "",
-         "Buyruqlar:",
-         "/ertalab — rejani hozir yozish · /kechqurun — hisobotni hozir yozish",
-         "/ertalab qayta · /kechqurun qayta — yuborilganini yangilab qayta yuborish",
-         "/dam — bugun so'ramaslik",
-         "/boshliq @username Ism — qabul qiluvchi (sinov: <code>/boshliq me</code>)",
-         "/kalit — kalit so'zlar (ismlar, atamalar, loyihalar)",
-         "/kunlik avto 15 | avto off · /kunlik off | on"]
+         "Holat: " + ("yoqilgan ✅" if _yoqilgan(sz) else "o'chiq (/kunlik on)")]
+    navbat = _navbat_holat()
+    if navbat:
+        L.append(navbat)
+    L += ["",
+          "Buyruqlar:",
+          "/ertalab — rejani hozir yozish · /kechqurun — hisobotni hozir yozish",
+          "/ertalab qayta · /kechqurun qayta — yuborilganini yangilab qayta yuborish",
+          "/dam — bugun so'ramaslik",
+          "/boshliq @username Ism — qabul qiluvchi (sinov: <code>/boshliq me</code>)",
+          "/kalit — kalit so'zlar (ismlar, atamalar, loyihalar)",
+          "/vazifa — keyin qilinadigan ishni navbatga qo'shish · /vazifalar — navbat",
+          "/kunlik avto 15 | avto off · /kunlik off | on"]
     return "\n".join(L)
 
 
@@ -1169,6 +1320,116 @@ def _qayta_ochish(slot, now):
         saqla(st)
     preview_yubor(sana, slot)
     return True
+
+
+def qator_qosh(sana, slot, qatorlar, qayta_och=False):
+    """Tashqi modul (vazifa navbati) qoralamaga qator qo'shadi — FAQAT holat, lock ostida
+    (RLock: chaqiruvchi o'z qulfini ushlab turishi mumkin); preview'ni chaqiruvchi yuboradi
+    ("qoshildi" bo'lganda). Avval natija hisoblanadi (takror, joy), holat faqat qator haqiqatan
+    qo'shilsa o'zgaradi. Qoralama/xato — qatorlar oxiriga, avto-yuborish sanog'i qaytadan
+    (va «korildi» izi eskiradi — egasi yangi preview'ni ko'rmaguncha avto ketmaydi).
+    Yuborilgan jadval: qator jadvalda bo'lsa — "bor"; bo'lmasa — "yuborildi", qayta_och=True da
+    esa «yangilangan» qoralama bo'lib ochiladi (faqat egasi aniq bosganda; boshqa slot faol
+    bo'lsa faol o'zgarmaydi — kechki hisobot ertalabki rejaga tushmasin). Qaytadi: "qoshildi" |
+    "bor" | "toliq" | slot holati (yangi | kutilmoqda | yuborildi | yuborilmoqda | otkazildi | dam)."""
+    with _LOCK:
+        st = yukla(sana)
+        s = st[slot]
+        h = s["holat"]
+        if h not in ("qoralama", "xato", "yuborildi"):
+            return "dam" if st.get("dam") and h in ("yangi", "kutilmoqda") else h
+        qosh, bor = [], 0
+        for q in qatorlar:
+            q = _toza(q, 300)
+            if not q:
+                continue
+            if any(matn_oxshash(q, r.get("ish", "")) for r in s["jadval"]) or \
+                    any(matn_oxshash(q, x) for x in qosh):
+                bor += 1
+                continue
+            qosh.append(q)
+        qosh = qosh[:max(0, MAX_QATOR - len(s["jadval"]))]
+        if not qosh:
+            return "bor" if bor else "toliq"
+        if h == "yuborildi":
+            if not qayta_och:
+                return "yuborildi"
+            s.update(holat="qoralama", yangilangan=True, yuborish_soni=0)
+            boshqa = st["kechqurun" if slot == "ertalab" else "ertalab"]
+            if boshqa["holat"] not in ("kutilmoqda", "qoralama"):
+                st["faol"] = slot
+        s["jadval"] += [{"ish": q, "izoh": "", "holat": ""} for q in qosh]
+        s["oxirgi"] = hozir().isoformat(timespec="seconds")
+        saqla(st)
+    return "qoshildi"
+
+
+def _kechki_reja(st):
+    """Kechki hisobot asosi: ertalabki reja + navbatdan bugunga olingan, lekin rejada yo'q ishlar
+    (egasi ularni ham «bugun qilaman» degan — hisobotda holati so'raladi)."""
+    reja = [dict(r) for r in st["ertalab"]["jadval"]]
+    reja += [{"ish": m, "izoh": "", "holat": ""} for m in _navbat_kechki(st.get("sana"), reja)]
+    return reja[:MAX_QATOR]
+
+
+# ---------------- vazifa navbati (vazifa.py) bilan bog'lanish ----------------
+# Navbat moduli yiqilsa ham kunlik reja/hisobot ishlayveradi — har chaqiruv try/except.
+
+def _navbat_sorovi(sana, now):
+    try:
+        import vazifa
+
+        vazifa.ertalabki_sorov(sana, now)
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati so'rovi: {type(e).__name__}: {e}")
+
+
+def _navbat_kutish_bekor():
+    try:
+        import vazifa
+
+        vazifa.kutish_bekor()
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati (kutish): {type(e).__name__}: {e}")
+
+
+def _navbat_rejaga(sana):
+    try:
+        import vazifa
+
+        return vazifa.rejaga_kutayotganlar(sana)
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati (rejaga): {type(e).__name__}: {e}")
+        return []
+
+
+def _navbat_kechki(sana, reja):
+    try:
+        import vazifa
+
+        return vazifa.kechki_eslatma(sana, reja)
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati (kechki eslatma): {type(e).__name__}: {e}")
+        return []
+
+
+def _navbat_kechki_yakun(sana, jadval):
+    try:
+        import vazifa
+
+        vazifa.kechki_yakun(sana, jadval)
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati (kechki yakun): {type(e).__name__}: {e}")
+
+
+def _navbat_holat():
+    try:
+        import vazifa
+
+        return vazifa.holat_qatori()
+    except Exception as e:                              # noqa: BLE001
+        log(f"XATO vazifa navbati (holat): {type(e).__name__}: {e}")
+        return ""
 
 
 def buyruq(text, msg=None, now=None):

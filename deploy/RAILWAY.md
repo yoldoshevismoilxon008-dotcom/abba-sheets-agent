@@ -204,6 +204,9 @@ matni bor) — qaytgach birinchi kun diff bo'sh tarixdan boshlanishi mumkin, kri
   2-bo'limga qarang); token 1 yildan keyin yangilanadi (setup-token → Railway var).
 - **Xarajat**: hobby plan ~$5/oy atrofida (bitta doimiy service + 1GB volume;
   claude API xarajati yo'q — Max plan token).
+- **Faqat obuna (27.11.2026):** `ANTHROPIC_API_KEY` va boshqa to'lov yo'llari Variables'ga
+  qo'yilsa ham `claude -p` ga berilmaydi (`analyze.claude_env`). Holat: botda `/claude`,
+  Logs'da `claude auth: …` qatori.
 
 ## Undiruv: oy oxiri ko'chirish ro'yxati (AUDIT P0-3)
 

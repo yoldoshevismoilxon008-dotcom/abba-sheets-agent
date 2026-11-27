@@ -213,6 +213,116 @@ CLAUDE_TOOLS = (
 )
 
 
+# FAQAT OBUNA (egasi qoidasi, 27.11.2026): claude -p doim egasining Claude obunasi bilan ishlaydi —
+# Railway'da CLAUDE_CODE_OAUTH_TOKEN (Mac'da `claude setup-token`), Mac'da claude.ai login.
+# Quyidagilar muhitda bo'lsa CLI obuna tokenidan USTUN qo'yadi (API-billing, proxy yoki bulut
+# provayder) yoki uni umuman o'qimaydi — subprocess muhitidan olib tashlanadi. API kalit endi
+# zaxira rejim EMAS: u yerda tursa ham ishlatilmaydi (holatni /claude ko'rsatadi).
+# Prefiks qoidasi (ro'yxat emas): CLI yangi provayder/kalit o'zgaruvchilarini qo'shib boradi —
+# masalan 2.1.287 da CLAUDE_CODE_USE_ANTHROPIC_AWS / _GOOGLE_CLOUD / _MANTLE, ANTHROPIC_UNIX_SOCKET.
+API_BILLING_PREFIKS = (
+    "ANTHROPIC_",                   # API kalit, auth token, base URL, unix socket, profil, provayder…
+    "CLAUDE_CODE_USE_",             # Bedrock, Vertex, Foundry, Anthropic AWS/GCP, Mantle, gateway…
+    "CLAUDE_CODE_API_KEY_",         # kalit fayl deskriptori
+    "CLAUDE_CODE_HOST_",            # host boshqaradigan provayder
+    "CLAUDE_CODE_GATEWAY_",
+    "CLAUDE_CODE_RETRY_WATCHDOG",   # limitda reset'gacha kutib qoladi — bot osilib qolardi
+)
+API_BILLING_ENV = (                 # aniq nomlar (prefiksga tushmaganlari)
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "CLAUDE_CODE_SIMPLE",           # = --bare: OAuth tokenni o'qimaydi
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+)
+OBUNA_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)    # yagona ruxsat etilgan yo'l (Railway); Mac — login
+
+
+def api_billing_mi(nom):
+    """Bu muhit o'zgaruvchisi claude'ni obunadan boshqa yo'lga (API/proxy/bulut) o'tkaza oladimi."""
+    nom = str(nom or "")
+    if nom in OBUNA_ENV:
+        return False
+    if nom in API_BILLING_ENV or nom.startswith(API_BILLING_PREFIKS):
+        return True
+    return nom.startswith("CLAUDE_CODE_SKIP_") and nom.endswith("_AUTH")
+
+
+def claude_env(base=None):
+    """claude subprocess muhiti: os.environ minus obunadan boshqa yo'llar (api_billing_mi)."""
+    env = dict(os.environ if base is None else base)
+    for k in [k for k in env if api_billing_mi(k)]:
+        env.pop(k, None)
+    return env
+
+
+def obuna_holati(base=None):
+    """Faqat NOMLAR (qiymat hech qachon): {"token": bool, "bloklangan": [...]}. Tarmoqsiz."""
+    env = os.environ if base is None else base
+    return {"token": bool(str(env.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()),
+            "bloklangan": sorted(k for k in env if api_billing_mi(k) and str(env.get(k) or "").strip())}
+
+
+def obuna_qisqa(base=None):
+    """Boot log uchun bitta qator."""
+    h = obuna_holati(base)
+    t = "obuna tokeni bor" if h["token"] else "token yo'q (Mac login yoki sozlanmagan)"
+    if h["bloklangan"]:
+        t += f"; bloklandi (claude -p ga berilmaydi): {', '.join(h['bloklangan'])}"
+    return f"claude auth: {t}"
+
+
+def auth_usuli(timeout=15):
+    """`claude auth status` → authMethod (oauth_token | claude.ai | api_key | none …) yoki "".
+    Inference emas (limit sarflamaydi). Muhit — claude_env(): run_claude bilan bir xil. Email va
+    org kabi maydonlar qaytarilmaydi va log qilinmaydi."""
+    try:
+        r = subprocess.run([find_claude(), "auth", "status"], capture_output=True, text=True,
+                           timeout=timeout, env=claude_env())
+        d = json.loads((r.stdout or "").strip() or "{}")
+        return str(d.get("authMethod") or "") if isinstance(d, dict) else ""
+    except Exception:                                # noqa: BLE001 — eski CLI, JSON emas, timeout
+        return ""
+
+
+def obuna_matni():
+    """/claude — Claude qaysi yo'l bilan ishlayotgani (faqat nomlar, qiymatsiz). HTML."""
+    h = obuna_holati()
+    usul = auth_usuli()
+    L = ["🔐 <b>Claude — faqat obuna limiti</b>"]
+    if h["token"]:
+        L.append("• Obuna tokeni (CLAUDE_CODE_OAUTH_TOKEN): bor ✅")
+    else:
+        L.append("• Obuna tokeni yo'q — Mac'da bo'lsa claude.ai login ishlatiladi; Railway'da "
+                 "bo'lsa Claude ishlamaydi (Mac'da <code>claude setup-token</code> → Railway "
+                 "Variables)")
+    if h["bloklangan"]:
+        L.append("• ⚠️ Muhitda bor, lekin Claude'ga BERILMAYDI: "
+                 + ", ".join(f"<code>{k}</code>" for k in h["bloklangan"])
+                 + " — Railway Variables'dan o'chirib qo'ysangiz bo'ladi")
+    else:
+        L.append("• API kalit va boshqa to'lov yo'llari: yo'q ✅")
+    if usul:
+        belgi = {"oauth_token": "obuna tokeni ✅", "claude.ai": "claude.ai obunasi ✅"}.get(
+            usul, f"⚠️ {usul}")
+        L.append(f"• CLI tasdig'i (<code>claude auth status</code>): {belgi}")
+    L.append("• Limit tugasa Claude kutadi, pul yechilmaydi — buning uchun claude.ai → Settings → "
+             "Usage'da «usage credits» o'chiq bo'lsin.")
+    return "\n".join(L)
+
+
+_LIMIT_RE = re.compile(r"(?i)(hit your [^\n.]{0,40}limit|reached your [^\n.]{0,40}limit|"
+                       r"out of usage|usage limit)")
+_RESET_RE = re.compile(r"(?i)resets?\s+([^\n·|]{1,40})")
+
+
+def limit_matni(err):
+    """claude -p xato matnida obuna limiti bo'lsa — egaga qisqa izoh (reset vaqti bilan)."""
+    s = str(err or "")
+    if not _LIMIT_RE.search(s):
+        return None
+    m = _RESET_RE.search(s)
+    return "Claude obuna limiti tugagan" + (f" (tiklanadi: {m.group(1).strip()})" if m else "")
+
+
 _CLI_YORDAM = {}
 
 
@@ -222,7 +332,8 @@ def _cli_qollaydi(flag):
     mumkin)."""
     if "txt" not in _CLI_YORDAM:
         try:
-            r = subprocess.run([find_claude(), "--help"], capture_output=True, text=True, timeout=20)
+            r = subprocess.run([find_claude(), "--help"], capture_output=True, text=True, timeout=20,
+                               env=claude_env())
             _CLI_YORDAM["txt"] = (r.stdout or "") + (r.stderr or "")
         except Exception:                            # noqa: BLE001
             _CLI_YORDAM["txt"] = ""
@@ -261,6 +372,10 @@ def run_claude(prompt, effort=None, allowed_tools=None, timeout=None, ish_papka=
     # Prompt (sheet qatorlari, maxfiy tab ham) ~/.claude/projects transkriptiga yozilmasin
     if _cli_qollaydi("--no-session-persistence"):
         cmd += ["--no-session-persistence"]
+    # Foydalanuvchi sozlamalari (~/.claude/settings.json: apiKeyHelper, env, hook'lar) yuklanmasin —
+    # faqat bo'sh cwd'dagi «project» (ya'ni hech narsa): obuna yo'li sozlamadan o'zgarmaydi
+    if _cli_qollaydi("--setting-sources"):
+        cmd += ["--setting-sources", "project"]
     taqiq = [t for t in CLAUDE_TOOLS if t not in (allowed_tools or ())]
     if _cli_qollaydi("--tools"):
         # yangi CLI'da bu nomli tool yo'q — «matches no known tool» ogohlantirishi stderr'ni
@@ -272,7 +387,7 @@ def run_claude(prompt, effort=None, allowed_tools=None, timeout=None, ish_papka=
             cmd, input=prompt, capture_output=True, text=True,
             timeout=timeout if timeout is not None else CLAUDE_TIMEOUT,
             cwd=ish_papka or bosh,
-
+            env=claude_env(),               # faqat obuna: API kalit va h.k. CLI'ga berilmaydi
         )
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError(f"claude -p xato (kod {r.returncode}): {claude_diag(r)}")

@@ -131,6 +131,12 @@ HELP = (                                  # «{BOT}» — help_matni() botning T
     "/kunlik — holat va sozlamalar · /ertalab · /kechqurun — hozir yozish · /dam — bugun "
     "so'ramaslik · /boshliq @username Ism — qabul qiluvchi · /kalit — kalit so'zlar (ismlar, "
     "atamalar, loyihalar)\n\n"
+    "📌 **Vazifa navbati:** keyinroq qilishingiz kerak bo'lgan ishlar va savollarni tashlang — "
+    "eslab qolaman va ertalabki reja so'rovi bilan har birini «buni ham bugun qilasizmi?» deb "
+    "so'rayman: ✅ Ha — bugungi rejaga (boshliqqa ketadigan jadvalga), ⏳ Keyinroq — keyingi "
+    "kunlarda yana. Kechki hisobotda bajarilmagani navbatga qaytadi.\n"
+    "/vazifa <matn> — qo'shish (yoki /vazifa yuborib, keyin ovoz/matn; matnli yoki ovozli "
+    "xabarga /vazifa bilan reply ham bo'ladi) · /vazifalar — navbat\n\n"
     "📊 **Sheets Q&A:** oddiy tilda savol yozing — PM KPI va SMM sheet'larining joriy holati "
     "asosida javob beraman. Suhbatni eslab qolaman: \"nega?\", \"o'shani "
     "batafsilroq\" kabi davom savollari ishlaydi. Raqamli-jadvalli javoblar "
@@ -160,6 +166,7 @@ HELP = (                                  # «{BOT}» — help_matni() botning T
     "/miya — ikkinchi miyadan kun xulosasi: reja/hisobot, 09:00, target, Claude ishlari "
     "(/miya kecha · /miya 24.11)\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
+    "/claude — Claude faqat obuna limiti orqali ishlayotganini tekshirish\n"
     "/help — shu yordam\n\n"
     "«/y_» bilan boshlanadigan buyruqlar va 🔖 belgili kartalar — Abba yordamchi (shaxsiy "
     "Telegram agent) niki: /y_yordam"
@@ -2117,8 +2124,8 @@ def handle_with_watchdog(upd, timeout=None):
 
 
 def handle_callback(cq):
-    """Inline tugma bosilishi (hozircha faqat kunlik reja/hisobot: «wow:…»). XAVFSIZLIK: faqat
-    egasining chatidagi xabar tugmasi va egasining o'zi — aks holda jim (log)."""
+    """Inline tugma bosilishi: kunlik reja/hisobot («wow:…») va vazifa navbati («vz:…»).
+    XAVFSIZLIK: faqat egasining chatidagi xabar tugmasi va egasining o'zi — aks holda jim (log)."""
     chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
     sender = str((cq.get("from") or {}).get("id") or "")
     if str(chat) != str(CHAT_ID) or sender not in owner_ids():
@@ -2129,11 +2136,16 @@ def handle_callback(cq):
             pass
         return "cb-ignored"
     try:
-        import wow_kunlik
+        if str(cq.get("data") or "").startswith("vz:"):
+            import vazifa
 
-        r = wow_kunlik.callback(cq)
+            r = vazifa.callback(cq)
+        else:
+            import wow_kunlik
+
+            r = wow_kunlik.callback(cq)
     except Exception as e:
-        log(f"XATO wow_kunlik.callback: {type(e).__name__}: {str(e)[:200]}")
+        log(f"XATO tugma ({str(cq.get('data'))[:12]!r}): {type(e).__name__}: {str(e)[:200]}")
         r = None
     if r is None:
         try:
@@ -2163,6 +2175,27 @@ def _wow_kunlik(msg):
         do_question(matn)
         return "wow-savol"
     return f"wow-{natija}"
+
+
+def _vazifa_kutish(msg):
+    """«/vazifa» dan keyingi xabar (matn/ovoz) — vazifa navbatiga. Kunlik reja ushlashidan
+    OLDIN: aks holda ertalab/kechqurun oynasida ish rejaga tushib ketardi. None — bizniki emas.
+    Xabar olingandan keyingi xato — egaga aytiladi, xabar boshqa oqimga sirpanib ketmaydi."""
+    try:
+        import vazifa
+
+        if not vazifa.ushlaydimi(msg):
+            return None
+    except Exception as e:
+        log(f"XATO vazifa navbati (tekshiruv): {type(e).__name__}: {str(e)[:200]}")
+        return None
+    try:
+        return vazifa.xabarni_ishlash(msg)
+    except Exception as e:
+        log(f"XATO vazifa navbati: {type(e).__name__}: {str(e)[:200]}")
+        send_retry(f"⚠️ Navbatga yozib bo'lmadi ({type(e).__name__}) — qayta yuboring yoki "
+                   "/vazifa matn bilan yozing.", attempts=2)
+        return "vazifa-xato"
 
 
 def handle_update(upd):
@@ -2197,6 +2230,10 @@ def handle_update(upd):
     if yordamchi_xabari(msg):
         log("yordamchi xabari — o'tkazildi (javobni yordamchi beradi)")
         return "yordamchi"
+    r = _vazifa_kutish(msg)
+    if r:
+        log(f"vazifa navbati: {r}")
+        return r
     r = _wow_kunlik(msg)
     if r:
         log(f"WOW kunlik: {r}")
@@ -2226,6 +2263,12 @@ def handle_update(upd):
             chat_log.append_cmd(text.split()[0])
         except Exception:
             pass
+        try:                                # «/vazifa» kutishi boshqa buyruqdan keyingi javobni olmasin
+            import vazifa
+
+            vazifa.boshqa_buyruq(text)
+        except Exception as e:
+            log(f"XATO vazifa kutishi: {type(e).__name__}: {str(e)[:120]}")
     if low.startswith("/help") or low.startswith("/start"):
         send_retry(help_matni(), attempts=2)
         return "help"
@@ -2242,6 +2285,24 @@ def handle_update(upd):
             log(f"XATO /miya: {type(e).__name__}: {str(e)[:200]}")
             send_retry(f"⚠️ /miya xatosi: {type(e).__name__}", attempts=2)
         return "miya"
+    if (low.split() or [""])[0].split("@")[0] == "/claude":   # faqat obuna — holat (nomlar, qiymatsiz)
+        try:
+            send_retry(analyze.obuna_matni(), attempts=2, is_html=True)
+        except Exception as e:
+            log(f"XATO /claude: {type(e).__name__}: {str(e)[:200]}")
+            send_retry(f"⚠️ /claude xatosi: {type(e).__name__}", attempts=2)
+        return "claude-holat"
+    if text.startswith("/"):                # vazifa navbati: /vazifa /vazifalar (aniq so'z bo'yicha)
+        try:
+            import vazifa
+
+            r = vazifa.buyruq(text, msg)
+        except Exception as e:
+            log(f"XATO vazifa.buyruq: {type(e).__name__}: {str(e)[:200]}")
+            send_retry(f"⚠️ Vazifa buyrug'i xatosi: {type(e).__name__}", attempts=2)
+            return "vazifa-xato"
+        if r:
+            return r
     if text.startswith("/"):                # kunlik reja: /kunlik /ertalab /kechqurun /dam /boshliq /kalit
         try:
             import wow_kunlik

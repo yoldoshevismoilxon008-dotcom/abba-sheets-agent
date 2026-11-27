@@ -93,8 +93,8 @@ if [ "$MODE" != "--code" ]; then
   rsync -az --ignore-existing --exclude 'logs/' --exclude 'qa-pdf/' \
     "$LOCAL_DIR/data/" "$SSH_DEST:$APP_DIR/data/"
   rsync -az "$LOCAL_DIR/credentials/" "$SSH_DEST:$APP_DIR/credentials/"
-  # .env.server bo'lsa u yuboriladi (masalan ANTHROPIC_API_KEY faqat serverda);
-  # aks holda Mac .env (CLAUDE_CODE_OAUTH_TOKEN bilan) ishlatiladi
+  # .env.server bo'lsa u yuboriladi; aks holda Mac .env (CLAUDE_CODE_OAUTH_TOKEN bilan).
+  # ANTHROPIC_API_KEY 27.11.2026 dan ishlatilmaydi (faqat obuna — analyze.claude_env)
   if [ -f "$LOCAL_DIR/.env.server" ]; then
     rsync -az "$LOCAL_DIR/.env.server" "$SSH_DEST:$APP_DIR/.env"
     echo "  .env.server → server .env"
@@ -131,8 +131,8 @@ sudo -u $APP_USER bash -c '
   echo "  venv + claude CLI OK (\$(claude --version 2>/dev/null | head -1))"
 '
 # auth borligini tekshirish (claude uchun)
-if ! grep -qE '^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=' $APP_DIR/.env; then
-  echo "  ⚠️ OGOHLANTIRISH: .env'da CLAUDE_CODE_OAUTH_TOKEN ham ANTHROPIC_API_KEY ham yo'q —"
+if ! grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=' $APP_DIR/.env; then
+  echo "  ⚠️ OGOHLANTIRISH: .env'da CLAUDE_CODE_OAUTH_TOKEN yo'q (API kalit ishlatilmaydi) —"
   echo "     Mac'da 'claude setup-token' qilib tokenni .env'ga qo'shing, keyin qayta deploy."
 fi
 REMOTE

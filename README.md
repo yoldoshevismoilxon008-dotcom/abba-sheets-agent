@@ -278,6 +278,65 @@ Holat — `DATA/wow_kunlik/<sana>.json`, sozlama — `DATA/wow_kunlik/sozlama.js
 Repo public: qabul qiluvchi kontakti kodda emas, faqat `/boshliq` bilan volume'ga yoziladi.
 Yangi env shart emas (userbot — mavjud `TG_SESSION_STRING`, `TG_API_ID`, `TG_API_HASH`).
 
+### 📌 Vazifa navbati (`vazifa.py`)
+
+Egasining «keyin qilaman» ishlari va savollari. Botga tashlanadi, eslab qolinadi, ertalabki reja
+so'rovi bilan har biri so'raladi.
+
+1. **Qo'shish:** `/vazifa <matn>` · `/vazifa` yuborib, keyingi matn yoki ovoz (10 daqiqa;
+   kunlik reja oynasida ham navbatga tushadi; boshqa buyruq yoki yangi kunlik so'rov kutishni
+   bekor qiladi; kunlik so'rov/preview'ga aniq reply — kunlik oqimniki) · xabarga `/vazifa`
+   bilan reply: matn, caption, «🎤 Eshitdim: «…»», ovozli xabar (matnga o'giriladi) yoki
+   belgilangan iqtibos. Bitta xabardagi bir nechta ishni `claude -p` (`prompts/vazifa-ajrat.md`,
+   effort low) alohida bandlarga ajratadi va nomlarni «Smm main» ro'yxati hamda egasining lug'ati
+   bo'yicha tuzatadi (noaniq nom bo'lsa — ℹ️ izoh). Claude ishlamasa (yoki obuna limiti tugasa) —
+   qatorlar bo'yicha oddiy bo'lish, ⚠️ bilan. Har qo'shishda «↩️ Bekor qilish» tugmasi.
+   Restart'da xabar qayta ishlansa — ikki marta qo'shilmaydi va boshqa oqimga sirpanmaydi.
+2. **So'rash:** ertalabki reja so'rovi yuborilgach (09:00 yoki birinchi muvaffaqiyatli so'rov,
+   `/ertalab`, boot catch-up) — kuniga bir marta, ko'pi bilan 5 ta ish. Har biri alohida xabar:
+   «Buni ham bugun qilasizmi?» **✅ Ha / ⏳ Keyinroq**. Eng uzoq so'ralmaganlar birinchi; ish
+   xabari yetib borgandagina «so'raldi» hisoblanadi.
+3. **✅ Ha** — ish bugungi ertalabki rejaga qo'shiladi va reja odatdagidek boshliqqa ketadi:
+   - qoralama ochiq bo'lsa — darhol qator bo'lib, yangi preview bilan;
+   - reja hali yozilmagan bo'lsa — egasi rejasini yozganda, xabardan reja chiqsa, jadval oxiriga
+     («ok», «hozir yozaman» kabi xabar faqat navbat ishidan iborat qoralama ochmaydi);
+   - reja yuborilgan bo'lsa — faqat «🔁 Rejaga qo'shib qayta yuborish» tugmasi bilan
+     («yangilangan» qoralama; ish rejada bo'lsa tugma chiqmaydi; kechki so'rov boshlangan bo'lsa
+     reja qayta ochilmaydi — ish kechki hisobotga qo'shiladi);
+   - dam kuni, o'tkazilgan ertalab yoki 30 qatorli reja — navbatda qoladi.
+4. **⏳ Keyinroq** — navbatda qoladi, keyingi kunlarda yana so'raladi.
+5. **Kechqurun:** navbatdan bugunga olingan, lekin rejada yo'q ishlar kechki so'rovda ko'rsatiladi
+   va kechki jadvalga (va «✅ Rejadagi hammasi bajarildi» ga) qo'shiladi. Hisobot boshliqqa
+   yuborilgach: «bajarildi» bo'lgani yopiladi, qolgani navbatga qaytadi. `/kechqurun qayta` bilan
+   tuzatilgan yoki ertasi kuni kech yuborilgan hisobot ham qayta solishtiriladi (olingan kuni
+   bo'yicha; boot'da ham — uzilish bo'lsa). Hisobot bo'lmagan kun — ertalab navbatga qaytadi.
+6. **Moslash qat'iy** (`wow_kunlik.matn_oxshash`): loyiha prefiksi («X:»), raqamlar va oy nomlari
+   teng bo'lishi shart, qism/kengaytma — boshqa ish. Shubhada ish «bajarildi» bo'lmaydi.
+7. `/vazifalar` — ro'yxat (sahifalab): ✅ bajarildi · 🗑 o'chirish · ❓ hozir so'rash. `/kunlik` da
+   soni.
+
+**Avto-yuborish himoyasi** (`wow_kunlik`, 27.11): preview egaga yetganda jadval izi (`korildi`)
+saqlanadi. Avto-yuborish faqat jadval shu izga teng bo'lsa (egasi oxirgi o'zgarishni ko'rgan
+bo'lsa) va jimlik lock ostida qayta tekshirilganda ham `AVTO_DAQ` bo'lsa ketadi. Aks holda —
+avval yangi preview, sanoq qaytadan.
+
+Holat — `DATA/wow_kunlik/vazifalar.json` (volume, atomik yozuv; buzilsa chetga olinadi, yangi
+navbat ogohlantirish bilan darhol yoziladi va keyingi javobda egaga aytiladi; eski tugmalar
+yangi ishlarga tegmaydi). Tugmalar — `vz:<amal>:<id>[:<sahifa>]`. Ish matnlari repo'da yo'q;
+chat arxiviga (`chat_log`) bir qatordan tushadi — ikkinchi miyaga ham yetadi.
+
+### 🔐 Claude — faqat obuna
+
+`analyze.run_claude` `claude -p` ni `analyze.claude_env()` bilan ishga tushiradi: obunadan
+boshqa yo'lga o'tkaza oladigan o'zgaruvchilar subprocess'ga berilmaydi (`analyze.api_billing_mi`:
+barcha `ANTHROPIC_*`, `CLAUDE_CODE_USE_*`, `CLAUDE_CODE_API_KEY_*`, `CLAUDE_CODE_HOST_*`,
+`CLAUDE_CODE_SKIP_*_AUTH`, `AWS_BEARER_TOKEN_BEDROCK`, `CLAUDE_CODE_SIMPLE` va h.k.; faqat
+`CLAUDE_CODE_OAUTH_TOKEN` qoladi). CLI qo'llasa `--setting-sources project` — foydalanuvchi
+sozlamalaridagi `apiKeyHelper`/env ham yuklanmaydi. Railway'da `CLAUDE_CODE_OAUTH_TOKEN`, Mac'da
+claude.ai login. `/claude` — holat (faqat nomlar; `claude auth status` tasdig'i bilan), boot
+log'da `claude auth: …` qatori. Limit tugasa pul yechilmasligi uchun claude.ai → Settings →
+Usage'da «usage credits» o'chiq bo'lishi kerak.
+
 ## 🖥 VPS'ga ko'chirish (deploy/)
 
 Tizim server-portable: `deploy/deploy.sh root@IP` — to'liq o'rnatish (paketlar,
@@ -286,4 +345,4 @@ chromium, `abba` user, venv, claude CLI, systemd unit'lar, ufw) + 5 sinov
 avtomatik yoqilmaydi — almashtirish `--enable` bilan (Mac launchd'ni o'zi
 o'chiradi), qaytish `--rollback`. Hisobotlar vault'ga Mac'dagi soatlik
 `deploy/mac-sync/` job orqali tushadi. To'liq checklist va claude auth
-(setup-token / API-key) tafsilotlari: **`deploy/MIGRATION.md`**.
+(setup-token; API-key rejimi 27.11.2026 dan o'chirilgan) tafsilotlari: **`deploy/MIGRATION.md`**.

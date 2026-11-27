@@ -433,6 +433,14 @@ def wow_jobs(sched):
 
 def main():
     log(f"boshlandi (DATA_DIR={DATA})")
+    # Faqat obuna: qaysi yo'l bilan ishlayotgani (nomlar, qiymatsiz). API kalit muhitda bo'lsa
+    # ham claude -p ga berilmaydi (analyze.claude_env) — logda ko'rinib tursin.
+    try:
+        import analyze
+
+        log(analyze.obuna_qisqa())
+    except Exception as e:                       # noqa: BLE001
+        log(f"claude auth holati o'qilmadi: {type(e).__name__}: {e}")
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
     boot_secrets()
     boot_brand()

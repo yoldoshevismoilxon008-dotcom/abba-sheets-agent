@@ -16,11 +16,9 @@
 
 - [ ] SSH kalit serverga qo'yilgan (`ssh-copy-id root@SERVER_IP`) — parolsiz kirish
       ham deploy, ham soatlik sync uchun shart (sync `BatchMode=yes` ishlatadi).
-- [ ] **claude auth tanlash** (2-bo'limga qarang):
-      - Asosiy yo'l: Mac'da `claude setup-token` → chiqqan tokenni
-        `.env` ga `CLAUDE_CODE_OAUTH_TOKEN=...` qatori qilib qo'shish.
-      - Yoki API-key yo'li: `cp .env .env.server` qilib FAQAT `.env.server` ga
-        `ANTHROPIC_API_KEY=...` qo'shish (Mac `.env` ga EMAS — pastda sabab).
+- [ ] **claude auth** (2-bo'limga qarang): Mac'da `claude setup-token` → chiqqan tokenni
+      `.env` ga `CLAUDE_CODE_OAUTH_TOKEN=...` qatori qilib qo'shish. API-key yo'li
+      27.11.2026 dan YO'Q (egasi qoidasi: faqat obuna limiti).
 - [ ] `git status` toza, oxirgi kod commit qilingan.
 
 ## 2. claude -p auth: rejimlar va cheklovlar
@@ -40,13 +38,15 @@
 - Token eskirsa (1 yil): Mac'da qayta `claude setup-token` → `.env` yangilash →
   `deploy.sh ... --code` emas, to'liq deploy (.env ni full rejim ko'chiradi).
 
-**Fallback rejim — API key (`ANTHROPIC_API_KEY`):**
-- `.env.server` faylga yoziladi; deploy.sh `.env.server` bo'lsa uni server `.env`
-  qilib yuboradi. **DIQQAT:** `ANTHROPIC_API_KEY` har doim OAuth tokendan USTUN
-  (rasmiy precedence) — shuning uchun uni Mac `.env` ga qo'yish MUMKIN EMAS,
-  aks holda Mac'dagi barcha claude ishlar ham API-billing'ga o'tib ketadi.
-- Kod o'zgarishi kerak emas: `claude` CLI ikkala env var'ni ham o'zi taniydi,
-  `run_claude()` subprocess muhitga meros beradi.
+**API key rejimi — 27.11.2026 dan O'CHIRILGAN (faqat obuna):**
+- `ANTHROPIC_API_KEY` CLI'da har doim OAuth tokendan USTUN (rasmiy precedence; `-p` rejimida
+  so'ramasdan ishlatiladi) — muhitga tasodifan tushsa, hamma `claude -p` jim API-billing'ga
+  o'tardi. Endi `run_claude()` subprocess'ga `analyze.claude_env()` beradi: obunadan boshqa
+  yo'lga o'tkaza oladigan o'zgaruvchilar (`analyze.api_billing_mi`: barcha `ANTHROPIC_*`,
+  `CLAUDE_CODE_USE_*` va h.k.; faqat `CLAUDE_CODE_OAUTH_TOKEN` qoladi) olib tashlanadi. Ular
+  `.env`, `.env.server` yoki Railway Variables'da tursa ham ishlatilmaydi.
+- Tekshirish: botda `/claude` (faqat nomlar) va boot log'dagi `claude auth: …` qatori.
+- Limit tugasa pul yechilmasligi uchun claude.ai → Settings → Usage'da «usage credits» o'chiq.
 
 ## 3. O'rnatish (VPS IP kelgach)
 
@@ -119,7 +119,8 @@ sudo -u abba tail -f /home/abba/abba-sheets-agent/data/logs/bot-$(date +%F).log
 ## Ochiq savollar / keyin
 
 - Max plan headless server avtomatlashtirish siyosati rasmiy hujjatda aniq
-  yozilmagan (texnik jihatdan setup-token aynan shu uchun) — muammo chiqsa
-  API-key rejimiga o'tish 5 daqiqa (`.env.server` + qayta deploy).
+  yozilmagan (texnik jihatdan setup-token aynan shu uchun). API-key rejimi
+  27.11.2026 dan kodda bloklangan (egasi: faqat obuna) — qaytarish kod o'zgarishini
+  talab qiladi (`analyze.api_billing_mi`).
 - Server logs retention (data/logs cheksiz o'sadi) — hozircha muammo emas,
   keyin logrotate qo'shsa bo'ladi.

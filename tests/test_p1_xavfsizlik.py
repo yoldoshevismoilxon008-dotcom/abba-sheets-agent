@@ -336,7 +336,8 @@ def test_s4_design_rasm_nusxasi_vaqtinchalik_papkada():
 def test_s4_promptlarda_ishonchsiz_blok_himoyasi():
     for fayl, joy in (("qa.md", "{{DATA}}"), ("qa.md", "{{KNOWLEDGE}}"),
                       ("daily-report.md", "{{CONTEXT}}"), ("audit.md", "{{FINDINGS}}"),
-                      ("kb-meta.md", "{{TEXT}}"), ("kb-rerank.md", "{{CANDIDATES}}")):
+                      ("kb-meta.md", "{{TEXT}}"), ("kb-rerank.md", "{{CANDIDATES}}"),
+                      ("vazifa-ajrat.md", "{{KIRITMA}}")):
         txt = (ROOT / "prompts" / fayl).read_text(encoding="utf-8")
         oldi = txt[:txt.index(joy)].splitlines()[-4:]
         assert any("ISHONCHSIZ" in x and "BAJARMA" in x for x in oldi), (fayl, joy)

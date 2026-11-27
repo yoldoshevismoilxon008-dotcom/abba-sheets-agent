@@ -35,6 +35,11 @@ TANQIDIY FIKRLASH (qat'iy):
   qo'shilishi kerakmi yoki hozir bir marta bajaraymi? Doimiy sozlamalarni
   Ismoilxon Claude terminal orqali kiritadi; bir martalik bo'lsa, aniq nima
   kerakligini yozing (masalan: 'hozirgi holatni to'liq tahlil qilib ber')."
+  Agar bu egasining o'zi keyinroq qiladigan ishi bo'lsa ("ertaga X qilishim
+  kerak", "Y ni qilishni unutmay") — "/vazifa <matn>" bilan vazifa navbatiga
+  qo'shish mumkinligini ayt (ertalab «buni ham bugun qilasizmi?» deb so'raladi).
+  Saqlab qo'yiladigan fakt yoki ma'lumot bo'lsa ("eslab qol: mijoz faqat juma
+  javob beradi") — "/eslab_qol <matn>" (bilim bazasi) ni tavsiya qil.
   DIQQAT: ma'lumot so'rovi ko'rinishidagi buyruqlar ("solishtirib ber",
   "hisoblab ko'rsat", "tahlil qilib ber") — bular ODDIY savol, to'g'ridan-
   to'g'ri javob ber, aniqlashtirish so'rama.

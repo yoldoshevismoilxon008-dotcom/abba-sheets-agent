@@ -80,8 +80,8 @@ keyingi 10 daqiqada yoki Telegram'da `/vault_sync` bilan darhol ishga tushadi.
   ≤6000 belgi + qisqa prompt. **14 fayl** (≤1500 belgi) — Claude'siz (light meta), $0.
 - Railway Max-obuna OAuth (`CLAUDE_CODE_OAUTH_TOKEN`) → **API $ xarajat yo'q**,
   obuna usage'i. `content_hash` tufayli **bir martalik** — keyin faqat o'zgargan fayl.
-- (Agar server'da `ANTHROPIC_API_KEY` bo'lsa: bir martalik ~50–65K input / ~3K
-  output token, low effort.)
+- Hajm: bir martalik ~50–65K input / ~3K output token, low effort — obuna limitidan.
+  `ANTHROPIC_API_KEY` 27.11.2026 dan ishlatilmaydi (`analyze.claude_env`: faqat obuna).
 - **Steady-state:** har 10daq faqat o'zgargan fayl(lar) — odatda kuniga 1–3 (kunlik
   yozuv, holat.md) → deyarli hech narsa.
 
