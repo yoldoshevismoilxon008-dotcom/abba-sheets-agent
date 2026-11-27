@@ -4,6 +4,9 @@
 FAQAT yozadi (best-effort append). kb.ingest HECH QACHON chaqirmaydi — chat KB'ga faqat
 vault_sync orqali (GitHub round-trip'dan keyin) tushadi; aks holda bir xil matn IKKI MARTA
 tushardi. Yozish xatosi javobni HECH QACHON yiqitmaydi (try/except, faqat log).
+
+Arxiv vault'ga (GitHub) va bilim bazasiga ketadi — telefon raqamlari yozishdan OLDIN va
+kesishdan OLDIN yashiriladi (maxfiy.telefon_yashir). Egasiga ketgan javob o'zgarmaydi.
 """
 import os
 from datetime import datetime
@@ -15,7 +18,7 @@ CHAT_DIR = DATA / "chat"
 CHAT_MAX = 8000            # bitta yozuv (savol/javob) shu belgidan kesiladi — kunlik fayl shishmasin
 
 
-from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+from maxfiy import redact, telefon_yashir  # noqa: E402  (log'da sir yo'q; arxivda telefon yo'q)
 
 
 def log(msg):
@@ -46,8 +49,9 @@ def append_qa(question, answer, now=None):
     try:
         now = now or datetime.now()
         t = now.strftime("%H:%M")
-        q = _clip(question)                     # uzun yozuv faylni shishirtirmasin (~8000)
-        a = _clip(answer)
+        # uzun yozuv faylni shishirtirmasin (~8000); telefon kesishdan OLDIN yashiriladi
+        q = _clip(telefon_yashir(question))
+        a = _clip(telefon_yashir(answer))
         _append(f"## {t} · Savol\n{q}\n\n## {t} · Javob\n{a}\n\n---\n\n", now)
     except Exception as e:
         log(f"append_qa o'tkazildi: {type(e).__name__}: {str(e)[:120]}")
@@ -57,6 +61,6 @@ def append_cmd(label, now=None):
     """Buyruqni BITTA qator bilan yozadi (to'liq chiqishsiz — baza shovqinga to'lmasin)."""
     try:
         now = now or datetime.now()
-        _append(f"- {now.strftime('%H:%M')} · {str(label).strip()}\n", now)
+        _append(f"- {now.strftime('%H:%M')} · {telefon_yashir(str(label).strip())}\n", now)
     except Exception as e:
         log(f"append_cmd o'tkazildi: {type(e).__name__}: {str(e)[:120]}")

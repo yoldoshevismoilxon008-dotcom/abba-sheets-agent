@@ -20,7 +20,7 @@ import send as sendmod       # noqa: E402
 # (aks holda global override boshqa test fayllariga oqadi — izolatsiya buziladi).
 _KB_ORIG = {n: getattr(kb, n)
             for n in ("stats", "list_docs", "search", "archive", "ingest_text", "ingest_file")}
-_VS_ORIG = {n: getattr(vs, n) for n in ("run", "stat")}
+_VS_ORIG = {n: getattr(vs, n) for n in ("run", "stat", "purge_archived")}
 _SEND_TG = sendmod.tg_send
 
 # Telegram HTML parse_mode ruxsat etadigan teglar (boshqa <...> → «Unsupported start tag»)
@@ -147,6 +147,33 @@ def test_vault_stat_paths_in_code():
     e = _run("/vault_stat")[-1]
     assert "<code>ilovalar</code>" in e["text"] and "<code>odam</code>" in e["text"]
     _assert_safe(e)
+
+
+def test_kb_tozala_sinov_va_ijro():
+    """/kb_tozala — sinov (dry_run); «/kb_tozala ha» — o'chirish. Origin <code> ichida."""
+    chaqiruv = []
+
+    def soxta(dry_run=True):
+        chaqiruv.append(dry_run)
+        return {"status": "ok", "dry_run": dry_run, "docs": 3, "chunks": 7, "telefonli": 2,
+                "by_source": {"vault": 2, "chat": 1}, "bytes_oldin": 4096, "bytes_keyin": 2048,
+                "faol_telefonli": ["bilim/namuna.md"]}
+
+    vs.purge_archived = soxta
+    e = _run("/kb_tozala")[-1]
+    assert chaqiruv == [True] and "sinov" in e["text"] and "/kb_tozala ha" in e["text"]
+    assert "<code>bilim/namuna.md</code>" in e["text"]
+    _assert_safe(e)
+    vs.purge_archived = soxta
+    e = _run("/kb_tozala ha")[-1]
+    assert chaqiruv == [True, False] and "tozalandi" in e["text"] and "4 KB → 2 KB" in e["text"]
+    _assert_safe(e)
+
+
+def test_kb_tozala_sinxron_band():
+    vs.purge_archived = lambda dry_run=True: {"status": "busy"}
+    e = _run("/kb_tozala ha")[-1]
+    assert "sinxroni hozir ishlayapti" in e["text"]
 
 
 def test_title_with_special_chars_single_escape():

@@ -8,6 +8,10 @@ supervisor.run_daily() pipeline'dan keyin chaqiradi. Env:
 Klon DATA_DIR/hisobotlar-repo da yashaydi (volume). Idempotent: mavjud va
 o'zgarmagan fayllar push qilinmaydi. Format export_obsidian.py bilan bir xil —
 Mac'dagi vault_pull to'g'ridan-to'g'ri vault'ga ko'chiradi.
+
+Repo'ga yozilgan hisobot vault'ga (GitHub) va WALL-E bilim bazasiga tushadi, shuning
+uchun telefon raqamlari yozishdan OLDIN yashiriladi (maxfiy.telefon_yashir). Snapshot
+o'zi (DATA/snapshots) va egaga ketgan hisobot o'zgarmaydi.
 """
 import os
 import re
@@ -23,7 +27,7 @@ SNAPSHOTS = DATA / "snapshots"
 CLONE = DATA / "hisobotlar-repo"
 
 
-from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+from maxfiy import redact, telefon_yashir  # noqa: E402  (log'da sir yo'q; repo'da telefon yo'q)
 
 
 def log(msg):
@@ -45,6 +49,40 @@ def sh(*cmd, cwd=None, env=None):
     if r.returncode != 0:
         raise RuntimeError(_san(f"{' '.join(cmd[:4])} → {r.stderr.strip()[:250]}"))
     return r.stdout
+
+
+def _hisobotlarni_yoz(out):
+    """SNAPSHOTS/<sana>/report.md → out/<sana>.md, telefon raqamlari yashirilgan holda.
+    Snapshot'i retention'da (30 kun, run.sh) o'chib ketgan eski hisobotlar repo'da
+    boshqa qayta yozilmaydi — ular ham shu yerda joyida maskalanadi (idempotent:
+    telefon yo'q faylga tegilmaydi). Qaytadi: o'zgargan fayllar soni."""
+    changed = 0
+    manbali = set()
+    if SNAPSHOTS.is_dir():
+        for d in sorted(SNAPSHOTS.iterdir()):
+            rep = d / "report.md"
+            if not (d.is_dir() and len(d.name) == 10 and rep.exists()):
+                continue
+            body = telefon_yashir(
+                f"# {d.name} — Sheets kunlik hisobot\n\n{rep.read_text(encoding='utf-8').strip()}\n")
+            dst = out / f"{d.name}.md"
+            manbali.add(dst.name)
+            if not dst.exists() or dst.read_text(encoding="utf-8") != body:
+                dst.write_text(body, encoding="utf-8")
+                changed += 1
+    for dst in sorted(out.glob("*.md")):
+        if dst.name in manbali:
+            continue
+        try:
+            eski = dst.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            log(f"{dst.name} o'qilmadi — telefon tekshirilmadi: {type(e).__name__}")
+            continue
+        yangi = telefon_yashir(eski)
+        if yangi != eski:
+            dst.write_text(yangi, encoding="utf-8")
+            changed += 1
+    return changed
 
 
 def main():
@@ -74,17 +112,7 @@ def main():
 
     out = CLONE / "hisobotlar"
     out.mkdir(exist_ok=True)
-    changed = 0
-    if SNAPSHOTS.is_dir():
-        for d in sorted(SNAPSHOTS.iterdir()):
-            rep = d / "report.md"
-            if not (d.is_dir() and len(d.name) == 10 and rep.exists()):
-                continue
-            body = f"# {d.name} — Sheets kunlik hisobot\n\n{rep.read_text(encoding='utf-8').strip()}\n"
-            dst = out / f"{d.name}.md"
-            if not dst.exists() or dst.read_text(encoding="utf-8") != body:
-                dst.write_text(body, encoding="utf-8")
-                changed += 1
+    changed = _hisobotlarni_yoz(out)
     if not changed:
         log("yangi/o'zgargan hisobot yo'q")
         return 0

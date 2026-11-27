@@ -191,7 +191,9 @@ def kun_matni(vault: Path, kun: str, chat: dict, hisob: dict, ig: dict, target: 
     if hisob["bolimlar"]:
         q.append("## 📊 09:00 Sheets hisoboti\n")
         for sar, birinchi in hisob["bolimlar"][:12]:
-            q.append(f"- **{asos.bir_qator(sar, 80)}**" + (f" — {asos.bir_qator(birinchi, 220)}" if birinchi else ""))
+            # hisobot jadvalidan iqtibos telefonni o'z ichiga olishi mumkin — kesishdan OLDIN redakt
+            q.append(f"- **{asos.bir_qator(asos.redakt(sar), 80)}**"
+                     + (f" — {asos.bir_qator(asos.redakt(birinchi), 220)}" if birinchi else ""))
         q.append("")
 
     if target:

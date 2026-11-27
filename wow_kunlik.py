@@ -842,12 +842,14 @@ def _arxiv(sana, slot, jadval):
     """Obsidian chat arxiviga bitta qator (best-effort) — ikkinchi miyaga ham tushsin."""
     try:
         import chat_log
+        from maxfiy import telefon_yashir
 
         bandlar = "; ".join(
             (f"{HOLAT_BELGI.get(r.get('holat') or '', '')} " if slot == "kechqurun" else "")
             + r["ish"] for r in jadval)
-        chat_log.append_cmd(f"WOW {SLOTLAR[slot]['sarlavha'].lower()} ({sana}) yuborildi: "
-                            f"{bandlar}"[:1500])
+        # telefon kesishdan OLDIN yashiriladi: 1500-belgi chegarasida raqam yarmi qolmasin
+        chat_log.append_cmd(telefon_yashir(f"WOW {SLOTLAR[slot]['sarlavha'].lower()} ({sana}) "
+                                           f"yuborildi: {bandlar}")[:1500])
     except Exception:                                   # noqa: BLE001
         pass
 

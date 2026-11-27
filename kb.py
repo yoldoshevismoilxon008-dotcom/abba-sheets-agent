@@ -7,6 +7,8 @@ Ommaviy API:
     ingest_text(text, *, source, origin, ...) -> dict
     ingest_file(path, *, source, origin, caption="") -> dict   # content_key=True
     archive(uid_or_title) -> dict          — /unut (ok|not_found|ambiguous; ommaviy emas)
+    purge_archived(*, origins=None, dry_run=True) -> dict
+                                           — /kb_tozala: arxivdagi vault/chat versiyalarini butunlay o'chirish
     stats() -> dict
     search(query, k=8, *, use_rerank=True, use_expansion=True) -> list[dict]
     context_for(query, budget_chars=12_000, *, use_rerank=True, use_expansion=True) -> str
@@ -57,7 +59,7 @@ def _canon_apos(s):
     return _APOS_RE.sub("'", s or "")
 
 
-from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+from maxfiy import redact, telefon_yashir  # noqa: E402  (log'da sir yo'q; purge — telefon soni)
 
 
 def log(msg):
@@ -744,6 +746,95 @@ def archive(uid_or_title):
         conn.close()
 
 
+# vault fayllarining ko'zgusi — asl matn vault git'ida qoladi, bazadagi eski versiya kerak emas
+PURGE_SOURCES = ("vault", "chat")
+
+
+def _db_bytes():
+    size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    wal = DB_PATH.with_name(DB_PATH.name + "-wal")
+    if wal.exists():
+        size += wal.stat().st_size
+    return size
+
+
+def _telefonli(matnlar):
+    return any(telefon_yashir(m) != m for m in matnlar if m)
+
+
+def purge_archived(*, origins=None, dry_run=True):
+    """Arxivlangan vault/chat versiyalarini bazadan BUTUNLAY o'chiradi: matn, sarlavha,
+    summary va FTS indeksi bilan. forget_old_versions/forget_origin faqat archived=1 qo'yadi —
+    eski matn (masalan keyin vault'da yashirilgan telefon raqami) SQLite faylida qolardi.
+
+    Faqat PURGE_SOURCES. Faol hujjatlar va Telegram'dan yuklanganlar (/unut — «qaytarish
+    mumkin») TEGILMAYDI. origins — faqat shu origin'lar (None — hammasi). dry_run=True —
+    hech narsa o'chirilmaydi, faqat sanaladi. O'chirilgandan keyin FTS 'rebuild' va VACUUM:
+    bo'shagan sahifalarda ham eski matn qolmasin (secure_delete ham yoqiladi).
+
+    Qaytadi: {dry_run, docs, chunks, telefonli, by_source, faol_telefonli, bytes_oldin,
+    bytes_keyin}. Natijada matn yoki raqam YO'Q — faqat sonlar va origin (fayl yo'li).
+    faol_telefonli — telefon raqami hali turgan FAOL vault/chat hujjatlari (tekshiruv uchun)."""
+    init_db()
+    ph = ",".join("?" * len(PURGE_SOURCES))
+    sql = (f"SELECT id, source, title, summary FROM docs "
+           f"WHERE archived=1 AND source IN ({ph})")
+    params = list(PURGE_SOURCES)
+    if origins is not None:
+        origins = [str(o) for o in origins if str(o).strip()]
+        sql += f" AND origin IN ({','.join('?' * len(origins))})" if origins else " AND 0"
+        params += origins
+    natija = {"dry_run": bool(dry_run), "docs": 0, "chunks": 0, "telefonli": 0,
+              "by_source": {}, "faol_telefonli": [], "bytes_oldin": _db_bytes(),
+              "bytes_keyin": None}
+    conn = _connect()
+    try:
+        ids = []
+        for r in conn.execute(sql, params).fetchall():
+            matnlar = [t for (t,) in conn.execute("SELECT text FROM chunks WHERE doc_id=?",
+                                                  (r["id"],))]
+            ids.append(r["id"])
+            natija["chunks"] += len(matnlar)
+            natija["by_source"][r["source"]] = natija["by_source"].get(r["source"], 0) + 1
+            if _telefonli([r["title"], r["summary"], *matnlar]):
+                natija["telefonli"] += 1
+        natija["docs"] = len(ids)
+        if ids and not dry_run:
+            conn.execute("PRAGMA secure_delete=ON")       # o'chgan katak nol bilan yoziladi
+            for i in range(0, len(ids), 500):              # SQLite o'zgaruvchi chegarasi
+                qism = ids[i:i + 500]
+                q = ",".join("?" * len(qism))
+                conn.execute(f"DELETE FROM chunks WHERE doc_id IN ({q})", qism)  # chunks_ad → FTS
+                conn.execute(f"DELETE FROM docs WHERE id IN ({q})", qism)
+            conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+            _log_ingest(conn, "kb", "purge_archived", "purged", natija["chunks"])
+            conn.commit()
+        for r in conn.execute(f"SELECT id, origin, title, summary FROM docs "
+                              f"WHERE archived=0 AND source IN ({ph}) ORDER BY origin",
+                              list(PURGE_SOURCES)).fetchall():
+            matnlar = [t for (t,) in conn.execute("SELECT text FROM chunks WHERE doc_id=?",
+                                                  (r["id"],))]
+            if _telefonli([r["title"], r["summary"], *matnlar]):
+                natija["faol_telefonli"].append(r["origin"])
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    if ids and not dry_run:
+        conn = _connect()
+        try:
+            conn.execute("VACUUM")                          # bo'sh sahifalar fayldan ketadi
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # WAL'dagi eski kadrlar ham
+        finally:
+            conn.close()
+        natija["bytes_keyin"] = _db_bytes()
+    log(f"purge_archived: dry_run={natija['dry_run']} docs={natija['docs']} "
+        f"chunks={natija['chunks']} telefonli={natija['telefonli']} "
+        f"faol_telefonli={len(natija['faol_telefonli'])}")
+    return natija
+
+
 # ======================================================================
 # O'qish — qidiruv
 # ======================================================================
@@ -949,12 +1040,8 @@ def stats():
         last_ingest = {"ts": last[0], "origin": last[1], "status": last[2]} if last else None
     finally:
         conn.close()
-    size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
-    wal = DB_PATH.with_name(DB_PATH.name + "-wal")
-    if wal.exists():
-        size += wal.stat().st_size
     return {
-        "docs": d, "docs_archived": da, "chunks": ch, "bytes_db": size,
+        "docs": d, "docs_archived": da, "chunks": ch, "bytes_db": _db_bytes(),
         "by_source": by_src, "last_ingest": last_ingest,
     }
 

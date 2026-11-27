@@ -180,9 +180,9 @@ _REDAKT = [
                r"SESSION|PRIVATE_KEY|API_HASH)[A-Z0-9_]*\s*=\s*[\"']?[^\s\"'#]{8,}"),
     re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s:@/\"']+:[^\s@/\"']+@"),
 ]
-# Shaxsiy ma'lumot (vault GitHub'ga va WALL-E bilim bazasiga ketadi): telefon, email, karta
-_TELEFON = re.compile(r"(?<!\d)\+?998[\s-]?\(?\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}(?!\d)")
-_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+# Shaxsiy ma'lumot (vault GitHub'ga va WALL-E bilim bazasiga ketadi): telefon, email, karta.
+# Telefon qoidasi pastda, o'z bo'limida (telefon_yashir).
+_EMAIL =re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _KARTA = re.compile(r"(?<!\d)(?:\d{4}[ -]?){3}\d{4}(?!\d)")
 
 
@@ -205,17 +205,103 @@ _KALIT_QIYMAT = re.compile(
 _URL_PAROL = re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@")
 
 
+# ---------------------------------------------------------------- telefon raqamlari
+#
+# Avval faqat +998 bilan boshlangan raqam yashirilardi. 27.11.2026 dagi maxfiylik skani
+# vault'da kalit so'zsiz 9 raqam, (90)000-00-00 va jadval katagidagi raqamni topgan.
+#
+# Qoida WALL-E repo ildizidagi maxfiy.py va TG audit (abba-tg-audit/maxfiylik.py) bilan
+# BIR XIL. U yerda ~490 ming real xabarda o'lchangan: summa, sana, ID va INN raqamlariga
+# tegilmaydi. Bu paket ~/.abba-miya ga alohida nusxalanadi va maxfiy.py ni import qila
+# olmaydi, shuning uchun blok shu yerda ham turibdi. Ikki nusxa bir xilligini
+# tests/test_telefon_yashir.py qo'riqlaydi: birini o'zgartirsangiz, ikkinchisini ham.
+#
+# Ma'lum cheklovlar: so'z bilan aytilgan raqam (ovozli xabar transkripti), harfga
+# yopishgan raqam (username, parol) va kam uchraydigan xorijiy shakllar («+» siz AQSh
+# 3-3-4) yashirilmaydi.
+
+TELEFON_BELGI = "[telefon]"
+
+# Mobil va shahar kodlari (O'zbekiston)
+_KOD = r"(?:20|33|50|55|71|77|78|88|9[0-9])"
+# Ko'zga ko'rinmaydigan ajratuvchilar: NBSP, ingichka va tor bo'shliq, uzilmas tire, qisqa tire
+_KORINMAS = "   ‑–"
+# Ajratuvchi: bo'shliq, -, . va yuqoridagilar
+_A = r"[ \-." + _KORINMAS + "]"
+
+# +998 90 000 00 00 · 998900000000 · +998 (90) 000-00-00 · «+ 998» yoki ikki bo'shliq bilan
+_UZ = re.compile(r"(?<!\d)(?:\+ ?)?998" + _A + r"{0,2}\(?\d{2}\)?" + _A + r"{0,2}\d{3}"
+                 + _A + r"{0,2}\d{2}" + _A + r"{0,2}\d{2}(?!\d)")
+
+# Boshqa davlatlar: «+» va jami 11–13 raqam (+7 916 000 00 00). 10 va kam raqamli
+# «+» sonlar summa o'zgarishi bo'lishi mumkin (+170 000 000), ularga tegilmaydi.
+_XALQARO = re.compile(r"(?<![\w+])\+\d[\d \-()." + _KORINMAS + r"]{9,18}\d(?!\d)")
+
+# Mahalliy, ajratilgan: 90 000 00 00 · (90)000-00-00 · (90) 0000000 · 90 000 0000.
+# Qavssiz koddan keyin ajratuvchi SHART: summalar (90 000 000) 2-3-3 bo'ladi va bu
+# shaklga tushmaydi. Gap oxiridagi nuqta yoki vergul mumkin, o'nlik kasr (3.14) emas.
+_MAHALLIY = re.compile(
+    r"(?<![\d+])(?<!\d[.,])"
+    r"(?:\(" + _KOD + r"\)" + _A + r"{0,2}|" + _KOD + r"\)?" + _A + r"{1,2})"
+    r"\d{3}" + _A + r"{0,2}\d{2}" + _A + r"{0,2}\d{2}(?!\d|[.,]\d)")
+
+# Yopishgan 9 raqam (900000000) — kalit so'zsiz ham. Real xabarlarda bu shakl deyarli
+# har doim telefon. Faqat undan keyin pul birligi kelsa yoki oldin narx/ID/INN/№ so'zi
+# bo'lsa tegilmaydi.
+_YOPISHGAN = re.compile(r"(?<![\w+#№/=@$])(?<!\d[.,])(" + _KOD + r"\d{7})(?!\w|[.,]\d)")
+_PUL_KEYIN = re.compile("[  ]{0,2}" + r"(?:so['ʻ’`‘]?m|sum\b|сум|сўм|ming|минг|тыс|mln|млн"
+                        r"|\$|usd|y\.?e\b|у\.?е\b|uzs)", re.I)
+_PUL_OLDIN = re.compile(r"(?:narx\w*|summa\w*|jami|цен\w*|сумм\w*|итого|price|total)\W{0,3}$",
+                        re.I)
+_ID_OLDIN = re.compile(r"(?:\bid|\binn|\bstir|инн|стир|\bmfo|мфо|№|#|hisob raqam\w*|р/с|x/r"
+                       r"|karta\w*|card\w*)\W{0,3}$", re.I)
+
+# Kalit so'zdan keyingi yopishgan 9 raqam har doim telefon deb olinadi
+# («tel: 900000000 so'm» kabi chalkash holatda ham).
+_KALIT_SOZ = re.compile(
+    r"(?i)((?:tel|telefon|phone|raqam|raqamim|nomer|номер|тел|телефон|📞|☎)\W{0,12})"
+    r"(" + _KOD + r"\d{7})(?!\d)")
+
+
+def _xalqaro(m):
+    raqamlar = sum(ch.isdigit() for ch in m.group(0))
+    return TELEFON_BELGI if 11 <= raqamlar <= 13 else m.group(0)
+
+
+def _yopishgan(m):
+    s = m.string
+    oldin = s[max(0, m.start() - 24):m.start()]
+    if _PUL_KEYIN.match(s, m.end()) or _ID_OLDIN.search(oldin) or _PUL_OLDIN.search(oldin):
+        return m.group(0)
+    return TELEFON_BELGI
+
+
+def telefon_yashir(matn):
+    """Matndagi telefon raqamlarini TELEFON_BELGI bilan almashtiradi; bo'sh matn o'zgarmaydi.
+    Kesishdan (qisqartirishdan) OLDIN chaqiring — aks holda chegarada raqam yarmi qoladi."""
+    if not matn:
+        return matn
+    t = _UZ.sub(TELEFON_BELGI, matn)
+    t = _XALQARO.sub(_xalqaro, t)
+    t = _MAHALLIY.sub(TELEFON_BELGI, t)
+    t = _YOPISHGAN.sub(_yopishgan, t)
+    return _KALIT_SOZ.sub(lambda m: m.group(1) + TELEFON_BELGI, t)
+
+
 def redakt(matn: str) -> str:
-    """Sir ko'rinishidagi qiymatlarni [MAXFIY] bilan almashtiradi (xavfsizlik to'ri:
-    yozuvlarga tool natijalari kirmaydi, lekin so'rov/javob matnida sir bo'lishi mumkin)."""
+    """Sir ko'rinishidagi qiymatlarni [MAXFIY] bilan, telefon, email va karta raqamini
+    [telefon], [email], [karta] bilan almashtiradi (xavfsizlik to'ri: yozuvlarga tool
+    natijalari kirmaydi, lekin so'rov/javob matnida sir bo'lishi mumkin)."""
     if not matn:
         return matn
     t = matn.replace(str(HOME) + "/", "~/")
-    for rx in _REDAKT:
+    for rx in _REDAKT:          # sirlar telefondan OLDIN: bot tokeni «900000000:AA…» bilan boshlanadi
         t = rx.sub(_MAXFIY, t)
     t = _URL_PAROL.sub(lambda m: m.group(1) + _MAXFIY + "@", t)
-    t = _TELEFON.sub("[telefon]", t)
+    # email telefondan OLDIN: «ali998900000000@mail.uz» dagi raqam avval yashirilsa,
+    # email naqshi endi tushmaydi va manzil yarim ochiq qolardi
     t = _EMAIL.sub("[email]", t)
+    t = telefon_yashir(t)
     t = _KARTA.sub(lambda m: "[karta]" if _luhn(m.group(0)) else m.group(0), t)
 
     def _kq(m):

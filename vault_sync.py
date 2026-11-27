@@ -333,5 +333,19 @@ def stat():
     }
 
 
+def purge_archived(dry_run=True):
+    """/kb_tozala — arxivdagi eski vault/chat versiyalarini bazadan butunlay o'chirish
+    (kb.purge_archived). Sinxron bilan bir lock'da: ingest va VACUUM to'qnashmasin, sinxron
+    o'rtasida yarim arxivlangan holat o'chirilmasin. Lock band bo'lsa {"status": "busy"}."""
+    if not _LOCK.acquire(blocking=False):
+        return {"status": "busy"}
+    try:
+        import kb
+
+        return {"status": "ok", **kb.purge_archived(dry_run=dry_run)}
+    finally:
+        _LOCK.release()
+
+
 if __name__ == "__main__":
     print(json.dumps(run(), ensure_ascii=False, indent=2))

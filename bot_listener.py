@@ -155,7 +155,8 @@ HELP = (                                  # «{BOT}» — help_matni() botning T
     "/bilim_stat — statistika · /unut <id> — arxivlash · /eslab_qol <matn> — matn saqlash "
     "(PDF/DOCX/TXT/CSV/XLSX yuborsangiz — avtomatik bazaga tushadi)\n"
     "/vault_sync — Obsidian vault sinxronini hozir ishga tushirish · "
-    "/vault_stat — vault sinxron holati\n"
+    "/vault_stat — vault sinxron holati · "
+    "/kb_tozala — arxivdagi eski versiyalarni bazadan o'chirish (avval sinov, keyin «/kb_tozala ha»)\n"
     "/miya — ikkinchi miyadan kun xulosasi: reja/hisobot, 09:00, target, Claude ishlari "
     "(/miya kecha · /miya 24.11)\n"
     "/yangi — suhbat kontekstini tozalash (yangi mavzu)\n"
@@ -174,6 +175,32 @@ def help_matni():
     except Exception:                       # noqa: BLE001 — yordam matni hech qachon yiqilmasin
         nom = "Bot"
     return HELP.replace("{BOT}", nom)
+
+
+def _kb_tozala_matni(r):
+    """/kb_tozala javobi (HTML). Faqat sonlar va origin (<code> ichida) — matn yoki raqam yo'q."""
+    def kb_(b):
+        return f"{(b or 0) / 1024:.0f} KB"
+
+    manba = ", ".join(f"{k} {v}" for k, v in sorted((r.get("by_source") or {}).items())) or "—"
+    if r.get("dry_run"):
+        L = ["🧹 <b>Bilim bazasi: arxivni tozalash — sinov</b> (hech narsa o'chirilmadi)",
+             f"• Arxivdagi eski versiyalar (vault, chat): {r['docs']} ta hujjat · "
+             f"{r['chunks']} bo'lak ({sendmod.esc(manba)})",
+             f"• Shundan telefon raqamli: {r['telefonli']} ta"]
+    else:
+        L = ["🧹 <b>Bilim bazasi tozalandi</b>",
+             f"• O'chirildi: {r['docs']} ta eski versiya · {r['chunks']} bo'lak "
+             f"({sendmod.esc(manba)}), shundan telefon raqamli {r['telefonli']} ta",
+             f"• Baza hajmi: {kb_(r.get('bytes_oldin'))} → {kb_(r.get('bytes_keyin'))}"]
+    faol = r.get("faol_telefonli") or []
+    L.append(f"• Faol hujjatlarda telefon raqami: {len(faol)} ta"
+             + (": " + ", ".join(sendmod.code(o) for o in faol[:5])
+                + (f" va yana {len(faol) - 5}" if len(faol) > 5 else "") if faol else ""))
+    if r.get("dry_run"):
+        L.append("\nO'chirish: /kb_tozala ha — qaytarib bo'lmaydi, lekin asl matn vault git'ida "
+                 "qoladi. Faol hujjatlar va Telegram'dan yuklanganlar tegilmaydi.")
+    return "\n".join(L)
 
 
 # abba-hisobotlar/yordamchi (shaxsiy Telegram agent) ham SHU botdan xabar yuboradi, lekin botning
@@ -2491,6 +2518,23 @@ def handle_update(upd):
         if not edit_status(mid, m, html=True):
             send_retry(m, attempts=2, is_html=True)
         return "kb-remember"
+    if low.startswith("/kb_tozala"):
+        ijro = text[len("/kb_tozala"):].strip().lower() == "ha"
+        try:
+            import vault_sync
+
+            r = vault_sync.purge_archived(dry_run=not ijro)
+        except Exception as e:
+            log(f"/kb_tozala xato: {e}")
+            send_retry(f"⚠️ Bilim bazasini tozalashda xato: {sendmod.esc(str(e)[:160])}",
+                       attempts=2, is_html=True)
+            return "kb-tozala-err"
+        if r.get("status") == "busy":
+            send_retry("⏳ Vault sinxroni hozir ishlayapti — 1–2 daqiqadan keyin qayta yuboring.",
+                       attempts=2)
+            return "kb-tozala-busy"
+        send_retry(_kb_tozala_matni(r), attempts=2, is_html=True)
+        return "kb-tozala"
     if low.startswith("/vault_stat"):
         try:
             import vault_sync

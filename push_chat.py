@@ -29,7 +29,7 @@ NOTIFY_AFTER = 6            # shuncha KETMA-KET yiqilishdan (~1 soat) keyin egag
 _TOKEN_RE = re.compile(r"x-access-token:[^@]*@")
 
 
-from maxfiy import redact  # noqa: E402  (audit P0-1: log'da token/sir yo'q)
+from maxfiy import redact, telefon_yashir  # noqa: E402  (log'da sir yo'q; repo'da telefon yo'q)
 
 
 def log(msg):
@@ -101,17 +101,34 @@ def stat():
 # ---------------------------------------------------------------- push
 
 def _sync_files():
-    """DATA/chat/*.md → clone/chat/ (append-fayllar to'liq nusxa). O'zgargan fayllar soni."""
+    """DATA/chat/*.md → clone/chat/ (append-fayllar to'liq nusxa). Repo vault'ga (GitHub) va
+    bilim bazasiga ketadi — telefon raqamlari yozishdan OLDIN yashiriladi. chat_log yangi
+    yozuvlarni o'zi maskalaydi; bu yerda eski (maskalanmagan) fayllar ham qamraladi, manbasi
+    volume'da qolmagan repo fayllari esa joyida maskalanadi. O'zgargan fayllar soni."""
     out = CLONE / "chat"
     out.mkdir(exist_ok=True)
     changed = 0
+    manbali = set()
     if CHAT_SRC.is_dir():
         for src in sorted(CHAT_SRC.glob("*.md")):
-            body = src.read_text(encoding="utf-8")
+            body = telefon_yashir(src.read_text(encoding="utf-8"))
             dst = out / src.name
+            manbali.add(dst.name)
             if not dst.exists() or dst.read_text(encoding="utf-8") != body:
                 dst.write_text(body, encoding="utf-8")
                 changed += 1
+    for dst in sorted(out.glob("*.md")):
+        if dst.name in manbali:
+            continue
+        try:
+            eski = dst.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            log(f"{dst.name} o'qilmadi — telefon tekshirilmadi: {type(e).__name__}")
+            continue
+        yangi = telefon_yashir(eski)
+        if yangi != eski:
+            dst.write_text(yangi, encoding="utf-8")
+            changed += 1
     return changed
 
 
