@@ -1882,7 +1882,8 @@ def handle_kb_document(path, name, caption):
     if r["status"] == "unchanged":
         m = f"ℹ️ «{sendmod.code(r['title'])}» allaqachon bazada, o'zgarish yo'q."
     else:
-        verb = "yangilandi" if r["status"] == "updated" else "qo'shildi"
+        verb = {"updated": "yangilandi", "restored": "qayta tiklandi"}.get(
+            r["status"], "qo'shildi")
         tags = ", ".join(r.get("tags") or []) or "—"
         lines = [f"✅ «{sendmod.code(r['title'])}» bazaga {verb} — "
                  f"{r['n_chunks']} bo'lak · teglar: {sendmod.esc(tags)}"]
@@ -2570,6 +2571,8 @@ def handle_update(upd):
             return "kb-remember-err"
         if r["status"] == "unchanged":
             m = "ℹ️ Bu allaqachon bazada bor edi."
+        elif r["status"] == "restored":
+            m = f"✅ Qayta tikladim — «{sendmod.code(r['title'])}» (avval unutilgan edi)."
         else:
             tags = ", ".join(r.get("tags") or []) or "—"
             m = (f"✅ Eslab qoldim — «{sendmod.code(r['title'])}» "

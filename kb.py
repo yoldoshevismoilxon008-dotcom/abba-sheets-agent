@@ -538,7 +538,9 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
     ustiga yozilmaydi; ingest_file/eslatma shu rejimda).
     meta_min_chars>0 → shu belgidan KICHIK matnga Claude metadata chaqirilmaydi,
     light meta (fayl nomi + birinchi sarlavha) ishlatiladi (vault narx-nazorati).
-    Qaytadi: {uid, title, n_chunks, status: new|updated|unchanged, tags, summary, warn}"""
+    restored = xuddi shu kontent arxivda edi (A→B→A yoki /unut + qayta yuborish) —
+    qayta faollashtirildi, chunk'lar o'zgarmadi.
+    Qaytadi: {uid, title, n_chunks, status: new|updated|unchanged|restored, tags, summary, warn}"""
     init_db()
     norm = _normalize(text)
     if not norm:
@@ -554,16 +556,26 @@ def ingest_text(text, *, source, origin, title=None, mime="text/plain",
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT id, content_hash, title, tags, summary, n_chunks FROM docs WHERE uid=?",
+            "SELECT id, content_hash, title, tags, summary, n_chunks, archived "
+            "FROM docs WHERE uid=?",
             (uid,),
         ).fetchone()
 
         if row and row["content_hash"] == chash and row["n_chunks"]:
-            _log_ingest(conn, source, origin, "unchanged", row["n_chunks"])
+            # Xuddi shu uid+kontent. Agar hujjat arxivda bo'lsa (vault fayli A→B→A
+            # qaytganda forget_old_versions A'ni arxivlagan; yoki /unut'dan keyin
+            # qayta yuborildi) — uni FAOLLASHTIRAMIZ, aks holda bu kontentning birorta
+            # ham faol nusxasi qolmaydi. Chunk'lar saqlanib turadi (qayta chunk/Claude yo'q).
+            restored = bool(row["archived"])
+            if restored:
+                conn.execute("UPDATE docs SET archived=0, updated_at=? WHERE id=?",
+                             (now, row["id"]))
+            status = "restored" if restored else "unchanged"
+            _log_ingest(conn, source, origin, status, row["n_chunks"])
             conn.commit()
             return {
                 "uid": uid, "title": row["title"], "n_chunks": row["n_chunks"],
-                "status": "unchanged", "tags": json.loads(row["tags"] or "[]"),
+                "status": status, "tags": json.loads(row["tags"] or "[]"),
                 "summary": row["summary"] or "", "warn": "",
             }
 

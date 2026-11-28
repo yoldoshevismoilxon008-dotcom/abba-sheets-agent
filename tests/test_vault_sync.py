@@ -235,6 +235,77 @@ def test_edited_file_keeps_single_active_version():
     assert vs.run()["counts"]["superseded"] == 0
 
 
+def _faol_matnlar(origin):
+    """origin bo'yicha faol hujjatlarning to'liq matni (chunk'lardan) ro'yxati."""
+    conn = kb._connect()
+    try:
+        out = []
+        for d in conn.execute("SELECT id FROM docs WHERE origin=? AND archived=0",
+                              (origin,)).fetchall():
+            rows = conn.execute("SELECT text FROM chunks WHERE doc_id=? ORDER BY ord",
+                                (d["id"],)).fetchall()
+            out.append("\n".join(r["text"] for r in rows))
+        return out
+    finally:
+        conn.close()
+
+
+def _qidir(q):
+    """Qidiruv — so'rovni kengaytirish (Claude) o'rniga fallback ishlasin."""
+    eski = kb._ask_claude
+
+    def _yiqil(prompt, effort="low"):
+        raise RuntimeError("expansion -> fallback")
+    kb._ask_claude = _yiqil
+    try:
+        return kb.search(q, use_rerank=False)
+    finally:
+        kb._ask_claude = eski
+
+
+def test_file_a_b_a_keeps_one_active_doc():
+    """Fayl A → B → A: har bosqichda reconcile. Oxirida aynan BITTA faol hujjat va
+    uning matni A. (Xato: A'ning uid'i bir xil — 'unchanged' arxivdagi A'ni
+    faollashtirmasdi, forget_old_versions esa uni arxivlab qo'yardi → 0 faol.)"""
+    clone = setup()
+    kbignore(clone)
+    rel = "abba-sheets-agent/holat.md"
+    A = "# Holat\n\nA versiya: birinchi fakt ALFA."
+    B = "# Holat\n\nB versiya: ikkinchi fakt BETA."
+
+    write(clone, rel, A)
+    vs.run()
+    assert len(_faol_matnlar(rel)) == 1
+
+    write(clone, rel, B)
+    r = vs.run()
+    assert r["counts"]["superseded"] == 1
+    faol = _faol_matnlar(rel)
+    assert len(faol) == 1 and "BETA" in faol[0]
+
+    write(clone, rel, A)                       # A ga qaytdi
+    r = vs.run()
+    assert r["counts"]["errors"] == 0
+    faol = _faol_matnlar(rel)
+    assert len(faol) == 1, f"faol hujjat soni {len(faol)}, kutilgan 1"
+    assert "ALFA" in faol[0] and "BETA" not in faol[0]
+    # bot ham ko'radi: qidiruv A ni topadi, B ni emas
+    assert any("ALFA" in (h.get("text") or "") for h in _qidir("ALFA"))
+    assert not any("BETA" in (h.get("text") or "") for h in _qidir("BETA"))
+
+    # yana bir tur A→B→A barqaror (idempotent)
+    write(clone, rel, B)
+    vs.run()
+    write(clone, rel, A)
+    vs.run()
+    faol = _faol_matnlar(rel)
+    assert len(faol) == 1 and "ALFA" in faol[0]
+    # o'zgarishsiz yurish: hech narsa arxivlanmaydi/tiklanmaydi
+    r = vs.run()
+    assert r["counts"]["superseded"] == 0 and r["counts"]["unchanged"] == 1
+    assert len(_faol_matnlar(rel)) == 1
+
+
 def test_kbignore_matcher():
     """.kbignore matcher: bare nom, anchored yo'l, glob, inkor."""
     pats = ["odam/", "kunlik/shaxsiy/", "*.private.md", "!kunlik/shaxsiy/keep.md"]

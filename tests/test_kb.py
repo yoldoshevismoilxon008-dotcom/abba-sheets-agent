@@ -70,6 +70,26 @@ def test_ingest_new_then_unchanged():
     assert kb.stats()["docs"] == 1            # dublikat yaratilmadi
 
 
+def test_unut_then_resend_restores():
+    """/unut (arxiv) + o'sha hujjatni qayta yuborish → faollashadi (status 'restored'),
+    dublikat yaratilmaydi, qidiruv yana topadi."""
+    setup_kb()
+    doc = "# Narxnoma\n\n" + ("TIKLASHMATN xizmat narxi ro'yxati. " * 15)
+    r1 = kb.ingest_text(doc, source="telegram", origin="narx.md")
+    assert r1["status"] == "new"
+    kb.archive(r1["uid"])
+    assert kb.stats()["docs"] == 0
+    assert kb.search("TIKLASHMATN", use_rerank=False) == []
+    r2 = kb.ingest_text(doc, source="telegram", origin="narx.md")
+    assert r2["status"] == "restored"
+    assert r2["uid"] == r1["uid"] and r2["n_chunks"] == r1["n_chunks"]
+    st = kb.stats()
+    assert st["docs"] == 1 and st["docs_archived"] == 0
+    assert len(kb.search("TIKLASHMATN", use_rerank=False)) >= 1
+    # faol hujjatni qayta yuborish — baribir 'unchanged' (tiklash faqat arxivdan)
+    assert kb.ingest_text(doc, source="telegram", origin="narx.md")["status"] == "unchanged"
+
+
 def test_updated_removes_old_chunks():
     setup_kb()
     kb.ingest_text("# Hujjat\n\n" + ("ESKIMATN birlamchi tarkib. " * 10),
