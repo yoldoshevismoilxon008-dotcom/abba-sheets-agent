@@ -291,10 +291,65 @@ def test_oy_oxirida_parallel_va_oldindan_ogohlantirish():
     oldindan = {r["loyiha"] for r in v["keyingi"]["joriy_toxtaydi"]}
     assert {"Kochmagan qarz", "Farqli loyiha", "Oy oxiri"} <= oldindan
     assert "Teng loyiha" not in oldindan and "Tolangan" not in oldindan
-    # Oldindan aytilgan ro'yxat 1-dekabrdagi «to'xtatildi» bilan bir xil (o'sha ma'lumotda)
+    # Oldindan aytilgan ro'yxat 1-dekabrdagi «to'xtatildi» ni to'liq qamraydi (o'sha ma'lumotda)
     d1 = date(2026, 12, 1)
     v1 = _view(d1, {("noyabr", 2026): _noyabr(kun), ("dekabr", 2026): _dekabr(d1)})
-    assert oldindan == {r["loyiha"] for r in v1["prev"]["toxtatildi"]}
+    assert oldindan >= {r["loyiha"] for r in v1["prev"]["toxtatildi"]}
+
+
+def test_navbatdagi_oylik_tolov_oldindan_aytiladi():
+    """Noyabr invoysi to'lanmagan, dekabr tabida faqat keyingi oyning xuddi shu summasi (30.12):
+    1-dekabr qoidasi (KN1) uni «ko'chgan» deb oladi — noyabr qarzi jim yo'qolmasin, oldindan ⚠️."""
+    kun = date(2026, 11, 27)
+    tabs = {("noyabr", 2026): ("Undiruv noyabr(2026)", _tab(
+                _qator("Oylik mijoz", "Alfa", "$1 200", "30.11"), ref=date(2026, 11, 1), today=kun)),
+            ("dekabr", 2026): ("Undiruv dekabr(2026)", _tab(
+                _qator("Oylik mijoz", "Alfa", "$1 200", "30.12"), ref=date(2026, 12, 1), today=kun))}
+    v = _view(kun, tabs)
+    assert [r["loyiha"] for r in v["keyingi"]["joriy_toxtaydi"]] == ["Oylik mijoz"]
+    assert any("Oylik mijoz (Alfa, $1 200)" in n and "keyingi oylik to'lov" in n for n in v["notes"])
+    per_pm, _st = _push(kun, v)
+    assert any("Oylik mijoz — qoldiq $1 200" in s for s in _barcha_satrlar(per_pm))   # hali so'raladi
+
+
+def test_keyingi_tab_oqilmasa_tabini_oching_demaydi():
+    kun = date(2026, 11, 28)
+    orig = u._oy_oqi
+    tabs = _tabs(kun, "noyabr")
+
+    def soxta(month, year, ref, today_, day, prefer_live, qat_iy, notes):
+        if month == "dekabr":
+            return None, [], "xato"
+        t = tabs.get((month, year))
+        return (t[0], [dict(r) for r in t[1]], "live") if t else (None, [], "none")
+    u._oy_oqi, u._VIEW_KESH = soxta, {}
+    try:
+        v = u.korinish(kun, day=kun.isoformat(), prefer_live=True, qlar=[])
+    finally:
+        u._oy_oqi = orig
+    ogoh = [n for n in v["notes"] if n.startswith("⚠️ 1-dekabrdan noyabr tabi")]
+    assert len(ogoh) == 1 and "o'qilmadi (xato)" in ogoh[0] and "tabini oching" not in ogoh[0], ogoh
+
+
+def test_carry_toxtagan_oyda_qayta_soralmoqda_demaydi(monkeypatch):
+    """P0-3: oy oxirida ko'chgan deb ko'rsatilgan qarz dekabr tabida yo'qolsa — egaga rost gap."""
+    import undiruv_carry as carry
+    kun = date(2026, 12, 3)
+    prows = _tab(_qator("Kochgan qarz", "Alfa", "$900", "20.11"), ref=date(2026, 11, 1), today=kun)
+    cur = _tab(_qator("Boshqa loyiha", "Alfa", "$500", "05.12"), ref=date(2026, 12, 1), today=kun)
+    rec = {"versiya": carry.VERSIYA, "kun": "2026-11-30", "keyingi_tab": "Undiruv dekabr(2026)",
+           "manba_tab": "Undiruv noyabr(2026)",
+           "items": [{"loyiha": "Kochgan qarz", "pm": "Alfa", "turi": "aynan", "summa": 900,
+                      "yangi_loyiha": "Kochgan qarz"}]}
+    monkeypatch.setattr(carry, "royxat", lambda today, soraladi=True: (rec, []))
+    for soraladi, kutilgan, yoq in ((True, "qayta so'ralmoqda", "PM'lardan so'ralmaydi"),
+                                    (False, "PM'lardan so'ralmaydi", "qayta so'ralmoqda")):
+        t1 = {"cur_rows": cur, "real": list(prows), "juft": {}, "farqli": [], "noaniq": [],
+              "closed": [], "moved": []}
+        out = carry.tekshir(t1, prows, "Undiruv dekabr(2026)", "noyabr", "dekabr", kun,
+                            ptab="Undiruv noyabr(2026)", soraladi=soraladi)
+        matn = " ".join(out["notes"])
+        assert "Kochgan qarz (Alfa)" in matn and kutilgan in matn and yoq not in matn, matn
 
 
 def test_qoidadan_oldingi_oy_oxirida_yangi_ogohlantirish_yoq():
@@ -435,3 +490,27 @@ def test_pm_push_test_haqiqiy_pushda_ketmaydiganini_belgilaydi(monkeypatch, soxt
     assert sarlavha["alfa"] == "🧪 [SINOV — Alfa ko'radigan xabar]"
     assert "kontakt yo'q (/pm_set yangipm)" in sarlavha["yangipm"]
     assert "PM ro'yxatida yo'q" in sarlavha["notanish"]
+
+
+def test_oldindan_royxat_1_sana_tasnifi_va_qarorga_tayanadi():
+    """Sanasiz ko'chgan qator (1-sanada «ko'chgan») va hisobdan chiqarilgan qarz ro'yxatga kirmaydi."""
+    kun = date(2026, 11, 28)
+    tabs = {("noyabr", 2026): ("Undiruv noyabr(2026)", _tab(
+                _qator("Sanasiz kochgan", "Alfa", "$2 500", "15.11"),
+                _qator("Chiqarilgan", "Beta", "$400", "10.11"),
+                _qator("Qolgan", "Beta", "$300", "12.11"), ref=date(2026, 11, 1), today=kun)),
+            ("dekabr", 2026): ("Undiruv dekabr(2026)", _tab(
+                _qator("Sanasiz kochgan", "Alfa", "$2 500", ""), ref=date(2026, 12, 1), today=kun))}
+    qaror = [{"loyiha": "Chiqarilgan", "tab": "Undiruv noyabr(2026)", "qaror": "hisobdan_chiqarilsin",
+              "qoldiq": 400, "sabab": "soxta"}]
+    orig = u._oy_oqi
+
+    def soxta(month, year, ref, today_, day, prefer_live, qat_iy, notes):
+        t = tabs.get((month, year))
+        return (t[0], [dict(r) for r in t[1]], "live") if t else (None, [], "none")
+    u._oy_oqi, u._VIEW_KESH = soxta, {}
+    try:
+        v = u.korinish(kun, day=kun.isoformat(), prefer_live=True, qlar=qaror)
+    finally:
+        u._oy_oqi = orig
+    assert [r["loyiha"] for r in v["keyingi"]["joriy_toxtaydi"]] == ["Qolgan"]

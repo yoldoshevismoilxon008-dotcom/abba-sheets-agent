@@ -620,9 +620,14 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
     # Carryover: joriy oy tabida allaqachon to'langan/yuritilayotgan loyihalar
     # o'tgan oy qoldig'i sifatida SO'RALMAYDI — faqat ega jamlamasida
     # "sheet'ni tuzatish kerak" bloki
+    # To'xtagan o'tgan oy (undiruv.OTGAN_OY_TOXTASH_DAN): uning 🧹/🔁 gigiyena satrlari faqat oyning
+    # ≤PUSH_DUE_DAYS kunlarida — keyin oy bo'yi har kuni eski oy shovqini bo'lmasin (review 28.11)
+    toxtagan = view is not None and view["prev"].get("soraladi", True) is False
     if view is not None:
         pv = view["prev"]
         prev_real, closed, moved = pv["real"], pv["closed"], pv["moved"]
+        if toxtagan and today.day > PUSH_DUE_DAYS:
+            closed, moved = [], []
         stats["farqli"] = [_farqli_item(r, f"{prev_month} → {cur_oy}") for r in pv["farqli"]]
         stats["noaniq"] = [_noaniq_satr(r, prev_month) for r in pv["noaniq"]]
         stats["qaror_izoh"] = list(pv["izoh"])
@@ -726,7 +731,7 @@ def build_push(today, cur_rows, prev_rows, prev_month, view=None):
             per_pm.setdefault(r["pm"], []).append(line)
     # Pul katagi son emas (#REF!, matn) — undiruv.money_parse bilan bir xil qoida:
     # "$1,800" endi son (ilgari 1,8), "—" bo'sh; Summa/Undirildi/Lose (P2)
-    for r in cur_rows + prev_rows:
+    for r in cur_rows + ([] if toxtagan else prev_rows):
         if r.get("bad_sum") or undiruv.money_parse(r.get("qoldiq_raw", "")) is None:
             stats["bad_sum"] += 1
     return per_pm, stats

@@ -271,7 +271,7 @@ def _yozuv(und, kun, today):
     return rec
 
 
-def royxat(today):
+def royxat(today, soraladi=True):
     """O'tgan oy oxirida egaga «🔁 ko'chirilgan / 🧹 yopilgan» deb ko'rsatilgan qarzlar —
     muzlatilgan yozuv. Qaytadi (yozuv|None, egaga_izohlar).
       · fayl bor — o'qiladi; buzuq bo'lsa QAYTA YOZILMAYDI (S5, qarzlar so'raladi);
@@ -298,13 +298,15 @@ def royxat(today):
         except Exception as e:                   # noqa: BLE001
             log(f"{path} buzilgan: {type(e).__name__}: {e}")
             return None, [f"⚠️ undiruv_carry/{path.name} buzilgan ({type(e).__name__}) — oy oxiri "
-                          f"ko'chirish ro'yxati tekshirilmadi, {prev_m} qoldiqlari odatdagidek "
-                          f"so'ralmoqda (faylni o'chiring — {_dm(oxiri)} report.json'dan qayta tiklanadi)"]
+                          f"ko'chirish ro'yxati tekshirilmadi, {prev_m} qoldiqlari "
+                          + ("odatdagidek so'ralmoqda" if soraladi else "baribir PM'lardan so'ralmaydi")
+                          + f" (faylni o'chiring — {_dm(oxiri)} report.json'dan qayta tiklanadi)"]
     kun, und, xato = _oxirgi_report(oxiri)
     if xato is not None:
         log(f"{kun} report.json o'qilmadi: {type(xato).__name__}: {xato}")
         return None, [f"⚠️ {_dm(kun)} report.json o'qilmadi ({type(xato).__name__}) — oy oxiri "
-                      f"ko'chirish ro'yxati tekshirilmadi, {prev_m} qoldiqlari odatdagidek so'ralmoqda"]
+                      f"ko'chirish ro'yxati tekshirilmadi, {prev_m} qoldiqlari "
+                      + ("odatdagidek so'ralmoqda" if soraladi else "baribir PM'lardan so'ralmaydi")]
     if kun is None:
         return None, []
     rec = _yozuv(und, kun, today)
@@ -336,7 +338,7 @@ def _hozir(c):
     return s
 
 
-def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
+def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None, soraladi=True):
     """korinish() ichida, t1 + kechish_ajrat'dan keyin, look-ahead (t3 `_i`) dan OLDIN.
     Qaytadi {dublikat: [o'tgan oy qatorlari], izohsiz: [{loyiha, pm, summa}], notes,
     skip: {name_key} (dublikat — o'tgan tab kuzatuvi takrorlamasin), kochgan: {name_key}}.
@@ -348,10 +350,12 @@ def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
     nom, _hamkor) yagona va _juftla bugun ham aynan shu qatorni juftlagan; qoldiq L kunidagidan
     OSHMAGAN. Hamkor nomi yo'q — ⚠️ va so'raladi. Boshqa har holat — bugungi xulq.
     IZOHSIZ — hamkor qator L kunidagi asosga nisbatan (o'tgan qator qaysi tasnifda bo'lishidan
-    qat'i nazar: PR #1 K2 uni yopsa ham $1 000 ko'rinadi)."""
+    qat'i nazar: PR #1 K2 uni yopsa ham $1 000 ko'rinadi).
+    soraladi=False — o'tgan oy PM'lardan so'ralmaydi (undiruv.OTGAN_OY_TOXTASH_DAN): «qayta
+    so'ralmoqda» o'rniga egaga qarz yo'qolmasin degan ⚠️ (u har kuni chiqadi, jim emas)."""
     u = _u()
     out = {"dublikat": [], "izohsiz": [], "notes": [], "skip": set(), "kochgan": set()}
-    rec, iz = royxat(today)
+    rec, iz = royxat(today, soraladi)
     out["notes"] += iz
     if not rec or tab is None or not u._tab_mos(rec.get("keyingi_tab"), tab):
         return out
@@ -385,7 +389,9 @@ def tekshir(t1, prows, tab, prev_m, cur_m, today, ptab=None):
             if not n_nom:
                 notes.append(f"⚠️ {r['loyiha']} ({r['pm']}): {sana} da {cur_m} tabiga «{yn}» bo'lib "
                              f"ko'chirilgan edi, endi u yerda topilmadi — {prev_m} qoldig'i "
-                             f"{_usd(r['qoldiq'])} qayta so'ralmoqda")
+                             + (f"{_usd(r['qoldiq'])} qayta so'ralmoqda" if soraladi else
+                                f"{_usd(r['qoldiq'])} PM'lardan so'ralmaydi (o'tgan oy to'xtagan): qarz "
+                                f"yo'qolmasin — {cur_m} tabiga qaytaring yoki hisobdan chiqaring"))
             # Faqat joriy qator qarzni SHEET'da o'zi saqlasa. qaror_qoshildi ($364 bot xotirada
             # qo'shgan) / qaror_yangi_toliq — qaror amal qilsa month_transition r'ni real'dan
             # o'zi oladi; bu yerga faqat qaror ESKIRGANDA keladi — undiruv.py qoidasi («📝 …
