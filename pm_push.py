@@ -35,6 +35,7 @@ CONTACTS_FILE = DATA / "pm_contacts.json"  # userbot yetkazish: slot → @userna
 STATE_FILE = DATA / "undiruv_push_state.json"
 
 PUSH_DUE_DAYS = undiruv.PUSH_DUE_DAYS  # yagona chegara — undiruv.py'da
+NOMALUM_MAX = 3900                    # noma'lum ismlar tayyor matni (Telegram 4096 chegarasi)
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
@@ -126,23 +127,49 @@ def owner_pdf(rows, tab, today, source, push_lines=None, title=None, data_source
 # ---------- slotlar / mapping ----------
 
 def _slot_key(name):
-    """"Azizxo'ja" → "azizxoja" (deep-link va json kaliti uchun barqaror)."""
-    return "".join(ch for ch in fetchmod.norm(name) if ch.isalnum())
+    """"Azizxo'ja" / «Azizxoʻja» → "azizxoja" (deep-link va json kaliti uchun barqaror).
+    Apostrof variantlari (ʻ ʼ ’ ‘ ` ´ — ʻ/ʼ Unicode'da HARF, isalnum() True) avval «'» ga
+    keltiriladi, keyin tashlanadi: aks holda «Azizxoʻja» alohida (kontaktsiz) slot bo'lardi."""
+    return "".join(ch for ch in fetchmod.norm(name).translate(fetchmod._APOS) if ch.isalnum())
 
 
-def _undiruv_pmlar():
-    """config.yaml «undiruv_pmlar» — PM KPI sheet'i yo'q PM'lar: [(nom, [alias, ...])].
-    Buzuq yozuv push'ni yiqitmaydi: log + o'tkazib yuboriladi."""
+def _config():
+    """config.yaml + overlay; o'qilmasa {} (push yiqilmasin — log)."""
     try:
         cfg = fetchmod.load_full_config()
+        return cfg if isinstance(cfg, dict) else {}
     except Exception as e:                      # noqa: BLE001
-        log(f"undiruv_pmlar: config o'qilmadi ({type(e).__name__}: {str(e)[:100]})")
+        log(f"config o'qilmadi ({type(e).__name__}: {str(e)[:100]})")
+        return {}
+
+
+def _kpi_nomlari(cfg):
+    """PM KPI sheet nomlarining birinchi so'zi («Zubair PM KPI» → Zubair). Sheet ID'siga
+    BOG'LIQ EMAS: overlay'da bitta ID tushib qolsa ham, o'sha PM slotsiz qolib eslatmasi
+    to'xtamasin (review 28.11)."""
+    out = []
+    for s in cfg.get("sheets") or []:
+        if isinstance(s, dict) and s.get("pm_kpi", True) and not s.get("qa_only"):
+            first = (str(s.get("name") or "").split() or [""])[0]
+            if _slot_key(first):
+                out.append(first)
+    return out
+
+
+def _undiruv_pmlar(cfg=None):
+    """config.yaml «undiruv_pmlar» — PM KPI sheet'i yo'q PM'lar: [(nom, [alias, ...])].
+    Buzuq yozuv push'ni yiqitmaydi: log + o'tkazib yuboriladi (ro'yxat bo'lmasa — butunlay)."""
+    cfg = _config() if cfg is None else cfg
+    raw = cfg.get("undiruv_pmlar") or []
+    if not isinstance(raw, list):
+        # «- » unutilsa mapping, bitta satr yozilsa str — harf/kalitlardan soxta slot yasalmasin
+        log(f"undiruv_pmlar: ro'yxat emas ({type(raw).__name__}) — e'tiborsiz qoldirildi")
         return []
     out = []
-    for x in cfg.get("undiruv_pmlar") or []:
+    for x in raw:
         if isinstance(x, str):
             x = {"nom": x}
-        nom = str((x or {}).get("nom") or "").strip() if isinstance(x, dict) else ""
+        nom = str(x.get("nom") or "").strip() if isinstance(x, dict) else ""
         if not nom or not _slot_key(nom):
             log(f"undiruv_pmlar: noto'g'ri yozuv o'tkazib yuborildi: {x!r}"[:200])
             continue
@@ -152,23 +179,46 @@ def _undiruv_pmlar():
     return out
 
 
-def slots_from_config():
-    """{slot: DisplayNom} — pm_kpi sheet nomlarining birinchi so'zidan + config.yaml
-    «undiruv_pmlar» (KPI sheet'i hali yo'q PM'lar — masalan Furqat, 27.11.2026)."""
-    out = {}
-    for s in fetchmod.load_config(include_qa_only=True):
-        if s.get("pm_kpi", True) and not s.get("qa_only"):
-            first = str(s.get("name", "")).split()[0]
-            if first:
-                out[_slot_key(first)] = first
-    for nom, _al in _undiruv_pmlar():
+def slots_from_config(cfg=None):
+    """{slot: DisplayNom} — PM KPI sheet nomlari + config.yaml «undiruv_pmlar» (KPI sheet'i
+    hali yo'q PM'lar — masalan Furqat, 27.11.2026)."""
+    cfg = _config() if cfg is None else cfg
+    out = {_slot_key(n): n for n in _kpi_nomlari(cfg)}
+    for nom, _al in _undiruv_pmlar(cfg):
         out.setdefault(_slot_key(nom), nom)
     return out
 
 
-def _alias_map():
-    """{alias_kaliti: slot} — «undiruv_pmlar» aliaslari («Furqa» → furqat)."""
-    return {_slot_key(a): _slot_key(nom) for nom, al in _undiruv_pmlar() for a in al}
+def _alias_tahlil(cfg=None):
+    """({alias_kaliti: slot}, [ogohlantirish]) — «undiruv_pmlar» aliaslari («Furqa» → furqat).
+    Alias boshqa PM nomiga teng bo'lsa yoki ikki PM'ga yozilgan bo'lsa — QO'LLANMAYDI (egaga
+    ⚠️): aks holda config'dagi bitta xato bir PM'ning barcha qarzlarini boshqasiga yuborardi."""
+    cfg = _config() if cfg is None else cfg
+    pmlar = _undiruv_pmlar(cfg)
+    nomlar = {_slot_key(n) for n in _kpi_nomlari(cfg)} | {_slot_key(n) for n, _a in pmlar}
+    nishon = {}                                   # alias_kaliti → {slot: (alias, nom)}
+    for nom, al in pmlar:
+        sk = _slot_key(nom)
+        for a in al:
+            ak = _slot_key(a)
+            if ak != sk:                          # o'z nomini takrorlash — zararsiz
+                nishon.setdefault(ak, {})[sk] = (a, nom)
+    m, xato = {}, []
+    for ak, t in nishon.items():
+        a = next(iter(t.values()))[0]
+        if ak in nomlar:
+            xato.append(f"«{a}» aliasi boshqa PM nomi bilan bir xil — qo'llanmadi")
+        elif len(t) > 1:
+            xato.append(f"«{a}» aliasi bir nechta PM'da ({', '.join(n for _a, n in t.values())}) "
+                        f"— qo'llanmadi")
+        else:
+            m[ak] = next(iter(t))
+    return m, xato
+
+
+def _alias_map(cfg=None):
+    """{alias_kaliti: slot} — faqat xavfsiz aliaslar (_alias_tahlil)."""
+    return _alias_tahlil(cfg)[0]
 
 
 def pm_slot(pm_name, amap=None):
@@ -374,6 +424,7 @@ def reject(slot, chat_id=None):
 
 
 def status_text():
+    cfg = _config()
     slots = slots_from_config()
     contacts = load_contacts()
     st = _load_state()
@@ -385,9 +436,10 @@ def status_text():
         L.append(f"Userbot: {'tayyor ✅' if ok else 'sozlanmagan — ' + why}")
     except Exception as e:
         L.append(f"Userbot: xato — {str(e)[:80]}")
+    amap, alias_xato = _alias_tahlil(cfg)
     aliases = {}
-    for nom, al in _undiruv_pmlar():
-        aliases.setdefault(_slot_key(nom), []).extend(al)
+    for nom, al in _undiruv_pmlar(cfg):
+        aliases.setdefault(_slot_key(nom), []).extend(a for a in al if _slot_key(a) in amap)
     for slot, name in slots.items():
         c = contacts.get(slot)
         nm = name + (f" (sheet'da: {', '.join(aliases[slot])})" if aliases.get(slot) else "")
@@ -401,6 +453,7 @@ def status_text():
         L.append(f"Oxirgi push: {st['date']} ({st.get('tab', '?')})")
     if st.get("nomalum"):
         L.append(f"⚠️ Oxirgi push'da PM ro'yxatida yo'q ism: {', '.join(st['nomalum'])}")
+    L += [f"⚠️ config «undiruv_pmlar»: {x}" for x in alias_xato]
     L.append("Sinov: /pm_push test — bugungi PM xabarlari o'z Saved Messages'ingizga")
     return "\n".join(L)
 
@@ -748,7 +801,8 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     new_month_tab = bool(prev_tab) and fetchmod.norm(prev_tab) != fetchmod.norm(tab)
 
     contacts = load_contacts()
-    slots = slots_from_config()
+    slots = slots_from_config()        # argumentsiz — testlar/chaqiruvchilar almashtira oladi
+    alias_xato = _alias_tahlil()[1]
     nodate_pm = stats.get("nodate_pm", {})
     # by_slot: overdue/due-soon YOKI faqat-muddatsiz qatorli PM'lar ham kirsin
     # Bitta PM ismi ikki tabda ikki xil yozilishi mumkin («Azizxo'ja»/«Azizxo’ja») —
@@ -762,10 +816,11 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
     for slot, (pm_name, lines) in by_slot.items():
         text = _xabar_matni(dd, lines, slot_nd.get(slot, []))
         texts[slot] = text
-        if slot not in slots:
+        if slot not in slots and not contacts.get(slot):
             # Sheet'dagi ism hech qaysi PM slotiga mos emas (yangi PM yoki imlo xatosi — 27.11
             # da «Furqa»). /pm_set uni ulay olmaydi: ilgari «kontakt yo'q — /pm_set» deyilardi
             # va tuzatib bo'lmas edi. Endi egaga aniq ⚠️ + qo'lda yuborish uchun tayyor matn.
+            # Kontakti BOR slot (config'dan tushib qolgan bo'lsa ham) — avvalgidek yuboriladi.
             nomalum[slot] = (pm_name, slot_n[slot])
             continue
         c = contacts.get(slot)
@@ -833,7 +888,9 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
         L.append(_warn)
     manba = "jonli holat" if data_source == "live" else f"snapshot {snap_day}"
     L.append(f"📤 Undiruv push jamlamasi — {dd} (tab: {tab}, manba: {manba})")
-    for slot, name in slots.items():
+    royxat = list(slots.items()) + [(s, by_slot[s][0]) for s in by_slot
+                                     if s not in slots and s not in nomalum]
+    for slot, name in royxat:
         if slot in sent:
             L.append(f"• {name} ({contacts.get(slot, '?')}): {sent[slot]} eslatma yuborildi ✅")
         elif slot in failed:
@@ -843,6 +900,7 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                      f"{no_contact[slot]} eslatma kutmoqda")
         else:
             L.append(f"• {name}: bugun eslatma yo'q")
+    L += [f"⚠️ config «undiruv_pmlar»: {x}" for x in alias_xato]
     if nomalum:
         det = ", ".join(f"«{nm}» — {n} eslatma" for nm, n in nomalum.values())
         L.append(f"⚠️ PM ro'yxatida yo'q ism: {det} — push YUBORILMADI. Sheet'da ism imlosini "
@@ -980,10 +1038,14 @@ def run_daily(today=None, force=False, dry_run=False, day=None):
                if stats["pm_col_missing"] else "PM katagi bo'sh")
         send_owner(f"📋 PM aniqlanmagan {len(stats['pm_missing'])} qator ({why}) — "
                    f"tegishli PM'ga QO'LDA yuboring:\n\n{pmm_text}")
-    # Slot ro'yxatida yo'q ism — xuddi shunday tayyor matn (dry'da ham egaga ko'rsatiladi)
-    for slot, (nm, _n) in nomalum.items():
-        send_owner(f"📋 «{nm}» uchun tayyor matn (PM ro'yxatida yo'q — QO'LDA yuboring):\n\n"
-                   f"{texts[slot]}")
+    # Slot ro'yxatida yo'q ism — BITTA xabarda tayyor matnlar (dry'da ham egaga ko'rsatiladi;
+    # Telegram 4096 belgi chegarasi — ortig'i qisqartiriladi, xabar soni o'smaydi)
+    if nomalum:
+        nm_txt = ("📋 PM ro'yxatida yo'q ism uchun tayyor matn — QO'LDA yuboring:\n\n"
+                  + "\n\n".join(f"«{nm}»:\n{texts[slot]}" for slot, (nm, _n) in nomalum.items()))
+        if len(nm_txt) > NOMALUM_MAX:
+            nm_txt = nm_txt[:NOMALUM_MAX - 40].rstrip() + "\n… (qisqartirildi — sheet'ni tuzating)"
+        send_owner(nm_txt)
     if not dry_run:
         _save_state({"date": today.isoformat(), "tab": tab, "sent": sent,
                      "failed": failed, "no_contact": no_contact,
@@ -1020,10 +1082,18 @@ def test_to_saved(today=None, day=None):
         return "Bugun birorta PM uchun eslatma yo'q — sinovga xabar chiqmadi."
     dd = today.strftime("%d.%m.%Y")
     # run_daily bilan AYNAN bir xil yig'uvchi: PM ismi variantlari bitta xabarga (review C8/S8)
-    by_slot, _slot_n, slot_nd = _slotga_yig(per_pm, nodate_pm, slots_from_config())
+    slots, contacts = slots_from_config(), load_contacts()
+    by_slot, _slot_n, slot_nd = _slotga_yig(per_pm, nodate_pm, slots)
     msgs = []
     for slot, (pm_name, lines) in by_slot.items():
-        text = (f"🧪 [SINOV — {pm_name} ko'radigan xabar]\n"
+        # run_daily bilan bir xil qoida: haqiqiy push'da ketmaydigan xabar sinovda ✅ bo'lib
+        # «hammasi joyida» degan taassurot bermasin (review 28.11)
+        if not contacts.get(slot):
+            belgi = (" — PM ro'yxatida yo'q, haqiqiy push'da YUBORILMAYDI" if slot not in slots
+                     else f" — kontakt yo'q (/pm_set {slot}), haqiqiy push'da YUBORILMAYDI")
+        else:
+            belgi = ""
+        text = (f"🧪 [SINOV — {pm_name} ko'radigan xabar{belgi}]\n"
                 + _xabar_matni(dd, lines, slot_nd.get(slot, [])))
         msgs.append((slot, "me", text))
     import userbot_sender
