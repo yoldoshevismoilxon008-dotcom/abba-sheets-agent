@@ -211,6 +211,19 @@ def test_takror_xabar_va_bir_xil_ish_qoshilmaydi(s):
     assert len(_items()) == 4
 
 
+def test_bitta_sozi_farq_qiladigan_ishlar_alohida_qoshiladi(s):
+    """28.11 jonli xato: uchinchi ish «navbatda allaqachon bor» deb tashlab yuborilgan edi
+    (taxminiy o'xshashlik 0.93 — chegaradan yuqori)."""
+    ishlar = ("Kunlik update sistemasini toplarga o'rgatish",
+              "Kunlik update sistemasini managerlarga joriy qilish",
+              "Kunlik update sistemasini pmlarga joriy qilish")
+    s.ajrat = _bandlar(*ishlar)
+    assert vz.buyruq("/vazifa " + "\n".join(ishlar), _msg(mid=17)) == "vazifa-qoshildi"
+    assert [i["matn"] for i in _items()] == list(ishlar)
+    t = s.tahrirlar()[-1]["text"]
+    assert "3 ta" in t and "allaqachon bor" not in t
+
+
 def test_claude_ishlamasa_zaxira_va_limit_aytiladi(s):
     s.ajrat = RuntimeError("claude -p xato (kod 1): You've hit your weekly limit · resets Nov 28 at 7pm")
     assert vz.buyruq("/vazifa Alfa TZ\nBeta narx kerakmi?", _msg(mid=14)) == "vazifa-qoshildi"
@@ -836,7 +849,8 @@ def test_limit_matni():
 
 def test_matn_oxshash_qatiy():
     ha = [("Alfa: TZ yozish", "alfa — tz yozish"), ("Alfa: TZ yozish", "Alfa: TZ yozish."),
-          ("Alfa: TZ yozish", "ALFA: tz  yozish"), ("Alfa: post va video", "Alfa: video va post")]
+          ("Alfa: TZ yozish", "ALFA: tz  yozish"), ("Alfa: post va video", "Alfa: video va post"),
+          ("Alfa: qo'shish", "Alfa: qoʻshish")]
     yoq = [("Alfa: TZ yozish", "Beta: TZ yozish"), ("Alfa: post", "Alfa: video"),
            ("Alfa: 1-post dizayni", "Alfa: 2-post dizayni"), ("3 ta reels", "5 ta reels"),
            ("Alfa: oktyabr hisoboti", "Alfa: noyabr hisoboti"), ("TZ yozish", "Beta: TZ yozish"),
@@ -844,7 +858,12 @@ def test_matn_oxshash_qatiy():
            ("Alfa: TZ yozish va mijozga yuborish", "Alfa: TZ yozish"),
            ("Alfa: KP yuborish", "Alfa: KP yozish"), ("Alfa: dogovor tuzish", "Alfa: dogovor yuborish"),
            ("Alfa: kontent-reja tayyorlash", "Gamma: kontent-reja tayyorlash"),
-           ("Alfa: TZ yozish", "Alfa: TZ yozish (soat 15)"), ("", "Alfa")]
+           ("Alfa: TZ yozish", "Alfa: TZ yozish (soat 15)"), ("", "Alfa"),
+           ("Kunlik update sistemasini pmlarga joriy qilish",              # 28.11 jonli xato
+            "Kunlik update sistemasini managerlarga joriy qilish"),
+           ("Kunlik update sistemasini toplarga o'rgatish",
+            "Kunlik update sistemasini pmlarga o'rgatish"),
+           ("Alfa: TZ yozish", "Alfa: TZ yozsh")]                   # imlo xatosi — takror bo'lsa ham alohida
     assert all(wk.matn_oxshash(a, b) for a, b in ha), [p for p in ha if not wk.matn_oxshash(*p)]
     assert not any(wk.matn_oxshash(a, b) for a, b in yoq), [p for p in yoq if wk.matn_oxshash(*p)]
     assert not wk.matn_oxshash("Alfa: 2 marta qo'ng'iroq", "Alfa: 2 mart qo'ng'iroq")   # «marta» oy emas

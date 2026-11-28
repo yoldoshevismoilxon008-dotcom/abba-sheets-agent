@@ -310,8 +310,10 @@ so'rovi bilan har biri so'raladi.
    yuborilgach: «bajarildi» bo'lgani yopiladi, qolgani navbatga qaytadi. `/kechqurun qayta` bilan
    tuzatilgan yoki ertasi kuni kech yuborilgan hisobot ham qayta solishtiriladi (olingan kuni
    bo'yicha; boot'da ham — uzilish bo'lsa). Hisobot bo'lmagan kun — ertalab navbatga qaytadi.
-6. **Moslash qat'iy** (`wow_kunlik.matn_oxshash`): loyiha prefiksi («X:»), raqamlar va oy nomlari
-   teng bo'lishi shart, qism/kengaytma — boshqa ish. Shubhada ish «bajarildi» bo'lmaydi.
+6. **Moslash qat'iy** (`wow_kunlik.matn_oxshash`): faqat normallashganda teng yoki aynan bir xil
+   so'zlar (tartibi boshqa bo'lishi mumkin). Taxminiy o'xshashlik yo'q: bitta so'zi farq qiladigan
+   ish («…pmlarga joriy qilish» / «…managerlarga joriy qilish», «1-post» / «2-post») — boshqa ish.
+   Shubhada ish tashlanmaydi va «bajarildi» bo'lmaydi.
 7. `/vazifalar` — ro'yxat (sahifalab): ✅ bajarildi · 🗑 o'chirish · ❓ hozir so'rash. `/kunlik` da
    soni.
 

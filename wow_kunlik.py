@@ -458,56 +458,19 @@ def _norm_matn(s):
     return re.sub(r"\s+", " ", t).strip()
 
 
-# Oy nomlari (lotin/kirill) — «oktyabr hisoboti» ≠ «noyabr hisoboti». Qo'shimcha faqat ro'yxatdagi
-# (aks holda «marta», «mayli» oy bo'lib qolardi).
-_OY_OZAK = {"yanvar": 1, "fevral": 2, "mart": 3, "aprel": 4, "may": 5, "iyun": 6, "iyul": 7,
-            "avgust": 8, "sentabr": 9, "sentyabr": 9, "oktabr": 10, "oktyabr": 10, "noyabr": 11,
-            "dekabr": 12, "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "май": 5, "мая": 5,
-            "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12}
-_OY_QOSHIMCHA = ("", "da", "dagi", "gacha", "dan", "ga", "ni", "ning", "oyi", "lik", "ь", "я",
-                 "е", "ю", "ьда")
-
-
-def _oylar(t):
-    out = set()
-    for soz in t.split():
-        for ozak, n in _OY_OZAK.items():
-            if soz.startswith(ozak) and soz[len(ozak):] in _OY_QOSHIMCHA:
-                out.add(n)
-    return out
-
-
-def _loyiha_old(s):
-    """«<Loyiha>: <ish>» — ikki nuqtagacha qism (normallashgan) yoki None."""
-    s = str(s or "")
-    if ":" not in s:
-        return None
-    old = _norm_matn(s.split(":", 1)[0])
-    return old if 0 < len(old) <= 60 else None
-
-
 def matn_oxshash(a, b):
-    """Ikki ish matni BITTA ishmi (navbat ↔ jadval qatori, navbatdagi takror). Qat'iy: loyiha
-    prefiksi («X:») ikkalasida bo'lsa — teng; raqamlar va oy nomlari — teng; keyin matnlar
-    normallashganda teng, so'zlari bir xil yoki deyarli bir xil yozilgan (so'z soni teng).
-    Qism/kengaytma («TZ yozish» ↔ «TZ yozish va yuborish») — boshqa ish. Shubhada — «o'xshamaydi»:
-    kechki hisobotda ish hech qachon xato bilan «bajarildi» deb topilmasin."""
-    import difflib
-
+    """Ikki ish matni BITTA ishmi (navbat ↔ jadval qatori, navbatdagi takror): normallashganda
+    (katta-kichik harf, tinish belgilari, apostrof turlari, bo'shliqlar) teng yoki aynan bir xil
+    so'zlardan iborat (tartibi boshqa). Taxminiy (fuzzy) o'xshashlik ATAYLAB yo'q: bitta so'zi
+    farq qiladigan ishlar — boshqa-boshqa («…pmlarga joriy qilish» ≠ «…managerlarga joriy
+    qilish»: harflar 93% mos, lekin ish boshqa — 28.11 jonli xato; «1-post» ≠ «2-post»,
+    «Alfa: TZ» ≠ «Beta: TZ», «TZ yozish» ≠ «TZ yozish va yuborish»). Shubhada — «o'xshamaydi»:
+    ish jim tashlanmasin va kechki hisobotda xato bilan «bajarildi» bo'lmasin (yolg'on «yo'q» —
+    arzon: ko'pi bilan takror qator)."""
     x, y = _norm_matn(a), _norm_matn(b)
     if not x or not y:
         return False
-    px, py = _loyiha_old(a), _loyiha_old(b)
-    if px and py and px != py:
-        return False
-    if set(re.findall(r"\d+", x)) != set(re.findall(r"\d+", y)) or _oylar(x) != _oylar(y):
-        return False
-    if x == y:
-        return True
-    tx, ty = x.split(), y.split()
-    if sorted(tx) == sorted(ty):
-        return True
-    return len(tx) == len(ty) and difflib.SequenceMatcher(None, x, y).ratio() >= 0.92
+    return x == y or sorted(x.split()) == sorted(y.split())
 
 
 def _jadval_izi(jadval):
