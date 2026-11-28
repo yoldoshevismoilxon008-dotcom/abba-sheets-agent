@@ -2366,7 +2366,7 @@ def handle_update(upd):
         parts = text.split()
         if len(parts) < 3:
             send_retry("Format: /pm_set <slot> <@username|+998...>\n"
-                       "Slotlar: zubair, islom, abdufattoh, azizxoja", attempts=2)
+                       "Slotlar: " + ", ".join(pm_push.slots_from_config()), attempts=2)
         else:
             send_retry(pm_push.set_contact(parts[1].lower(), parts[2]), attempts=2)
         return "pm-set"

@@ -26,7 +26,9 @@ sys.path.insert(0, str(BASE))
 DATA = Path(os.environ.get("DATA_DIR") or (BASE / "data"))
 SESSION = DATA / "undiruv_user.session"
 
-MAX_SENDS = 4          # kuniga maksimal chiqish xabari (4 PM)
+# Bitta chiqishda maksimal xabar (flood himoyasi). 27.11.2026 dan 5 PM (Furqat) — 4 da 5-PM
+# xabari jimgina kesilardi; endi zaxira bilan 8, oshgani esa xato bo'lib qaytadi (jim emas).
+MAX_SENDS = 8
 SLEEP_RANGE = (4, 6)   # xabarlar orasidagi pauza, soniya
 _CLIENT_LOCK = threading.Lock()   # bir jarayonda bitta ulanish (PM push + WOW jadval)
 
@@ -106,8 +108,13 @@ def send_messages(items, sleep_range=SLEEP_RANGE):
     ok0, why = available()
     if not ok0:
         raise SessionInvalid(why)
+    ortiqcha = []
     if len(items) > MAX_SENDS:
         log(f"OGOHLANTIRISH: {len(items)} xabar so'raldi — faqat {MAX_SENDS} tasi yuboriladi")
+        # Kesilganlar natijada XATO bo'lib qaytadi: chaqiruvchi (pm_push jamlamasi) ularni
+        # «bugun eslatma yo'q» deb emas, «YUBORILMADI ❌» deb ko'rsatsin
+        ortiqcha = [(slot, False, f"limit: bir chiqishda ko'pi bilan {MAX_SENDS} xabar "
+                                  f"(userbot_sender.MAX_SENDS)") for slot, _to, _t in items[MAX_SENDS:]]
         items = items[:MAX_SENDS]
 
     from telethon.sync import TelegramClient
@@ -141,7 +148,7 @@ def send_messages(items, sleep_range=SLEEP_RANGE):
                 client.disconnect()
             except Exception:
                 pass
-    return results
+    return results + ortiqcha
 
 
 def send_photo(to, path, caption=""):

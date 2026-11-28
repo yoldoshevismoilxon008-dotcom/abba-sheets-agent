@@ -27,6 +27,16 @@ dam_kunlari: ["2026-01-01", "2026-03-08", "2026-03-21", "2026-05-09",
 # PDF hisobot dizayni: data/brand/themes/<nom>.yaml (bot /dizayn bilan boshqariladi)
 active_theme: "default"
 
+# Undiruv push (09:30) — PM slotlari PM KPI sheet nomlaridan («Zubair PM KPI» → zubair) VA
+# shu ro'yxatdan olinadi: KPI sheet'i hali yo'q PM ham undiruv eslatmasini oladi (27.11.2026).
+#   nom     — «Ma'sul shaxs» ustunidagi ism; slot = kichik harf, belgisiz («Furqat» → furqat).
+#   aliases — sheet'dagi boshqa yozilishlari (imlo xatosi) — shu PM'ga yo'naltiriladi.
+#             Taxminiy moslik YO'Q: ro'yxatda bo'lmagan ism egaga ⚠️ bilan ko'rsatiladi.
+# Kontakt repo'da EMAS (volume): botga /pm_set furqat @username.
+undiruv_pmlar:
+  - nom: "Furqat"
+    aliases: ["Furqa"]     # noyabr va dekabr 2026 tablarida «Furqa» deb yozilgan
+
 # MAXFIY QISM (audit P0-2): Google Sheet ID'lar va dashboard_id bu PUBLIC faylda EMAS.
 # Ular config.local.yaml (.gitignore'da) yoki Railway'da CONFIG_LOCAL_B64 (shu faylning
 # base64'i) orqali beriladi — fetch.load_config sheet NOMI bo'yicha qo'shadi:

@@ -394,11 +394,12 @@ def qaror_tekshir(items):
     return ok, xato
 
 
-def kechish_ajrat(real_rows, tab, qlar, oy=""):
+def kechish_ajrat(real_rows, tab, qlar, oy="", soraladi=True):
     """«hisobdan_chiqarilsin» — ega o'tgan oy qoldig'ini so'ramaslikka qaror qilgan
     (29.09: «Baaztruck kerak emas»). FAQAT o'tgan oy qoldiqlariga (korinish prev.real)
     qo'llanadi — joriy oy jamlamasiga (Kelishilgan/Qoldiq, reconcile) tegmaydi.
     Qo'riqchi: tab va qoldiq AYNAN qarordagidek (o'zgargan bo'lsa — qo'llanmaydi, izoh).
+    soraladi=False — o'tgan oy baribir so'ralmaydi (OTGAN_OY_TOXTASH_DAN): izoh shunga mos.
     Qaytadi: (qolgan_real, hisobdan_chiqarilganlar, izohlar)."""
     qolgan, chiqdi, izoh = list(real_rows), [], []
     for q in qlar or []:
@@ -411,7 +412,7 @@ def kechish_ajrat(real_rows, tab, qlar, oy=""):
             if mos:
                 izoh.append(f"{nom}: hisobdan chiqarish qarori eskirgan (jadvalda endi "
                             f"{', '.join(_fmt_usd(r['qoldiq']) for r in mos)}, qarorda {_fmt_usd(qol or 0)}) "
-                            f"— qo'llanmadi, qoldiq so'ralmoqda")
+                            f"— qo'llanmadi" + (", qoldiq so'ralmoqda" if soraladi else ""))
             continue
         r = aynan[0]
         qolgan = [x for x in qolgan if x is not r]
@@ -541,7 +542,7 @@ def qaror_qoll(rows, tab, qlar, otgan_oy, otgan_rows=None):
 
 
 def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", yangi_min=None,
-                     prev_oqildi=True):
+                     prev_oqildi=True, otgan_soraladi=True):
     """O'tgan oyning to'lanmagan qatorlarini joriy oy tabi bilan solishtiradi.
 
     Qaytadi dict:
@@ -571,7 +572,9 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
     yangi oy muddatini oladi; nusxa/shablon tab (eski muddat yoki sanasiz) joriy
     qarzni yashirib qo'ymasin.
     prev_oqildi=False — o'tgan oy tabi o'qilmadi (prev_rows bo'sh): ega qarori «qoldiq
-    to'langan» deb noto'g'ri eskirmasin, qo'llanmaydi + halol izoh."""
+    to'langan» deb noto'g'ri eskirmasin, qo'llanmaydi + halol izoh.
+    otgan_soraladi=False — o'tgan oy PM'lardan so'ralmaydi (OTGAN_OY_TOXTASH_DAN): tasnif
+    o'zgarmaydi, faqat egaga izoh «… so'ralmoqda» deb yolg'on gapirmasin."""
     q_ok, _xato = qaror_tekshir(list(qlar or []))
     cur, izoh = qaror_qoll(cur_rows, cur_tab, q_ok, prev_oy, otgan_rows=prev_rows if prev_oqildi else None)
     faqat = [i for i, r in enumerate(prev_rows) if is_unpaid(r)]
@@ -643,7 +646,9 @@ def month_transition(prev_rows, cur_rows, cur_tab=None, qlar=None, prev_oy="", y
         if q is not None and q.get("qaror") == "yangi_toliq":
             out["izoh"].append(f"{q.get('loyiha')}: ega qarori eskirgan (jadvalda endi {_fmt_usd(rq)} → "
                                f"{_fmt_usd(kel_c)}, qarorda {_fmt_usd(q['otgan_qoldiq'])} → "
-                               f"{_fmt_usd(q['yangi_summa'])}) — o'tgan qoldiq ham so'ralmoqda")
+                               f"{_fmt_usd(q['yangi_summa'])}) — "
+                               + ("o'tgan qoldiq ham so'ralmoqda" if otgan_soraladi else
+                                  "o'tgan oy endi so'ralmaydi, qoldiq joriy tabda bo'lsin"))
     return out
 
 
@@ -1036,6 +1041,28 @@ def oldinga_qarash_faolmi(today):
     return oy_oxiriga_kun(today) <= PUSH_DUE_DAYS
 
 
+# Ega qarori (27.11.2026): «noyabr va dekabrni parallel berib, dekabrga o'tganda noyabr
+# update'ini so'rashni to'xtatsin». Shu oydan boshlab yangi oy boshlanishi bilan O'TGAN OY
+# tabidagi qoldiqlar PM'lardan SO'RALMAYDI — faqat joriy oy tabi (09:30 push, 09:00 💰 bloki,
+# PDF, dashboard: hammasi korinish() dan, C3). Oy oxirida (≤PUSH_DUE_DAYS kun) joriy va keyingi
+# oy parallel so'raladi (oldinga qarash — o'zgarmagan). Qarz qolsa, yangi oy tabiga ko'chiriladi
+# (egasining konvensiyasi, 29.09); ko'chgani ko'rinmaganlar egaga oy oxirida OLDINDAN aytiladi.
+# Undan oldingi oylar (≤ noyabr 2026) — eski qoida: o'tgan oy qoldig'i bir oy davomida so'raladi.
+OTGAN_OY_TOXTASH_DAN = date(2026, 12, 1)
+
+
+def otgan_oy_soraladimi(oy_1):
+    """Joriy oy (1-kuni) uchun o'tgan oy tabidagi qoldiqlar PM'lardan so'raladimi."""
+    return oy_1 < OTGAN_OY_TOXTASH_DAN
+
+
+def _nomlar_satri(rows, n=6):
+    """«A (PM, $X), B (PM, $Y) +N» — eng katta qarz birinchi (egaga qisqa ro'yxat)."""
+    rows = sorted(rows, key=lambda r: -r["qoldiq"])
+    return (", ".join(f"{r['loyiha']} ({r['pm']}, {_fmt_usd(r['qoldiq'])})" for r in rows[:n])
+            + (f" +{len(rows) - n}" if len(rows) > n else ""))
+
+
 def _oy_oqi(month, year, ref, today, day, prefer_live, qat_iy, notes):
     """Bitta oy tabi: (tab, rows, source) — source ∈ live / snapshot / none / xato.
     Jonli-birinchi, xato/topilmasa snapshot. Jonli o'qish XATO berib, snapshot'da ham
@@ -1127,7 +1154,9 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
                          f"Yangi oy tabini oching (nomi aynan: «Undiruv {cur_m}({cur_y})»)")
     else:
         ptab, prows, psrc = _oy_oqi(prev_m, prev_y, prev_1, today, day, prefer_live, True, notes)
-        if ptab is None:
+        if ptab is None and otgan_oy_soraladimi(cur_1):
+            # (OTGAN_OY_TOXTASH_DAN dan o'tgan oy PM'lardan so'ralmaydi — tab yo'qligi PM
+            # eslatmalariga ta'sir qilmaydi, egaga «tekshirilmadi» shovqini kerak emas)
             notes.append(f"⚠️ O'tgan oy tabi «Undiruv {prev_m}({prev_y})» "
                          + ("o'qilmadi (xato)" if psrc == "xato" else "topilmadi")
                          + " — o'tgan oy qoldiqlari tekshirilmadi")
@@ -1138,10 +1167,12 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
             p2tab, p2rows, _p2src = _oy_oqi(prev2_m, prev2_y, prev2_1, today, day, prefer_live, True, notes)
             prows, iz = qaror_qoll(prows, ptab, q, prev2_m, otgan_rows=p2rows if p2tab is not None else None)
             notes += iz
-    t1 = month_transition(prows, rows, tab, q, prev_oy=prev_m, prev_oqildi=ptab is not None)
+    otgan_soraladi = otgan_oy_soraladimi(cur_1)
+    t1 = month_transition(prows, rows, tab, q, prev_oy=prev_m, prev_oqildi=ptab is not None,
+                          otgan_soraladi=otgan_soraladi)
     # Ega hisobdan chiqargan o'tgan oy qoldiqlari — so'ralmaydi, «tushadi» ogohlantirishiga
     # ham kirmaydi (t3 dan OLDIN: t3 `_i` indekslari t1["real"] ga tayanadi)
-    t1["real"], kechildi, iz = kechish_ajrat(t1["real"], ptab, q, prev_m)
+    t1["real"], kechildi, iz = kechish_ajrat(t1["real"], ptab, q, prev_m, soraladi=otgan_soraladi)
     notes += iz
     if kechildi:
         kk = {(r["loyiha"], round(r["qoldiq"])) for r in kechildi}
@@ -1158,8 +1189,24 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
         except Exception as e:                   # noqa: BLE001
             log(f"carry tekshiruvi xato: {type(e).__name__}: {e}")
             ct = dict(ct, notes=[f"⚠️ Oy oxiri ko'chirish ro'yxati tekshirilmadi ({type(e).__name__}) — "
-                                 f"{prev_m} qoldiqlari odatdagidek so'ralmoqda"])
+                                 + (f"{prev_m} qoldiqlari odatdagidek so'ralmoqda" if otgan_soraladi
+                                    else f"{prev_m} qoldiqlari baribir so'ralmaydi")])
         notes += ct["notes"]
+    toxtatildi = []
+    if not otgan_soraladi:
+        # 1-sanadan o'tgan oy PM'lardan so'ralmaydi (ega qarori 27.11.2026, OTGAN_OY_TOXTASH_DAN).
+        # Tasnif (ko'chgan/yopilgan, ega qarorlari, P0-3 dublikat) o'z joyida — faqat
+        # «so'raladigan» to'plam bo'shatiladi; farqli/noaniq ham real'ning qismi (egaga «…
+        # so'ralmoqda» deyiladi) — ular ham. Ochiq qolganlar egaga oyning ≤PUSH_DUE_DAYS
+        # kunlarida bitta satr bilan aytiladi (jim yo'qolmasin), keyin shovqin qilinmaydi.
+        toxtatildi = [r for r in t1["real"] if is_unpaid(r)]
+        t1["real"], t1["farqli"], t1["noaniq"] = [], [], []
+        if toxtatildi and today.day <= PUSH_DUE_DAYS:
+            notes.append(f"ℹ️ 1-{cur_m}dan {prev_m} qoldiqlari PM'lardan so'ralmaydi (faqat «{tab}»): "
+                         f"«{ptab}» tabida ochiq qolgan {len(toxtatildi)} ta, "
+                         f"{_fmt_usd(sum(r['qoldiq'] for r in toxtatildi))} — {_nomlar_satri(toxtatildi)}. "
+                         f"To'langan bo'lsa {prev_m} tabida belgilang, qarz qolgan bo'lsa {cur_m} "
+                         f"tabiga ko'chiring")
     joriy = t1["cur_rows"]
     for r in joriy:
         kq = r.get("qoshimcha")
@@ -1246,11 +1293,41 @@ def korinish(today=None, day=None, prefer_live=True, qlar=None, kesh=False):
                 notes.append(f"⚠️ 1-{next_m}dan bot {prev_m} qoldig'ini tekshirmaydi ({next_m} tabi {holat}, "
                              f"tekshirib bo'lmadi): {nomlar}. {next_m.capitalize()} tabiga ko'chirilganiga "
                              f"ishonch hosil qiling yoki hisobdan chiqaring")
+        keyingi["joriy_toxtaydi"] = []
+        if not otgan_oy_soraladimi(next_1):
+            # 1-{keyingi}dan JORIY oy tabi PM'lardan so'ralmaydi (OTGAN_OY_TOXTASH_DAN). O'sha kuni
+            # «o'tgan oy qoldig'i» bo'lib qoladigan qarzlar — ya'ni 1-sana tasnifi (yangi_min'siz,
+            # ega qarorlari bilan) keyingi oy tabiga ko'chgan/yopilgan deb TOPMAYDIGANLARI — egaga
+            # OLDINDAN aytiladi («tushadi» qoidasi kabi, D11/A2): oy oxirigacha to'lanmasa yoki
+            # ko'chirilmasa, jim yo'qolmasin. Ro'yxat 1-sanadagi «ℹ️ … so'ralmaydi» bilan bir xil.
+            if ntab is not None:
+                tp = month_transition(joriy, nrows, ntab, q, prev_oy=cur_m, otgan_soraladi=False)
+                qoladi = [r for r in tp["real"] if is_unpaid(r)]
+            else:
+                qoladi = [r for r in joriy if is_unpaid(r)]
+            qoladi = kechish_ajrat(qoladi, tab, q, cur_m)[0]
+            keyingi["joriy_toxtaydi"] = qoladi
+            if qoladi:
+                jami = _fmt_usd(sum(r["qoldiq"] for r in qoladi))
+                if ntab is not None:
+                    notes.append(f"⚠️ 1-{next_m}dan {cur_m} tabi PM'lardan so'ralmaydi (faqat «{ntab}»). "
+                                 f"{next_m.capitalize()} tabida mos qatori topilmagan yoki summasi farqli "
+                                 f"{cur_m} qarzlari — {len(qoladi)} ta, {jami}: {_nomlar_satri(qoladi)}. "
+                                 f"Oy oxirigacha to'lanmasa, {next_m} tabiga ko'chiring yoki hisobdan chiqaring")
+                else:
+                    holat = "o'qilmadi" if nsrc == "xato" else "hali yo'q"
+                    notes.append(f"⚠️ 1-{next_m}dan {cur_m} tabi PM'lardan so'ralmaydi, {next_m} tabi esa "
+                                 f"{holat} — ochiq {cur_m} qarzlari {len(qoladi)} ta, {jami}: "
+                                 f"{_nomlar_satri(qoladi)}. {next_m.capitalize()} tabini oching va "
+                                 f"qarzlarni ko'chiring")
     srcs = [source, psrc] + ([keyingi["source"]] if keyingi else [])
     view = {
         "today": today, "day": day, "tab": tab, "rows": joriy, "source": source, "oy": cur_m,
         "yil": cur_y,
         "prev": {"tab": ptab, "rows": prows, "source": psrc, "oy": prev_m, "kechildi": kechildi,
+                 # OTGAN_OY_TOXTASH_DAN: o'tgan oy PM'lardan so'raladimi; so'ralmasa — ochiq
+                 # qolgan (endi so'ralmaydigan) qatorlar egaga ma'lumot uchun
+                 "soraladi": otgan_soraladi, "toxtatildi": toxtatildi,
                  **{k: t1[k] for k in ("real", "closed", "moved", "farqli", "noaniq", "izoh")},
                  # P0-3: dublikat — real'dan olingan (so'ralmaydi, egaga ⚠️); izohsiz — ⚠️ satrlari;
                  # carry_skip/carry_kochgan — summary'dagi o'tgan tab kuzatuvi uchun
